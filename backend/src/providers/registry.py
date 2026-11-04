@@ -8,6 +8,26 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.domain.enums import ProviderType
 from src.domain.environment import DemoEnvironment
 from src.domain.profile import CloudDeploymentProfile
+from src.providers.base import ProviderCapabilities, UnsupportedProviderError
+
+PROVIDER_CAPABILITIES = (
+    ProviderCapabilities(
+        provider=ProviderType.AZURE,
+        engines=("vllm",),
+        cloudInfrastructure=True,
+        durableProvisioning=True,
+        durableModelDeployment=True,
+        durableEvaluation=False,
+    ),
+    ProviderCapabilities(
+        provider=ProviderType.LOCAL,
+        engines=("ollama",),
+        cloudInfrastructure=False,
+        durableProvisioning=False,
+        durableModelDeployment=False,
+        durableEvaluation=False,
+    ),
+)
 
 
 class CompositeProviderAdapter:
@@ -35,7 +55,7 @@ class CompositeProviderAdapter:
 
     def start_provisioning(self, **kwargs):
         profile = kwargs.get("profile")
-        provider = self._resolve_by_provider(getattr(profile, "provider", ProviderType.AZURE))
+        provider = self._resolve_by_provider(getattr(profile, "provider", None))
         return provider.start_provisioning(**kwargs)
 
     def getEnvironmentState(self, environmentId: str):
@@ -58,7 +78,9 @@ class CompositeProviderAdapter:
     def get_engine_adapter(self, engine_id: str):
         if engine_id == "ollama":
             return self._local.get_engine_adapter(engine_id)
-        return self._azure.get_engine_adapter(engine_id)
+        if engine_id == "vllm":
+            return self._azure.get_engine_adapter(engine_id)
+        raise LookupError(f"Engine '{engine_id}' is not supported.")
 
     def teardownPreview(self, environmentId: str):
         return self._for_environment(environmentId).teardownPreview(environmentId)
@@ -80,7 +102,9 @@ class CompositeProviderAdapter:
                 raise LookupError(f"Environment '{environment_id}' was not found.")
             return self._resolve_by_provider(environment.provider)
 
-    def _resolve_by_provider(self, provider: ProviderType):
+    def _resolve_by_provider(self, provider: ProviderType | str | None):
         if provider == ProviderType.LOCAL:
             return self._local
-        return self._azure
+        if provider == ProviderType.AZURE:
+            return self._azure
+        raise UnsupportedProviderError(f"Provider '{provider}' has no implemented adapter.")
