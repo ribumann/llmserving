@@ -137,17 +137,39 @@ jobs:
               ;;
             frontend)
               trap 'docker rm --force llmserving-ci-frontend >/dev/null' EXIT
-              docker run --detach --name llmserving-ci-frontend --network none "llmserving-ci:$IMAGE"
+              docker run --detach --name llmserving-ci-frontend --network none \
+                -e BACKEND_URL=http://127.0.0.1:8081 \
+                --mount "type=bind,src=$PWD/frontend/tests/proxy-upstream.conf,dst=/etc/nginx/conf.d/test-upstream.conf,readonly" \
+                "llmserving-ci:$IMAGE"
+              ready=false
               for attempt in $(seq 1 30); do
                 if docker exec llmserving-ci-frontend wget -qO- http://127.0.0.1/ >/dev/null; then
-                  echo "Frontend container HTTP smoke passed"
-                  exit 0
+                  ready=true
+                  break
                 fi
                 echo "Waiting for frontend HTTP (attempt $attempt/30)"
                 sleep 1
               done
-              echo "::error::Frontend image did not serve HTTP."
-              exit 1
+              if [ "$ready" != true ]; then
+                echo "::error::Frontend image did not serve HTTP."
+                exit 1
+              fi
+              docker exec llmserving-ci-frontend wget -qO- \
+                --header="X-MS-TOKEN-AAD-ID-TOKEN: signed-fixture" \
+                --header="X-Demo-User: forged" \
+                --header="X-MS-CLIENT-PRINCIPAL-NAME: forged" \
+                http://127.0.0.1/api/identity | \
+                python -c 'import json,sys; p=json.load(sys.stdin); assert p=={"authorization":"Bearer signed-fixture","demo":"","principal":"","rawToken":"","uri":"/identity"}'
+              docker exec llmserving-ci-frontend wget -qO- \
+                --header="Authorization: Bearer bearer-fixture" \
+                http://127.0.0.1/api/identity | \
+                python -c 'import json,sys; assert json.load(sys.stdin)["authorization"]=="Bearer bearer-fixture"'
+              if response=$(docker exec llmserving-ci-frontend wget -SO- http://127.0.0.1/api/identity 2>&1); then
+                echo "::error::Proxy accepted a request without a token."
+                exit 1
+              fi
+              printf '%s\n' "$response" | grep -q '401 Unauthorized'
+              echo "Frontend HTTP and signed-token transport smoke passed (not Entra acceptance)"
               ;;
             *)
               docker run --rm --network none --entrypoint python "llmserving-ci:$IMAGE" -c \
