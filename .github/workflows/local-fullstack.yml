@@ -50,7 +50,8 @@ jobs:
             --pids-limit=256 -e OLLAMA_MAX_LOADED_MODELS=1 -e OLLAMA_NUM_PARALLEL=2 \
             -p 127.0.0.1:11434:11434 \
             ollama/ollama@sha256:2c9595c555fd70a28363489ac03bd5bf9e7c5bdf2890373c3a830ffd7252ce6d
-          curl --fail --retry 10 --retry-connrefused --retry-delay 1 --max-time 10 \
+          curl --fail --retry 10 --retry-all-errors --retry-delay 1 \
+            --retry-max-time 30 --max-time 3 \
             "$OLLAMA_BASE_URL/api/version"
           curl --fail --silent --show-error --max-time 300 \
             -H 'Content-Type: application/json' \
@@ -67,7 +68,8 @@ jobs:
             > "$RUNNER_TEMP/live-api.log" 2>&1 &
           api_pid=$!
           trap 'kill "$api_pid" || true' EXIT
-          curl --fail --retry 15 --retry-connrefused --retry-delay 1 --max-time 5 \
+          curl --fail --retry 15 --retry-all-errors --retry-delay 1 \
+            --retry-max-time 45 --max-time 3 \
             "$LIVE_API_URL/readyz"
           python -m pytest -q -s -o addopts="" tests/integration/test_live_ollama.py
       - name: Capture model evidence
