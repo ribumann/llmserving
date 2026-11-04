@@ -103,7 +103,7 @@ def test_vllm_prompt_client_prefers_hugging_face_repo_id_over_resolved_checkpoin
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["model"] = json.loads(request.content)["model"]
-        return httpx.Response(200, content=b'data: [DONE]\n\n')
+        return httpx.Response(200, content=b"data: [DONE]\n\n")
 
     client = VllmPromptClient(
         http_client=httpx.Client(transport=httpx.MockTransport(handler)),

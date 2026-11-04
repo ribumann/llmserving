@@ -5,11 +5,9 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 from src.api.app import create_app
 from src.domain.benchmark_definition import BenchmarkDefinition
-from src.domain.deployment_revision import DeploymentRevision
 from src.domain.enums import (
     DatasetProvenance,
     DemoEnvironmentState,
-    DeploymentRevisionState,
     ExperimentRunStatus,
     ExperimentRunType,
     ProviderType,
@@ -40,7 +38,9 @@ class FakeResult:
 
 
 class FakeSession:
-    def __init__(self, rows: list[object], *, get_map: dict[tuple[type, str], object] | None = None) -> None:
+    def __init__(
+        self, rows: list[object], *, get_map: dict[tuple[type, str], object] | None = None
+    ) -> None:
         self._rows = rows
         self._get_map = get_map or {}
 
@@ -83,9 +83,7 @@ def test_list_golden_datasets_returns_summaries() -> None:
     rows = [_golden_dataset("golden-demo-v1")]
     client = _client(FakeSession(rows))
 
-    response = client.get(
-        "/golden-datasets", headers={"X-Demo-User": "presenter@example.com"}
-    )
+    response = client.get("/golden-datasets", headers={"X-Demo-User": "presenter@example.com"})
 
     assert response.status_code == 200
     body = response.json()
@@ -103,15 +101,11 @@ def test_list_benchmark_definitions_returns_summaries() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["benchmarkDefinitions"] == [
-        {"benchmarkId": "gsm8k", "version": "1.0"}
-    ]
+    assert response.json()["benchmarkDefinitions"] == [{"benchmarkId": "gsm8k", "version": "1.0"}]
 
 
 def test_list_performance_workloads_returns_summaries() -> None:
-    rows = [
-        PerformanceWorkload(workloadId="perf-demo-v1", version=1, concurrency=4)
-    ]
+    rows = [PerformanceWorkload(workloadId="perf-demo-v1", version=1, concurrency=4)]
     client = _client(FakeSession(rows))
 
     response = client.get(
@@ -151,9 +145,7 @@ def test_list_runs_returns_runs_for_environment() -> None:
         cancellationRequests=[],
         retentionClass=RetentionClass.PERSISTED,
     )
-    session = FakeSession(
-        [run], get_map={(DemoEnvironment, "env-123"): environment}
-    )
+    session = FakeSession([run], get_map={(DemoEnvironment, "env-123"): environment})
     client = _client(session)
 
     response = client.get(
