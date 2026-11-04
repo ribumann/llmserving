@@ -143,6 +143,7 @@ jobs:
                   echo "Frontend container HTTP smoke passed"
                   exit 0
                 fi
+                echo "Waiting for frontend HTTP (attempt $attempt/30)"
                 sleep 1
               done
               echo "::error::Frontend image did not serve HTTP."
