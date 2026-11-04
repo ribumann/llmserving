@@ -45,7 +45,19 @@ class CompositeProviderAdapter:
     def previewEnvironment(self, profileId: str, regionOverride: str | None = None):
         return self._for_profile(profileId).previewEnvironment(profileId, regionOverride)
 
-    def preview_with_details(self, *, profileId: str, regionOverride: str | None = None):
+    def preview_with_details(
+        self,
+        *,
+        profileId: str,
+        regionOverride: str | None = None,
+        configurableInputs: Mapping[str, object] | None = None,
+    ):
+        if configurableInputs:
+            return self._for_profile(profileId).preview_with_details(
+                profileId=profileId,
+                regionOverride=regionOverride,
+                configurableInputs=configurableInputs,
+            )
         return self._for_profile(profileId).preview_with_details(
             profileId=profileId, regionOverride=regionOverride
         )

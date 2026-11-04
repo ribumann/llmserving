@@ -28,6 +28,7 @@ from src.domain.model_configuration import ModelConfiguration
 from src.domain.profile import CloudDeploymentProfile
 from src.persistence.db import get_db_session
 from src.providers.azure.adapter import AzureProviderAdapter
+from src.providers.azure.preview import InvalidVmSizeError, resolve_vm_size
 
 router = APIRouter(tags=["environments"])
 
@@ -35,6 +36,7 @@ router = APIRouter(tags=["environments"])
 class EnvironmentPreviewRequest(BaseModel):
     profileId: str
     regionOverride: str | None = None
+    configurableInputs: dict[str, object] = Field(default_factory=dict)
 
 
 class EnvironmentCreateRequest(BaseModel):
@@ -154,7 +156,7 @@ def _terraform_variables(
         "environment_id": environment_id,
         "name_prefix": defaults.get("namePrefix", "llm"),
         "profile_size_class": defaults.get("profileSizeClass", "small"),
-        "vm_size": defaults.get("vmSizeOverride"),
+        "vm_size": resolve_vm_size(profile, inputs),
         "admin_username": defaults.get("adminUsername", "azureuser"),
         "admin_ssh_public_key": admin_ssh_public_key,
         "vllm_image": defaults.get("vllmImage", getattr(settings_obj, "vllm_image", "")),
@@ -178,7 +180,16 @@ def preview_environment(
         evaluation = provider.preview_with_details(
             profileId=payload.profileId,
             regionOverride=payload.regionOverride,
+            **(
+                {"configurableInputs": payload.configurableInputs}
+                if payload.configurableInputs
+                else {}
+            ),
         )
+    except InvalidVmSizeError as exc:
+        raise ApiError(
+            status_code=422, code="invalid_vm_size", message=str(exc), details={}
+        ) from exc
     except LookupError as exc:
         raise ApiError(
             status_code=404,
@@ -205,9 +216,13 @@ def preview_environment(
             "assessments": [
                 {
                     "region": check.region,
-                    "quotaStatus": _status(check.available, "sufficient", "insufficient"),
-                    "capacityStatus": _status(check.available, "available", "constrained"),
-                    "compatibilityStatus": _status(check.available, "compatible", "incompatible"),
+                    "quotaStatus": _status(check.quota.available, "sufficient", "insufficient"),
+                    "capacityStatus": (
+                        "constrained" if check.sku.available is False else "unknown"
+                    ),
+                    "compatibilityStatus": _status(
+                        check.sku.available, "compatible", "incompatible"
+                    ),
                     "checkedAt": checked_at,
                     "evidence": check.evidence,
                     "uncertainty": (
@@ -232,7 +247,16 @@ def create_environment(
         evaluation = provider.preview_with_details(
             profileId=payload.profileId,
             regionOverride=payload.region,
+            **(
+                {"configurableInputs": payload.configurableInputs}
+                if payload.configurableInputs
+                else {}
+            ),
         )
+    except InvalidVmSizeError as exc:
+        raise ApiError(
+            status_code=422, code="invalid_vm_size", message=str(exc), details={}
+        ) from exc
     except LookupError as exc:
         raise ApiError(
             status_code=404,

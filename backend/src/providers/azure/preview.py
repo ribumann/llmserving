@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from src.domain.profile import CloudDeploymentProfile
@@ -21,6 +22,13 @@ DEFAULT_UNCERTAINTY_NOTE = (
     "with AllocationFailed, try an alternate region or SKU."
 )
 
+# Keep aligned with infra/demo/main.tf's existing default_vm_size_by_class.
+VM_SIZE_BY_CLASS = {
+    "small": "Standard_NC16as_T4_v3",
+    "medium": "Standard_NC24ads_A100_v4",
+    "large": "Standard_NC80adis_H100_v5",
+}
+
 
 @dataclass(slots=True, frozen=True)
 class PreviewEvaluation:
@@ -28,17 +36,41 @@ class PreviewEvaluation:
     checks: list[CapacityPreflightResult]
 
 
+class InvalidVmSizeError(ValueError):
+    pass
+
+
+def resolve_vm_size(
+    profile: CloudDeploymentProfile, inputs: Mapping[str, object] | None = None
+) -> str:
+    merged = dict(profile.configurableInputs or {})
+    merged.update(inputs or {})
+    size_class = merged.get("profileSizeClass", "small")
+    if not isinstance(size_class, str) or size_class not in VM_SIZE_BY_CLASS:
+        raise InvalidVmSizeError("profileSizeClass must be small, medium or large.")
+    size = merged.get("vmSizeOverride")
+    if size is None:
+        return VM_SIZE_BY_CLASS[size_class]
+    if not isinstance(size, str) or not size.strip():
+        raise InvalidVmSizeError("vmSizeOverride must be a non-empty VM SKU string.")
+    return size
+
+
 class AzurePreviewService:
     def __init__(self, *, preflight: AzureCapacityPreflight) -> None:
         self._preflight = preflight
 
     def preview_environment(
-        self, *, profile: CloudDeploymentProfile, region_override: str | None = None
+        self,
+        *,
+        profile: CloudDeploymentProfile,
+        region_override: str | None = None,
+        configurable_inputs: Mapping[str, object] | None = None,
     ) -> PreviewEvaluation:
         regions = self._ordered_regions(profile.eligibleRegions, region_override)
+        vm_size = resolve_vm_size(profile, configurable_inputs)
         checks = [
-            self._preflight.evaluate_region(region=region, vm_size=profile.vmSku)
-            for region in regions
+            self._preflight.evaluate_region(region=region, vm_size=vm_size) for region in regions
         ]
 
         if region_override is not None:

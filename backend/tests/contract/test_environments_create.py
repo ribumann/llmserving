@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 from src.api.app import create_app
 from src.domain.enums import ModelSizeClass, ProviderType
@@ -28,8 +29,12 @@ class NoopPersistenceSession:
 class FakeProvider:
     def __init__(self) -> None:
         self.bound_contexts = []
+        self.preview_inputs = None
 
-    def preview_with_details(self, *, profileId: str, regionOverride: str | None = None):
+    def preview_with_details(
+        self, *, profileId: str, regionOverride: str | None = None, configurableInputs=None
+    ):
+        self.preview_inputs = configurableInputs
         now = datetime(2026, 8, 19, tzinfo=UTC)
         return PreviewEvaluation(
             recommendation=RegionRecommendation(
@@ -83,7 +88,17 @@ class FakeSession:
         self.committed = True
 
 
-def test_create_environment_returns_accepted_and_binds_context(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "overrides,expected_sku",
+    [
+        ({}, "Standard_NC16as_T4_v3"),
+        ({"vmSizeOverride": "Standard_NC24ads_A100_v4"}, "Standard_NC24ads_A100_v4"),
+        ({"profileSizeClass": "large"}, "Standard_NC80adis_H100_v5"),
+    ],
+)
+def test_create_environment_returns_accepted_and_binds_context(
+    monkeypatch, overrides, expected_sku
+) -> None:
     app = create_app()
     app.state.provider_adapter = FakeProvider()
     app.state.session_factory = lambda: NoopPersistenceSession()
@@ -119,7 +134,11 @@ def test_create_environment_returns_accepted_and_binds_context(monkeypatch) -> N
     response = client.post(
         "/environments",
         headers={"X-Demo-User": "presenter@example.com"},
-        json={"profileId": "azure-single-gpu-3b", "region": "westus3"},
+        json={
+            "profileId": "azure-single-gpu-3b",
+            "region": "westus3",
+            "configurableInputs": overrides,
+        },
     )
 
     assert response.status_code == 202
@@ -132,6 +151,8 @@ def test_create_environment_returns_accepted_and_binds_context(monkeypatch) -> N
     terraform_variables = app.state.provider_adapter.bound_contexts[0]["terraform_variables"]
     assert terraform_variables["environment_id"]
     assert terraform_variables["admin_ssh_public_key"].startswith("ssh-rsa ")
+    assert terraform_variables["vm_size"] == expected_sku
+    assert app.state.provider_adapter.preview_inputs == (overrides or None)
 
 
 def test_get_environment_returns_provider_state() -> None:
