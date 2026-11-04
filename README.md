@@ -207,13 +207,15 @@ On PRs and relevant pushes:
 
 Only on an explicitly enabled manual deployment dispatch from `main`:
 
-- logs into Azure with a commit-pinned `azure/login` action (OIDC)
+- logs into Azure with `azure/login@v2` (OIDC; currently a mutable action tag)
 - builds and pushes `llmserving-backend:${github.sha}` with `az acr build`
 - points Container App `llm-backend` at that commit-labelled tag
 - polls `https://<fqdn>/readyz`
 
 Git-SHA tags are traceable but still mutable registry tags. Digest pinning and
 artifact provenance are required before claiming immutable deployments.
+The legacy API/UI deployment jobs must also pin their Azure login action to
+a reviewed commit before enabling them; only the canary already does so.
 
 ### Frontend (`.github/workflows/frontend.yml`)
 

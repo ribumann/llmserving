@@ -5,6 +5,8 @@ describe shared/control/demo layers, but still have local cross-module state,
 placeholder image defaults and create/manage their own groups. Existing
 deployment workflows update API/UI images only; they are not an end-to-end
 bootstrap or independent cleanup of billable resources.
+Their `azure/login@v2` action tags also remain mutable and must be pinned to
+reviewed commits before enabling deployment; the protected canary is pinned.
 
 Do not run the default modules against an original deployment or pre-existing
 protected test groups. Validation (`init -backend=false`/`validate`) proves
