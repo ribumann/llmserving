@@ -57,12 +57,13 @@ def _evaluate_case(base_url: str, case: dict[str, Any], submit: Any) -> dict[str
             "error": result.error,
         }
 
-    if deterministic_check is None and not case.get("evaluationRule"):
+    canonical_rule = "input" in case or "evaluationRule" in case
+    if deterministic_check is None and not canonical_rule:
         status = "skipped"
     else:
         rule = (
             case
-            if case.get("evaluationRule")
+            if canonical_rule
             else {
                 "evaluationRule": "contains",
                 "expectedSubstring": str(deterministic_check),

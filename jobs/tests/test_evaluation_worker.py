@@ -138,6 +138,9 @@ def test_run_raises_when_cases_empty() -> None:
         ),
         ({"input": "bad rule", "evaluationRule": "unknown"}, "answer", "errored"),
         ({"input": "bad pattern", "evaluationRule": "regex:["}, "answer", "errored"),
+        ({"input": "missing rule"}, "answer", "errored"),
+        ({"input": "null rule", "evaluationRule": None}, "answer", "errored"),
+        ({"input": "empty rule", "evaluationRule": ""}, "answer", "errored"),
     ],
 )
 def test_worker_uses_backend_golden_scoring(case, text, expected) -> None:
@@ -156,3 +159,22 @@ def test_legacy_substring_check_also_grades_only_the_final_answer() -> None:
         MagicMock(return_value=_fake_result("<think>Nile</think>Amazon")),
     )
     assert result["status"] == "fail"
+
+
+def test_invalid_canonical_rules_make_the_report_partial() -> None:
+    callback = MagicMock()
+    entrypoint.run(
+        workflow_id="wf-invalid",
+        subscription_id="sub-1",
+        environment_id="demo123",
+        run_id="run-invalid",
+        cases=[{"caseId": "c1", "input": "missing rule"}],
+        name_prefix="llm",
+        callback=callback,
+        resolve_ip=MagicMock(return_value="10.0.1.5"),
+        submit=MagicMock(return_value=_fake_result("answer")),
+    )
+    diagnostics = callback.complete_workflow.call_args.kwargs["diagnostics"]
+    assert diagnostics["completenessIndicator"] == "partial"
+    assert diagnostics["quality"]["aggregate"]["erroredCount"] == 1
+    assert diagnostics["quality"]["aggregate"]["skippedCount"] == 0
