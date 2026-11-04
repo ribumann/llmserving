@@ -22,6 +22,9 @@ locals {
   resource_group_name = "rg-llm-control-${var.stage}"
   location            = local.shared.location
   unique_suffix       = substr(md5("${var.subscription_id}-${var.stage}-control"), 0, 6)
+  manage_sso          = var.enable_sso && var.existing_sso_client_id == null
+  sso_client_id       = local.manage_sso ? azuread_application.sso[0].client_id : var.existing_sso_client_id
+  sso_secret_id       = local.manage_sso ? azurerm_key_vault_secret.sso_client_secret[0].versionless_id : var.existing_sso_secret_id
 
   common_tags = merge(var.tags, {
     feature   = "azure-llm-serving-demo"
@@ -388,7 +391,7 @@ resource "azurerm_container_app" "backend" {
     for_each = var.enable_sso ? [1] : []
     content {
       name                = "sso-client-secret"
-      key_vault_secret_id = azurerm_key_vault_secret.sso_client_secret[0].versionless_id
+      key_vault_secret_id = local.sso_secret_id
       identity            = azurerm_user_assigned_identity.backend.id
     }
   }
@@ -417,6 +420,18 @@ resource "azurerm_container_app" "backend" {
       env {
         name        = "DATABASE_URL"
         secret_name = "database-url"
+      }
+      env {
+        name  = "APP_ENV"
+        value = "production"
+      }
+      env {
+        name  = "AUTH_MODE"
+        value = "entra-jwt"
+      }
+      env {
+        name  = "AUTH_AUDIENCE"
+        value = local.sso_client_id
       }
       env {
         name  = "AZURE_SUBSCRIPTION_ID"
@@ -521,6 +536,18 @@ resource "azurerm_container_app" "backend" {
 
   lifecycle {
     ignore_changes = [template[0].container[0].image]
+    precondition {
+      condition     = (var.existing_sso_client_id == null) == (var.existing_sso_secret_id == null)
+      error_message = "Supply both existing_sso_client_id and existing_sso_secret_id, or neither."
+    }
+    precondition {
+      condition     = var.enable_sso || var.existing_sso_client_id != null
+      error_message = "Cloud operator authentication requires managed SSO or an external application; disabling SSO is not an authentication bypass."
+    }
+    precondition {
+      condition     = var.existing_sso_secret_id == null ? true : startswith(var.existing_sso_secret_id, "${trimsuffix(local.shared.key_vault_uri, "/")}/secrets/")
+      error_message = "The external SSO credential reference must point to the isolated shared layer's Key Vault."
+    }
   }
 }
 
@@ -577,7 +604,7 @@ resource "azurerm_container_app" "frontend" {
     for_each = var.enable_sso ? [1] : []
     content {
       name                = "sso-client-secret"
-      key_vault_secret_id = azurerm_key_vault_secret.sso_client_secret[0].versionless_id
+      key_vault_secret_id = local.sso_secret_id
       identity            = azurerm_user_assigned_identity.frontend.id
     }
   }
@@ -1024,7 +1051,7 @@ locals {
 }
 
 resource "azuread_application" "sso" {
-  count = var.enable_sso ? 1 : 0
+  count = local.manage_sso ? 1 : 0
 
   display_name = "${var.entra_app_display_name}-${var.stage}"
 
@@ -1041,13 +1068,13 @@ resource "azuread_application" "sso" {
 }
 
 resource "azuread_service_principal" "sso" {
-  count = var.enable_sso ? 1 : 0
+  count = local.manage_sso ? 1 : 0
 
   client_id = azuread_application.sso[0].client_id
 }
 
 resource "azuread_application_password" "sso" {
-  count = var.enable_sso ? 1 : 0
+  count = local.manage_sso ? 1 : 0
 
   application_id = azuread_application.sso[0].id
   display_name   = "container-apps-easy-auth"
@@ -1078,11 +1105,10 @@ resource "azurerm_role_assignment" "functions_kv_secrets_user" {
 resource "azurerm_key_vault_secret" "sso_client_secret" {
   # NOTE: this resource does a data-plane read/write against the Key Vault on every plan/apply,
   # which will fail with 403 ("Public network access is disabled") when applied from outside the
-  # VNet with this private-only topology. This is currently inert because var.enable_sso defaults
-  # to false; if SSO is enabled, this secret will need the same
+  # VNet with this private-only topology. For managed SSO, this secret needs the same
   # out-of-band, in-VNet bootstrap-job treatment (see infra/README.md runbook) instead of being
   # applied directly.
-  count = var.enable_sso ? 1 : 0
+  count = local.manage_sso ? 1 : 0
 
   name         = "sso-client-secret"
   value        = azuread_application_password.sso[0].value
@@ -1112,12 +1138,12 @@ resource "azapi_resource" "backend_auth_config" {
         azureActiveDirectory = {
           enabled = true
           registration = {
-            clientId                = azuread_application.sso[0].client_id
+            clientId                = local.sso_client_id
             clientSecretSettingName = "sso-client-secret"
             openIdIssuer            = "https://login.microsoftonline.com/${data.azurerm_client_config.current.tenant_id}/v2.0"
           }
           validation = {
-            allowedAudiences = [azuread_application.sso[0].client_id]
+            allowedAudiences = [local.sso_client_id]
           }
         }
       }
@@ -1145,12 +1171,12 @@ resource "azapi_resource" "frontend_auth_config" {
         azureActiveDirectory = {
           enabled = true
           registration = {
-            clientId                = azuread_application.sso[0].client_id
+            clientId                = local.sso_client_id
             clientSecretSettingName = "sso-client-secret"
             openIdIssuer            = "https://login.microsoftonline.com/${data.azurerm_client_config.current.tenant_id}/v2.0"
           }
           validation = {
-            allowedAudiences = [azuread_application.sso[0].client_id]
+            allowedAudiences = [local.sso_client_id]
           }
         }
       }

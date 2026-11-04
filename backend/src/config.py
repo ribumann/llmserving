@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -14,6 +15,8 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 class Settings(BaseSettings):
     app_name: str = "Azure LLM Serving Demo Backend"
     app_env: str = "development"
+    auth_mode: Literal["entra-jwt", "local-demo"] = "entra-jwt"
+    auth_audience: str | None = None
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/llmserving"
     database_echo: bool = False
     database_readiness_timeout_seconds: float = Field(default=3.0, gt=0, le=10)
@@ -75,6 +78,18 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _local_auth_is_not_cloud_auth(self) -> Settings:
+        if self.auth_mode == "local-demo" and (
+            self.app_env not in {"development", "test", "local"}
+            or os.environ.get("CONTAINER_APP_NAME")
+            or os.environ.get("WEBSITE_SITE_NAME")
+        ):
+            raise ValueError(
+                "local-demo authentication is not allowed in cloud/production hosting."
+            )
+        return self
 
     @field_validator(
         "auth_allowed_email_domains",

@@ -48,15 +48,8 @@ def _issuers(tenant_id: str) -> list[str]:
     ]
 
 
-class InternalTokenValidator:
-    """Validates Entra ID managed-identity bearer tokens for the internal
-    orchestration callback API (contracts/api.md), audience-restricted to this API.
-
-    Distinct from the operator-facing SSO auth in api/auth.py, which is header-based
-    (e.g. X-MS-CLIENT-PRINCIPAL-NAME) and not usable for service-to-service calls: the
-    Durable Functions app and Container Apps Jobs authenticate here with a real Entra
-    ID access token acquired via their own user-assigned managed identity.
-    """
+class EntraTokenVerifier:
+    """Shared signature/issuer/audience/time validation; callers enforce identity semantics."""
 
     def __init__(
         self,
@@ -67,20 +60,30 @@ class InternalTokenValidator:
     ) -> None:
         self._tenant_id = tenant_id
         self._audience = audience
-        factory = jwks_client_factory or PyJWKClient
-        self._jwks_client = factory(_jwks_uri(tenant_id))
+        self._jwks_client = (
+            jwks_client_factory(_jwks_uri(tenant_id))
+            if jwks_client_factory
+            else PyJWKClient(_jwks_uri(tenant_id), timeout=5)
+        )
+
+    def decode(self, token: str) -> dict[str, Any]:
+        signing_key = self._jwks_client.get_signing_key_from_jwt(token)
+        return jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=self._audience,
+            issuer=_issuers(self._tenant_id),
+            options={"require": ["exp", "iat", "aud", "iss"]},
+        )
+
+
+class InternalTokenValidator(EntraTokenVerifier):
+    """Validates audience-restricted managed-identity tokens for internal callbacks."""
 
     def validate(self, token: str) -> InternalCaller:
         try:
-            signing_key = self._jwks_client.get_signing_key_from_jwt(token)
-            claims = jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=["RS256"],
-                audience=self._audience,
-                issuer=_issuers(self._tenant_id),
-                options={"require": ["exp", "iat", "aud", "iss"]},
-            )
+            claims = self.decode(token)
         except jwt.PyJWTError as exc:
             raise InternalAuthError(f"Invalid internal service token: {exc}") from exc
 

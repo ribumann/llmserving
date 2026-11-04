@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import jwt
 from fastapi import FastAPI, Request
+from starlette.concurrency import run_in_threadpool
 
 from src.api.errors import ApiError
+from src.api.internal_auth import EntraTokenVerifier
 from src.config import Settings
 
 
@@ -14,6 +17,57 @@ class AuthenticatedUser:
     email: str
     display_name: str
     auth_source: str
+
+
+class OperatorTokenValidator(EntraTokenVerifier):
+    def validate(self, token: str) -> AuthenticatedUser:
+        try:
+            claims = self.decode(token)
+        except jwt.PyJWKClientConnectionError as error:
+            raise ApiError(
+                status_code=503,
+                code="identity_provider_unavailable",
+                message="The identity provider signing keys are temporarily unavailable.",
+            ) from error
+        except jwt.PyJWTError as error:
+            raise ApiError(
+                status_code=401,
+                code="authentication_required",
+                message="A valid tenant- and audience-restricted operator token is required.",
+            ) from error
+        email = claims.get("preferred_username") or claims.get("email") or claims.get("upn")
+        subject = claims.get("oid") or claims.get("sub")
+        if (
+            claims.get("tid") != self._tenant_id
+            or claims.get("idtyp") == "app"
+            or not isinstance(email, str)
+            or "@" not in email
+            or not isinstance(subject, str)
+            or not subject
+        ):
+            raise ApiError(
+                status_code=401,
+                code="authentication_required",
+                message="An authenticated operator user identity is required.",
+            )
+        return AuthenticatedUser(
+            subject=subject,
+            email=email,
+            display_name=str(claims.get("name") or email),
+            auth_source="entra-jwt",
+        )
+
+
+def build_operator_token_validator(settings: Settings) -> OperatorTokenValidator | None:
+    if (
+        settings.auth_mode != "entra-jwt"
+        or not settings.azure_tenant_id
+        or not settings.auth_audience
+    ):
+        return None
+    return OperatorTokenValidator(
+        tenant_id=settings.azure_tenant_id, audience=settings.auth_audience
+    )
 
 
 def is_exempt_path(path: str, settings: Settings) -> bool:
@@ -48,19 +102,28 @@ def install_auth_middleware(app: FastAPI, settings: Settings) -> None:
         if is_exempt_path(request.url.path, settings):
             return await call_next(request)
 
-        user = extract_authenticated_user(request)
+        if settings.auth_mode == "local-demo":
+            user = extract_authenticated_user(request)
+        else:
+            validator = request.app.state.operator_token_validator
+            if validator is None:
+                raise ApiError(
+                    status_code=503,
+                    code="operator_auth_unconfigured",
+                    message="Operator authentication requires a tenant and audience.",
+                )
+            authorization = request.headers.get("Authorization", "")
+            scheme, _, bearer = authorization.partition(" ")
+            token = bearer.strip() if scheme.lower() == "bearer" else ""
+            token = token or request.headers.get("X-MS-TOKEN-AAD-ID-TOKEN", "")
+            user = await run_in_threadpool(validator.validate, token) if token else None
         if user is None:
             raise ApiError(
                 status_code=401,
                 code="authentication_required",
                 message="Organization SSO authentication is required.",
                 details={
-                    "acceptedHeaders": [
-                        "X-MS-CLIENT-PRINCIPAL-NAME",
-                        "X-Forwarded-Email",
-                        "X-User-Email",
-                        "X-Demo-User",
-                    ]
+                    "authMode": settings.auth_mode,
                 },
             )
 

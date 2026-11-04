@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.audit import install_audit_middleware
-from src.api.auth import install_auth_middleware
+from src.api.auth import build_operator_token_validator, install_auth_middleware
 from src.api.correlation import configure_monitoring
 from src.api.errors import install_error_handling
 from src.api.internal_auth import build_internal_token_validator
@@ -44,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_monitoring(app)
     session_factory = create_session_factory(resolved_settings)
     app.state.settings = resolved_settings
+    app.state.operator_token_validator = build_operator_token_validator(resolved_settings)
     app.state.database_readiness = readiness
     app.state.session_factory = session_factory
     app.state.telemetry = OperationTelemetry(session_factory=session_factory)

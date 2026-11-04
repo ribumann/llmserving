@@ -54,5 +54,5 @@ output "artifacts_storage_account_name" {
 }
 
 output "sso_application_client_id" {
-  value = var.enable_sso ? azuread_application.sso[0].client_id : null
+  value = var.enable_sso ? local.sso_client_id : null
 }
