@@ -102,21 +102,15 @@ class AzureEnvironmentStateService:
             return None
 
         model_configuration = session.get(ModelConfiguration, revision.modelConfigId)
-        inference_configuration = session.get(
-            InferenceConfiguration, revision.inferenceConfigId
-        )
+        inference_configuration = session.get(InferenceConfiguration, revision.inferenceConfigId)
         return {
             "deploymentRevisionId": revision.deploymentRevisionId,
             "lifecycleState": revision.lifecycleState.value,
             "engineId": revision.engineId,
             "catalogEntryId": getattr(model_configuration, "catalogEntryId", None),
-            "resolvedCheckpointRef": getattr(
-                model_configuration, "resolvedCheckpointRef", None
-            ),
+            "resolvedCheckpointRef": getattr(model_configuration, "resolvedCheckpointRef", None),
             "modelSettings": dict(getattr(model_configuration, "modelSettings", {}) or {}),
-            "servingSettings": dict(
-                getattr(inference_configuration, "servingSettings", {}) or {}
-            ),
+            "servingSettings": dict(getattr(inference_configuration, "servingSettings", {}) or {}),
             "generationSettings": dict(
                 getattr(inference_configuration, "generationSettings", {}) or {}
             ),

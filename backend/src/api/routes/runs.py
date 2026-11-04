@@ -210,12 +210,19 @@ def list_runs(
     session: Session = Depends(get_db_session),
 ) -> dict[str, object]:
     _require_environment(session, environment_id)
-    rows = session.execute(
-        select(ExperimentRun)
-        .join(DeploymentRevision, ExperimentRun.deploymentRevisionId == DeploymentRevision.deploymentRevisionId)
-        .where(DeploymentRevision.environmentId == environment_id)
-        .order_by(ExperimentRun.startedAt.desc())
-    ).scalars().all()
+    rows = (
+        session.execute(
+            select(ExperimentRun)
+            .join(
+                DeploymentRevision,
+                ExperimentRun.deploymentRevisionId == DeploymentRevision.deploymentRevisionId,
+            )
+            .where(DeploymentRevision.environmentId == environment_id)
+            .order_by(ExperimentRun.startedAt.desc())
+        )
+        .scalars()
+        .all()
+    )
     return with_request_id(
         {
             "runs": [
@@ -239,9 +246,7 @@ def list_runs(
 def list_golden_datasets(
     request: Request, session: Session = Depends(get_db_session)
 ) -> dict[str, object]:
-    rows = session.scalars(
-        select(GoldenDataset).order_by(GoldenDataset.createdAt.desc())
-    ).all()
+    rows = session.scalars(select(GoldenDataset).order_by(GoldenDataset.createdAt.desc())).all()
     return with_request_id(
         {
             "goldenDatasets": [

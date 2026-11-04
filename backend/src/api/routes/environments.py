@@ -415,12 +415,12 @@ def list_environments(
                     "activeDeploymentConfiguration": configuration_by_revision.get(
                         environment.activeDeploymentRevisionId or ""
                     ),
-                    "createdAt": environment.createdAt.isoformat()
-                    if environment.createdAt
-                    else None,
-                    "updatedAt": environment.updatedAt.isoformat()
-                    if environment.updatedAt
-                    else None,
+                    "createdAt": (
+                        environment.createdAt.isoformat() if environment.createdAt else None
+                    ),
+                    "updatedAt": (
+                        environment.updatedAt.isoformat() if environment.updatedAt else None
+                    ),
                 }
                 for environment in environments
             ]

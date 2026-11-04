@@ -51,7 +51,9 @@ GOLDEN_DATASETS = [
             },
             {
                 "caseId": "romeo-and-juliet-author",
-                "input": "Who wrote the play 'Romeo and Juliet'? Reply with just the author's name.",
+                "input": (
+                    "Who wrote the play 'Romeo and Juliet'? Reply with just the author's name."
+                ),
                 "evaluationRule": "contains",
                 "expectedSubstring": "Shakespeare",
             },

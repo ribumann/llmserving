@@ -24,9 +24,7 @@ router = APIRouter(tags=["configurations"])
 _LOCAL_ONLY_ENGINE_IDS = {"ollama"}
 
 
-def _validate_engine_provider_compatibility(
-    environment: DemoEnvironment, engine_id: str
-) -> None:
+def _validate_engine_provider_compatibility(environment: DemoEnvironment, engine_id: str) -> None:
     is_local_engine = engine_id in _LOCAL_ONLY_ENGINE_IDS
     is_local_environment = environment.provider == ProviderType.LOCAL
     if is_local_engine != is_local_environment:
