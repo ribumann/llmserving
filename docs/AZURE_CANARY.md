@@ -95,7 +95,8 @@ incremental Azure compute/storage exposure for these exercises was $0. This is
 not a billing reconciliation or a billable-resource cleanup test.
 
 GitHub environment execution required no local approval. Target-tenant Graph
-SSO bootstrap remains separately blocked by device Conditional Access; no app,
-service principal or SSO secret was created and no policy bypass was attempted.
+SSO bootstrap remains unverified after blocked interactive attempts; do not infer
+their cause or retry around policy. No app, service principal or SSO secret was
+created and no policy bypass was attempted.
 These results therefore do **not** certify unattended authenticated application
 deployment.

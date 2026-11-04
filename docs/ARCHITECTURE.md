@@ -8,6 +8,10 @@ This document describes the current architecture as implemented in this reposito
 - Provisioning, teardown, and Azure model deployment are orchestrated asynchronously through a Durable Functions app plus Container Apps Jobs.
 - Quality and performance runs are currently started by the backend's in-process `QualityRunOrchestrator` (`backend/src/api/routes/runs.py`, `backend/src/evaluation/run_quality.py`), even though the repo also contains `evaluation_worker`, `performance_worker`, and `export_worker` job implementations plus Terraform wiring for them.
 - Several UI routes remain scaffolds (`frontend/src/pages/Compare.tsx`, `Retune.tsx`, `Teardown.tsx`, `ExperimentHistory.tsx`).
+- Diagrams show implemented code or explicitly labelled trust/deployment
+  contracts, not evidence that a fresh cloud deployment passed. See
+  [exact validation and blocked gates](RELEASE_VALIDATION.md). AWS/GCP have no
+  working adapters; the [capability matrix](PROVIDERS.md) is authoritative.
 
 ## 1. Context view
 
@@ -32,7 +36,7 @@ flowchart TB
     ACA -->|Run jobs| ARM
     ACA -->|Pull images| ACR
     ACA -->|Start vLLM / run Terraform / workers| Demo
-    Entra -->|SSO headers / bearer tokens| App
+    Entra -->|Signed user JWT; browser acceptance pending| App
     Entra -->|Managed identity tokens| ACA
 ```
 
@@ -68,7 +72,8 @@ flowchart LR
 
     subgraph Orchestration["Azure orchestration"]
         Functions[Durable Functions app]
-        Jobs[Container Apps Jobs<br/>terraform_runner, model_deployment,<br/>evaluation_worker, performance_worker, export_worker]
+        Jobs[Active infrastructure/model jobs<br/>terraform_runner, model_deployment]
+        LegacyJobs[Unrouted worker definitions<br/>evaluation_worker, performance_worker, export_worker]
     end
 
     subgraph Infra["Terraform modules (infra/)"]
@@ -86,6 +91,7 @@ flowchart LR
     Persistence --> Alembic
     Providers --> Functions
     Functions --> Jobs
+    Functions -.->|Mappings exist; API evaluation not routed| LegacyJobs
     Jobs --> DemoTF
     SharedTF --> ControlTF
     SharedTF --> DemoTF
@@ -107,10 +113,10 @@ flowchart LR
 | Frontend service layer | Centralizes backend HTTP calls and request shaping | `frontend/src/services/apiClient.ts`, `catalogApi.ts`, `deploymentsApi.ts`, `environmentsApi.ts`, `runsApi.ts` |
 | Durable Functions app | Starts orchestration, tracks job execution, handles cancellation | `functions/function_app.py`, `functions/orchestrators/generic_orchestrator.py`, `functions/orchestration_lib/*.py` |
 | `terraform_runner` job | Applies/destroys `infra/demo`, manages per-environment and shared state blobs, works around Terraform MSI issues in Container Apps | `jobs/terraform_runner/entrypoint.py` |
-| `model_deployment` job | Uses VM Run Command to start vLLM on the private GPU VM and keeps the HF token only in process memory | `jobs/model_deployment/entrypoint.py` |
-| `evaluation_worker` job | Evaluates prompt cases against the deployed endpoint and reports quality diagnostics back through the internal callback API | `jobs/evaluation_worker/entrypoint.py` |
-| `performance_worker` job | Runs concurrent load tests and reports latency/throughput metrics | `jobs/performance_worker/entrypoint.py` |
-| `export_worker` job | Serializes report data to JSON/CSV and uploads it to artifacts storage | `jobs/export_worker/entrypoint.py` |
+| `model_deployment` job | Uses VM Run Command to start vLLM on the private GPU VM; HF credentials must not enter Terraform/history/public evidence, and cloud execution-metadata retention still needs review | `jobs/model_deployment/entrypoint.py` |
+| `evaluation_worker` job | Legacy prompt-case worker; not API-routed or complete golden/benchmark/report parity | `jobs/evaluation_worker/entrypoint.py` |
+| `performance_worker` job | Legacy concurrent HTTP worker; not genuine LLMPerf/TTFT/ITL parity or API-routed | `jobs/performance_worker/entrypoint.py` |
+| `export_worker` job | JSON/CSV artifact worker definition; not connected to the current API reconciliation path | `jobs/export_worker/entrypoint.py` |
 | `infra/shared` | Shared networking, DNS, egress, ACR, Key Vault, monitoring | `infra/shared/main.tf`, `infra/shared/providers.tf` |
 | `infra/control` | Control plane: Container Apps, jobs, Functions, PostgreSQL, storage, identities, alerts | `infra/control/main.tf`, `infra/control/variables.tf` |
 | `infra/demo` | Disposable per-environment GPU VM resource group | `infra/demo/main.tf`, `infra/demo/variables.tf` |
@@ -130,6 +136,13 @@ This split is explicit in `infra/README.md` and reinforced by the modules' own c
 - `infra/control` reads `infra/shared` state
 - `infra/demo` reads only `infra/shared` state and is prevented from modifying control-plane resources
 - `infra/demo` is executed by `terraform_runner`, not by the operator for every single environment
+
+The current cross-module readers use local state-file assumptions; the runner
+also stores per-environment state blobs. That is not a complete protected remote
+state/locking bootstrap for all layers. Defaults create/manage resource groups
+and placeholder image references; they must not be applied to persistent test
+groups or original resources without explicit parameterization and reviewed
+state ownership. See [the Azure gap/gate guide](AZURE.md).
 
 ## 4. Runtime / flow views
 
@@ -298,7 +311,38 @@ The repository contains:
 
 But the backend currently wires only `provision`, `teardown`, and `deploy` through the asynchronous workflow reconciliation path (`backend/src/domain/workflow_reconciliation.py` explicitly handles only those workflow types). That distinction matters when reasoning about where failures, retries, and state transitions actually happen today.
 
+Do not remove the API's proven golden/lm-eval/genuine pinned LLMPerf paths or
+set `durableEvaluation=true` until invocation, immutable snapshots, report
+semantics, restart, duplicate callbacks, cancellation, stale failures and
+owner-safe locks all have parity. An existing worker/Durable mapping is not
+proof that API runs survive backend process loss.
+
+### Configuration and report dataflow
+
+```mermaid
+flowchart LR
+    Input[User model and serving inputs]
+    Config[(Versioned configurations)]
+    Revision[(Deployment revision)]
+    Run[(Experiment run and frozen snapshot)]
+    Runner[Current in-process engine and runners]
+    Endpoint[Active inference endpoint]
+    Report[(Versioned report and per-case outcomes)]
+    Reader[API report reader]
+    Input --> Config --> Revision --> Run
+    Run --> Runner --> Endpoint
+    Endpoint --> Runner
+    Runner --> Report --> Reader
+    Run -->|Provenance and comparison context| Report
+```
+
+Editing a later configuration must not rewrite earlier run/report provenance.
+Record exact model/artifact versions, workload, counts/failures and metric
+semantics; do not make incomparable runs appear equivalent.
+
 ## 5. Deployment view
+
+This is the intended checked-in topology, not a freshly verified Azure install.
 
 ```mermaid
 flowchart TB
@@ -314,7 +358,7 @@ flowchart TB
         BackendCA[Container App: llm-backend]
         FrontendCA[Container App: llm-frontend]
         FuncApp[Durable Functions app]
-        Jobs[Container Apps Jobs x5]
+        Jobs[Five job definitions<br/>Only infra/model API routing active]
         PG[(Private PostgreSQL Flexible Server)]
         Storage[(Storage accounts<br/>functions state / tfstate / artifacts)]
     end
@@ -324,7 +368,7 @@ flowchart TB
     end
 
     subgraph Demo["Per-environment layer"]
-        DemoRG[rg-llm-demo-{environmentId}]
+        DemoRG["rg-llm-demo-{environmentId}"]
         GPUVM[Private GPU VM + vLLM]
     end
 
@@ -332,7 +376,7 @@ flowchart TB
     BWF -->|az acr build + update| BackendCA
     FWF -->|OIDC login| ACR
     FWF -->|az acr build + update| FrontendCA
-    IWF -->|fmt/validate only| SharedTF
+    IWF -.->|Code fmt/validate only; no cloud apply| SharedTF
 
     BackendCA --> PG
     BackendCA --> FuncApp
@@ -418,10 +462,82 @@ The backend uses:
 
 There are two different auth paths:
 
-1. **operator-facing requests** use header-based identity extraction (`X-MS-CLIENT-PRINCIPAL-NAME`, `X-Forwarded-Email`, `X-User-Email`, `X-Demo-User`) in `backend/src/api/auth.py`
+1. **operator-facing cloud requests** require a cryptographically validated RS256 Entra user JWT with correct tenant, issuer, audience, timestamps and allowed domain. Unsigned principal/email/demo headers are rejected; signed token header contents are still verified (`backend/src/api/auth.py`).
 2. **internal callbacks** use managed-identity bearer token validation in `backend/src/api/internal_auth.py`
 
-That keeps browser/session auth separate from service-to-service orchestration auth.
+That keeps browser/session auth separate from service-to-service orchestration
+auth. Explicit `local-demo` is development-only and forbidden in production/
+Azure hosting. Real Entra/browser token transport remains unverified; see
+[authentication](AUTHENTICATION.md).
+
+### Cloud authentication contract (live browser acceptance pending)
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Platform as App authentication platform
+    participant Entra as Tenant-approved Entra application
+    participant API as FastAPI JWT validator
+    User->>Platform: Request operator application
+    Platform->>Entra: Policy-compliant sign-in and consent
+    Entra-->>Platform: Signed user token after approval
+    Note over Platform,API: Actual token injection and browser session remain unverified
+    Platform->>API: Signed bearer or signed ID-token header
+    API->>Entra: Bounded signing-key discovery
+    API->>API: Verify signature, issuer, audience, time, tenant, user, domain
+    alt Valid user authorization
+        API-->>User: Authorized response
+    else Missing, invalid or unavailable identity
+        API-->>User: Explicit 401, 403 or 503 and never demo fallback
+    end
+```
+
+### Protected OIDC and independent canary cleanup
+
+```mermaid
+sequenceDiagram
+    participant GH as GitHub protected main
+    participant Canary as Canary workflow
+    participant Entra as Scoped federated identity
+    participant ARM as Azure Resource Manager
+    participant Cleanup as Separate cleanup workflow
+    participant Schedule as Scheduled fallback
+    GH->>Canary: Dispatch in protected environment
+    Canary->>Entra: Exact subject and audience OIDC exchange
+    Canary->>ARM: Check subscription and live group tags
+    Canary->>ARM: Create fixed owned canary identity
+    GH->>Cleanup: workflow_run completion including failure or cancellation
+    Schedule->>Cleanup: Independent periodic trigger
+    Cleanup->>Entra: Separate protected OIDC exchange
+    Cleanup->>ARM: Check exact group, identity, type, tags and run owner
+    Cleanup->>ARM: Delete only owned fixed identity
+    Cleanup->>ARM: Verify identity absent and preserve group and grants
+```
+
+The [actual failure/cancellation runs](AZURE_CANARY.md) prove this identity-only
+contract. Independent cleanup for billable resources is a separate unmet gate.
+
+### Persisted environment lifecycle (common paths)
+
+```mermaid
+stateDiagram-v2
+    [*] --> not_provisioned
+    not_provisioned --> provisioning
+    provisioning --> ready: successful infrastructure operation
+    provisioning --> provisioning_failed: failed operation
+    ready --> tearing_down
+    provisioning_failed --> tearing_down
+    tearing_down --> torn_down: successful teardown
+    tearing_down --> teardown_failed: failed teardown
+    teardown_failed --> tearing_down: approved retry
+    torn_down --> [*]
+```
+
+These are persisted lifecycle labels, not live power/model health. Deployment
+revisions and experiment runs have separate state machines; a `ready` environment
+does not prove a running GPU, a warm model or a complete report. Unknown lookup,
+quota visibility, DB pause, VM deallocation and cold-start behavior must remain
+visible rather than silently promoting state. See [operations](OPERATIONS.md).
 
 ## 8. Architecture Patterns & Design Principles Applied
 
@@ -435,7 +551,7 @@ Only patterns directly evidenced in this repo are included below.
 | Callback-driven asynchronous reconciliation | Workflow bookkeeping in `backend/src/domain/orchestration_workflow_service.py`; callback API in `backend/src/api/internal_workflows.py`; terminal reconciliation in `backend/src/domain/workflow_reconciliation.py`; orchestration start in `backend/src/providers/azure/provision.py` and `deploy.py` | Long-running Azure work should not block the HTTP request thread. The backend records intent, hands execution off, and changes environment/deployment state only when the callback arrives, which matches the latency and failure model of Terraform and VM bootstrapping. |
 | Control-plane vs. workload-plane infrastructure separation | `infra/shared`, `infra/control`, and `infra/demo`, especially `infra/README.md`, `infra/control/main.tf`, `infra/demo/main.tf` | The control plane must be stable and long-lived, while demo GPU environments are intentionally disposable. Splitting the Terraform modules minimizes blast radius and lets demo environments be torn down without touching the operator app. |
 | Infrastructure as Code | All Terraform under `infra/`; validation in `.github/workflows/infra.yml` | The app provisions non-trivial Azure topology: network, identities, storage, Container Apps, Functions, PostgreSQL, and GPU VMs. Capturing that in Terraform makes the demo reproducible and reviewable. |
-| Immutable per-commit image deployment | Git-SHA tags and deployment comments in `.github/workflows/backend.yml` and `.github/workflows/frontend.yml` | Container Apps revisions are easier to trace and roll back when each deployed image is tied to a unique commit SHA rather than a mutable `latest` tag. |
+| Traceable per-commit image tags | Git-SHA tags in `.github/workflows/backend.yml` and `.github/workflows/frontend.yml` | Tags aid tracing but can be overwritten; digest pinning/provenance is still required for immutable release/rollback claims. |
 | OIDC federated CI/CD auth instead of stored long-lived secrets | `azure/login@v2` usage and comments in `.github/workflows/backend.yml` and `.github/workflows/frontend.yml` | The deployment workflows need Azure access but should not carry a checked-in or long-lived secret. OIDC reduces credential sprawl and narrows blast radius. |
 | Schema-as-code migrations | `backend/alembic.ini`, `backend/migrations/env.py`, `backend/migrations/versions/` | The backend persists workflow state, catalog entries, deployments, and result reports. Alembic provides an auditable way to evolve that schema across environments. |
 | Shared-component reuse in the frontend | `frontend/src/components/EnvironmentPicker.tsx`, `RunHistory.tsx`, `ConfigVersionHistory.tsx`; reused across pages per `frontend/src/pages/*.tsx` imports | The same environment selection and history views appear across multiple operator tasks. Reusing them keeps the workflow consistent and avoids duplicating logic/UI markup. |
