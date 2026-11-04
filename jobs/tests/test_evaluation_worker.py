@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+
 from conftest import load_worker_entrypoint
 
 entrypoint = load_worker_entrypoint("evaluation_worker")
