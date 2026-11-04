@@ -183,7 +183,10 @@ class LocalProviderAdapter(ProviderAdapter):
                 dict(provider_state.get("currentOperation") or {}).get("diagnostics") or []
             )
             runtime_message = self._probe_runtime()
-            if runtime_message is None and environment.lifecycleState != DemoEnvironmentState.READY:
+            if runtime_message is None and environment.lifecycleState in {
+                DemoEnvironmentState.PROVISIONING,
+                DemoEnvironmentState.PROVISIONING_FAILED,
+            }:
                 environment.lifecycleState = DemoEnvironmentState.READY
                 environment.activeOperationId = None
                 provider_state = self._provider_state(

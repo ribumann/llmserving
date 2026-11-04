@@ -55,15 +55,15 @@ def test_real_local_api_flow() -> None:
     tags = httpx.get(f"{ollama_url}/api/tags", timeout=10).raise_for_status().json()
     model = next(item for item in tags["models"] if item["name"] == model_tag)
     print(f"MODEL_DIGEST={model['digest']}")
-    expected_digest = os.getenv("OLLAMA_EXPECTED_DIGEST")
-    if expected_digest:
-        assert model["digest"] == expected_digest
+    expected_digest = os.environ["OLLAMA_EXPECTED_DIGEST"]
+    assert model["digest"] == expected_digest
     evidence = {
         "commit": os.getenv("GITHUB_SHA", "unrecorded"),
         "model": model,
         "ollamaVersion": httpx.get(f"{ollama_url}/api/version").json(),
         "scope": "CPU-only real API; not browser, Azure, LLMPerf or benchmark acceptance",
         "reports": {},
+        "passed": False,
     }
     session_factory = create_session_factory(Settings(database_url=database_url))
     prefix = f"live-{uuid4().hex[:8]}"
@@ -221,13 +221,17 @@ def test_real_local_api_flow() -> None:
             cancelled = client.get(f"{cancel_path}/report").raise_for_status().json()
             assert cancelled["quality"]["aggregate"]["skipped"] > 0
             evidence["cancelled"] = cancelled
-            evidence["passed"] = True
+            evidence["apiFlowPassed"] = True
         finally:
-            if environment_id:
-                base = f"/environments/{environment_id}"
-                preview = post(f"{base}/teardown/preview", {}, 200)
-                post(f"{base}/teardown", {"previewToken": preview["previewToken"]}, 202)
-                _wait(client, base, "lifecycleState", "torn_down")
-            destination = os.getenv("FULLSTACK_EVIDENCE_FILE")
-            if destination:
-                Path(destination).write_text(json.dumps(evidence, indent=2))
+            try:
+                if environment_id:
+                    base = f"/environments/{environment_id}"
+                    preview = post(f"{base}/teardown/preview", {}, 200)
+                    post(f"{base}/teardown", {"previewToken": preview["previewToken"]}, 202)
+                    _wait(client, base, "lifecycleState", "torn_down")
+                    evidence["teardownVerified"] = True
+                    evidence["passed"] = bool(evidence.get("apiFlowPassed"))
+            finally:
+                destination = os.getenv("FULLSTACK_EVIDENCE_FILE")
+                if destination:
+                    Path(destination).write_text(json.dumps(evidence, indent=2))

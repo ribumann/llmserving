@@ -107,11 +107,12 @@ run migrations and `python -m src.persistence.seed_catalog` first. From `backend
 LIVE_API_URL=http://127.0.0.1:8000 \
 OLLAMA_BASE_URL=http://127.0.0.1:11434 \
 TEST_DATABASE_URL="$DATABASE_URL" \
+OLLAMA_EXPECTED_DIGEST=a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67 \
 python -m pytest -q -s -o addopts="" tests/integration/test_live_ollama.py
 ```
 
 The live API process must separately use `AUTH_MODE=local-demo APP_ENV=test`
-and the same database/Ollama URLs. `OLLAMA_EXPECTED_DIGEST` rejects an unexpected
+and the same database/Ollama URLs. Required `OLLAMA_EXPECTED_DIGEST` rejects an unexpected
 model version; `FULLSTACK_EVIDENCE_FILE` saves only this synthetic run's evidence.
 The test covers real prompts, two golden cases, immutable versioned configuration,
 single-stream (two requests) and concurrency-10 (ten requests) HTTP performance,
