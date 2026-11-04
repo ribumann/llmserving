@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from enum import Enum
 
 from fastapi import APIRouter, Depends, Request
@@ -10,8 +11,17 @@ from src.api.errors import with_request_id
 from src.domain.catalog import ModelCatalogEntry
 from src.domain.profile import CloudDeploymentProfile
 from src.persistence.db import get_db_session
+from src.providers.registry import PROVIDER_CAPABILITIES
 
 router = APIRouter(tags=["catalog"])
+
+
+@router.get("/providers")
+def list_providers(request: Request) -> dict[str, object]:
+    return with_request_id(
+        {"providers": [asdict(capabilities) for capabilities in PROVIDER_CAPABILITIES]},
+        getattr(request.state, "request_id", None),
+    )
 
 
 def _enum_value(value: object) -> object:

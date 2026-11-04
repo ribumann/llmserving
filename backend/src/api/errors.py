@@ -8,6 +8,8 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from src.providers.base import UnsupportedProviderError
+
 LOGGER = logging.getLogger(__name__)
 _REQUEST_ID: ContextVar[str] = ContextVar("request_id", default="")
 
@@ -66,6 +68,13 @@ def install_error_handling(app: FastAPI) -> None:
 
         try:
             response = await call_next(request)
+        except UnsupportedProviderError as exc:
+            response = _error_response(
+                request_id=request_id,
+                status_code=422,
+                code="unsupported_provider",
+                message=str(exc),
+            )
         except ApiError as exc:
             response = _error_response(
                 request_id=request_id,
