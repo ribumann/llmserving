@@ -1,0 +1,25 @@
+# Keeps `az acr build`/`docker build` upload context small when building from the repo root
+# (see backend/Dockerfile and frontend/Dockerfile, both of which use `.` as build context).
+.git
+.terraform
+**/.terraform
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfplan
+tfplan*
+.venv
+**/.venv
+venv311
+node_modules
+**/node_modules
+__pycache__
+**/__pycache__
+.pytest_cache
+.ruff_cache
+dist
+**/dist
+*.pyc
+.env
+.env.local
+terraform.tfvars

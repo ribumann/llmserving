@@ -1,0 +1,125 @@
+name: Frontend
+
+# Pushes and PRs run read-only CI. Deployment requires an explicit main-branch
+# dispatch, repository opt-in, and the separately configured azure-deployment environment.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend.yml"
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the frontend to the configured Azure environment
+        type: boolean
+        default: false
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Type-check + build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Unit tests
+        working-directory: frontend
+        run: npm test
+
+  deploy:
+    needs: test
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.deploy && vars.ENABLE_AZURE_DEPLOYMENT == 'true'
+    runs-on: ubuntu-latest
+    environment: azure-deployment
+    permissions:
+      id-token: write # required for OIDC
+      contents: read
+    concurrency:
+      group: deploy-frontend
+      cancel-in-progress: false
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      CONTAINER_APP_NAME: ${{ vars.AZURE_FRONTEND_APP_NAME }}
+      BACKEND_CONTAINER_APP_NAME: ${{ vars.AZURE_BACKEND_APP_NAME }}
+      IMAGE_NAME: llmserving-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          : "${RESOURCE_GROUP:?Configure AZURE_RESOURCE_GROUP}"
+          : "${ACR_NAME:?Configure AZURE_ACR_NAME}"
+          : "${CONTAINER_APP_NAME:?Configure AZURE_FRONTEND_APP_NAME}"
+          : "${BACKEND_CONTAINER_APP_NAME:?Configure AZURE_BACKEND_APP_NAME}"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve backend FQDN
+        id: backend
+        run: |
+          fqdn=$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$BACKEND_CONTAINER_APP_NAME" --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "fqdn=$fqdn" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image (ACR Tasks)
+        run: |
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "$IMAGE_NAME:${{ github.sha }}" \
+            -f frontend/Dockerfile \
+            --build-arg VITE_API_BASE_URL="https://${{ steps.backend.outputs.fqdn }}" \
+            .
+
+      - name: Point Container App at new image
+        run: |
+          az containerapp update \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CONTAINER_APP_NAME" \
+            --image "${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${{ github.sha }}"
+
+      - name: Wait for frontend to come up
+        run: |
+          fqdn=$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$CONTAINER_APP_NAME" --query "properties.configuration.ingress.fqdn" -o tsv)
+          url="https://${fqdn}/"
+          for i in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" "$url" || echo "000")
+            echo "attempt $i: $status"
+            if [ "$status" = "200" ]; then
+              echo "Frontend healthy."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Frontend did not become healthy in time." >&2
+          exit 1

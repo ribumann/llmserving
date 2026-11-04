@@ -1,0 +1,5 @@
+# Ensure shell scripts always use LF line endings, regardless of the
+# committer's OS. CRLF in a shebang line (`#!/bin/sh\r`) breaks exec in
+# Linux containers with a cryptic "exit code 255" crash loop and no
+# application logs - see backend/docker-entrypoint.sh history.
+*.sh text eol=lf

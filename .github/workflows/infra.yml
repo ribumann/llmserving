@@ -1,0 +1,65 @@
+name: Infra CI
+
+# Static validation only — `terraform fmt -check` and `terraform validate` for every module under
+# infra/. Deliberately does NOT run `terraform init`/`plan`/`apply`: infra/shared and infra/control
+# are single-applier modules run by hand from the operator's machine, and infra/demo is applied
+# repeatedly, per-environment, from inside the VNet by the terraform_runner Container Apps Job —
+# none of these are meant to be applied from CI. This workflow only catches formatting drift and
+# structural/syntax errors before they're merged.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  no-hf-credential-in-terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # FR-082: a Hugging Face credential must only ever live in the model_deployment Container
+      # Apps Job's own process memory, transiently, as a Run Command parameter — never as a
+      # Terraform variable/output (custom_data and similar attributes are persisted to state in
+      # plaintext regardless of a variable's `sensitive` flag, so a Terraform-shaped HF credential
+      # would leak into infra/demo's or infra/control's tfstate).
+      - name: Assert no huggingface_token-shaped variable in infra/demo or infra/control
+        run: |
+          if grep -rlEi 'variable[[:space:]]*"(huggingface|hf)_?token"' infra/demo infra/control; then
+            echo "::error::Found a Hugging Face token-shaped Terraform variable in infra/demo or infra/control (FR-082). The credential must only flow through the model_deployment Container Apps Job's runtime invocation, never through Terraform state."
+            exit 1
+          fi
+          echo "OK: no Hugging Face token-shaped Terraform variable found."
+
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [shared, control, demo]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: terraform fmt -check
+        working-directory: infra/${{ matrix.module }}
+        run: terraform fmt -check -recursive
+
+      - name: terraform init (backend=false)
+        working-directory: infra/${{ matrix.module }}
+        run: terraform init -backend=false
+
+      - name: terraform validate
+        working-directory: infra/${{ matrix.module }}
+        run: terraform validate

@@ -1,0 +1,24 @@
+/*
+ * Global reset only. Theming, typography, color, and every component pattern now
+ * come from Fluent UI React v9 (see App.tsx's FluentProvider + src/theme.ts) and the
+ * Griffel makeStyles blocks colocated with each component/page. This file must stay
+ * this small — do not reintroduce hand-rolled component classes here.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+code {
+  font-family: 'Cascadia Code', Consolas, monospace;
+}

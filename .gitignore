@@ -1,0 +1,71 @@
+# Python (backend/)
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node/TypeScript (frontend/)
+node_modules/
+dist/
+build/
+*.log
+.env
+.env.*
+!.env.example
+
+# Local tooling caches
+.impeccable/
+
+# Terraform (infra/shared/, infra/control/, infra/demo/)
+infra/shared/.terraform/
+infra/shared/.terraform.lock.hcl
+infra/shared/*.tfstate
+infra/shared/*.tfstate.*
+infra/shared/*.tfvars
+!infra/shared/terraform.tfvars.example
+infra/shared/crash.log
+infra/shared/crash.*.log
+infra/shared/tfplan
+infra/shared/*.tfplan
+infra/shared/plan_output*.txt
+infra/shared/apply_output*.txt
+
+infra/control/.terraform/
+infra/control/.terraform.lock.hcl
+infra/control/*.tfstate
+infra/control/*.tfstate.*
+infra/control/*.tfvars
+!infra/control/terraform.tfvars.example
+infra/control/crash.log
+infra/control/crash.*.log
+infra/control/tfplan
+infra/control/*.tfplan
+infra/control/plan_output*.txt
+infra/control/apply_output*.txt
+infra/control/apply_full*.txt
+
+infra/demo/.terraform/
+infra/demo/.terraform.lock.hcl
+infra/demo/*.tfstate
+infra/demo/*.tfstate.*
+infra/demo/*.tfvars
+!infra/demo/terraform.tfvars.example
+infra/demo/crash.log
+infra/demo/crash.*.log
+infra/demo/tfplan
+infra/demo/*.tfplan
+
+# Universal
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+
+backend/tests/**/.runtime/
+
+# Playwright (e2e/)
+e2e/test-results/
+e2e/playwright-report/

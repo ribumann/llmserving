@@ -1,0 +1,70 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+
+write_files:
+  # Deliberately does NOT accept a Hugging Face token or model repo as a template parameter: FR-082
+  # requires the HF credential to only ever exist in the model_deployment Container Apps Job's own
+  # process memory (FR-082/FR-083), never in Terraform state (custom_data is persisted to state
+  # verbatim regardless of a variable's `sensitive` flag, so baking the token in here would leak it
+  # into infra/demo's tfstate). Instead, this script only *starts* vLLM once the model_deployment
+  # job invokes it via `az vm run-command invoke` (or the VM Run Command extension) with the model
+  # repo and token passed as fresh, transient command parameters at deploy time (T136/T137).
+  - path: /opt/llmserving/run-vllm.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      # Invoked by the model_deployment Container Apps Job via Azure VM Run Command, not by
+      # cloud-init. Usage: run-vllm.sh <model_repo> <hf_token> [extra_args...]
+      set -euo pipefail
+
+      model_repo="$1"
+      hf_token="$2"
+      shift 2 || true
+
+      # Wait for the NVIDIA GPU driver extension to finish installing the driver.
+      for i in $(seq 1 60); do
+        if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+          echo "NVIDIA driver ready."
+          break
+        fi
+        echo "Waiting for NVIDIA driver... ($i/60)"
+        sleep 10
+      done
+
+      docker rm -f llmserving-vllm >/dev/null 2>&1 || true
+
+      docker run -d \
+        --name llmserving-vllm \
+        --restart unless-stopped \
+        --gpus all \
+        --shm-size=8g \
+        -p 8000:8000 \
+        -e HUGGING_FACE_HUB_TOKEN="$hf_token" \
+        -v /opt/llmserving/hf-cache:/root/.cache/huggingface \
+        ${vllm_image} \
+        --model "$model_repo" \
+        --host 0.0.0.0 \
+        --port 8000 \
+        "$@"
+
+runcmd:
+  - mkdir -p /opt/llmserving/hf-cache
+  # Install Docker Engine (official convenience script, per Docker's documented install path).
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable --now docker
+  # Install the NVIDIA Container Toolkit so Docker can pass GPUs through to containers.
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  - curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  - apt-get update
+  - apt-get install -y nvidia-container-toolkit
+  - nvidia-ctk runtime configure --runtime=docker
+  - systemctl restart docker
+  # Pre-pull the vLLM image so the first model_deployment run-command invocation doesn't pay the
+  # image-pull cost on top of the model download.
+  - docker pull ${vllm_image} || true

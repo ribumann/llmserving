@@ -1,0 +1,1 @@
+"""Plain activity implementations invoked by the generic orchestrator (T134/T135)."""

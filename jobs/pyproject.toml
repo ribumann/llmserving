@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 100
+src = ["common", "terraform_runner", "model_deployment", "evaluation_worker", "performance_worker", "export_worker", "tests"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+ignore = ["B008"]

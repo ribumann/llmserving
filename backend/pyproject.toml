@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llmserving-backend"
+version = "0.1.0"
+description = "Foundational FastAPI backend for the Azure LLM Serving Demo"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "sqlalchemy>=2.0,<3",
+  "psycopg[binary]>=3.2,<4",
+  "alembic>=1.13,<2",
+  "azure-identity>=1.19,<2",
+  "azure-mgmt-compute>=34,<35",
+  "azure-mgmt-appcontainers>=5.0,<6",
+  "azure-monitor-opentelemetry>=1.6,<2",
+  "opentelemetry-instrumentation-fastapi>=0.48b0",
+  "cryptography>=43,<49",
+  "pyjwt[crypto]>=2.9,<3",
+  "httpx>=0.28,<1",
+  "pydantic>=2.8,<3",
+  "pydantic-settings>=2.4,<3",
+  "python-dotenv>=1.0,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
+  "ruff>=0.6,<1",
+  "black>=24.8,<25",
+]
+evaluation = [
+  # "ifeval" extra pulls in langdetect/immutabledict/nltk, required by the
+  # ifeval benchmark task at runtime (lm_eval/tasks/ifeval uses langdetect).
+  "lm-eval[api,ifeval]>=0.4.7",
+  # Pin numpy below the line where upstream started requiring Python 3.12 to build
+  # from source; without this, pip's resolver can pick a numpy release that has no
+  # prebuilt wheel for our (3.11) interpreter and fails trying to compile it here.
+  "numpy<2.3",
+]
+# NOTE: the "performance" run type (src/performance/llmperf_runner.py) additionally
+# needs the real ray-project LLMPerf tool. It is intentionally NOT listed here: its
+# upstream pyproject.toml pins "pydantic<2.5", which hard-conflicts with our own
+# "pydantic>=2.8" dependency above, and the PyPI package named "llmperf" is an
+# unrelated squatted placeholder (not the real tool). backend/Dockerfile installs it
+# separately with --no-deps plus only the runtime libraries token_benchmark_ray.py
+# actually imports, so our pydantic version wins instead of upstream's stale pin.
+
+[project.scripts]
+seed-model-catalog = "src.persistence.seed_catalog:main"
+seed-benchmarks = "src.evaluation.seed_benchmarks:main"
+seed-golden-datasets = "src.evaluation.seed_golden_datasets:main"
+seed-performance-workloads = "src.performance.seed_workloads:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+ignore = ["B008"]

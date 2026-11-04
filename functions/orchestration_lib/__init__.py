@@ -1,0 +1,1 @@
+"""Plain, unit-testable helper modules backing the Durable Functions app(function_app.py). Kept separate from the framework-decorated triggerfunctions so the actual decision logic can be exercised without a runningDurable Functions host/Azurite emulator, neither of which is available inthis environment (T134/T135)."""

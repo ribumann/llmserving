@@ -1,0 +1,4 @@
+httpx>=0.28,<1
+azure-identity>=1.19,<2
+azure-mgmt-network>=27,<28
+azure-monitor-opentelemetry>=1.6,<2
