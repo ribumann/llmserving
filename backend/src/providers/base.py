@@ -5,6 +5,22 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
+from src.domain.enums import ProviderType
+
+
+class UnsupportedProviderError(ValueError):
+    """The requested provider has no implemented adapter."""
+
+
+@dataclass(slots=True, frozen=True)
+class ProviderCapabilities:
+    provider: ProviderType
+    engines: tuple[str, ...]
+    cloudInfrastructure: bool
+    durableProvisioning: bool
+    durableModelDeployment: bool
+    durableEvaluation: bool
+
 
 @dataclass(slots=True, frozen=True)
 class RegionRecommendation:

@@ -20,6 +20,7 @@ Several later-stage UI areas are still scaffolded rather than fully productized 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) - deeper architecture reference with multiple views and runtime diagrams
 - [`docs/AZURE_CANARY.md`](docs/AZURE_CANARY.md) - protected OIDC and independent failure/cancellation cleanup gate; not application or billable-resource cleanup validation
 - [`docs/TESTING.md`](docs/TESTING.md) - complete CI commands, real PostgreSQL coverage, and explicit mocked/full-stack evidence boundaries
+- [`docs/PROVIDERS.md`](docs/PROVIDERS.md) - implemented Azure/local capabilities and explicit, non-blocking AWS/GCP limitations
 
 ## Prerequisites
 
