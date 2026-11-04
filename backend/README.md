@@ -92,6 +92,18 @@ uvicorn src.api.app:app --reload
 Health route:
 
 - `GET /healthz`
+- `GET /readyz` - bounded real PostgreSQL probe; 503 when unavailable, paused, or timed out
+
+`/healthz` is process liveness and never queries the database. `/readyz` checks
+`SELECT 1` through an independent, nonpooled connection with connect/statement
+timeouts and at most one DB probe in flight. Its response deadline defaults to
+three seconds (`DATABASE_READINESS_TIMEOUT_SECONDS`, greater than zero and at
+most ten). A timeout returns 503 even if a driver/DNS call is still completing;
+it never reports a database as ready from cached state. Responses do not expose
+connection strings or claim to distinguish a paused database from an unreachable
+one. Container Apps and rollout checks use readiness; Docker's liveness check
+remains `/healthz`. Existing custom `AUTH_BYPASS_PATHS` must include `/readyz`
+before using it as an unauthenticated platform probe.
 
 ## Authentication behavior in this foundational phase
 
@@ -102,7 +114,7 @@ The auth middleware expects an upstream organization SSO layer to inject one of 
 - `X-User-Email`
 - `X-Demo-User`
 
-Requests to `/healthz`, `/docs`, `/redoc`, and `/openapi.json` are exempt so local bootstrapping
+Requests to `/healthz`, `/readyz`, `/docs`, `/redoc`, and `/openapi.json` are exempt so local bootstrapping
 works before a real identity layer is wired in.
 
 ## Validation commands

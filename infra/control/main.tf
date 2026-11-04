@@ -403,6 +403,17 @@ resource "azurerm_container_app" "backend" {
       cpu    = var.backend_cpu
       memory = var.backend_memory
 
+      liveness_probe {
+        transport = "HTTP"
+        port      = 8000
+        path      = "/healthz"
+      }
+      readiness_probe {
+        transport = "HTTP"
+        port      = 8000
+        path      = "/readyz"
+      }
+
       env {
         name        = "DATABASE_URL"
         secret_name = "database-url"

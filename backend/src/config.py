@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/llmserving"
     database_echo: bool = False
+    database_readiness_timeout_seconds: float = Field(default=3.0, gt=0, le=10)
     azure_subscription_id: str | None = None
     azure_tenant_id: str | None = None
     azure_client_id: str | None = None
@@ -31,6 +32,7 @@ class Settings(BaseSettings):
     auth_bypass_paths: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: [
             "/healthz",
+            "/readyz",
             "/openapi.json",
             "/docs",
             "/docs/oauth2-redirect",
