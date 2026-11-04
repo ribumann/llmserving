@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 import time
 from types import SimpleNamespace
 
+import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from src.api.app import create_app
-from src.api.auth import OperatorTokenValidator
+from src.api.auth import AuthenticatedUser, OperatorTokenValidator
 from src.config import Settings
 
 TENANT = "11111111-1111-1111-1111-111111111111"
@@ -145,3 +148,45 @@ def test_cloud_hosting_cannot_enable_demo_headers(monkeypatch, marker) -> None:
 def test_production_cannot_enable_demo_headers() -> None:
     with pytest.raises(ValidationError, match="not allowed"):
         Settings(auth_mode="local-demo", app_env="production")
+
+
+@pytest.mark.asyncio
+async def test_slow_key_lookup_does_not_block_liveness_or_event_loop(keypair) -> None:
+    app = cloud_app(keypair[1])
+    started = threading.Event()
+
+    def slow_validation(_token):
+        started.set()
+        time.sleep(0.25)
+        return AuthenticatedUser("operator", "operator@example.com", "Operator", "entra-jwt")
+
+    app.state.operator_token_validator = SimpleNamespace(validate=slow_validation)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        authenticated = asyncio.create_task(
+            client.get("/providers", headers={"Authorization": "Bearer token"})
+        )
+        deadline = time.monotonic() + 1
+        while not started.is_set() and time.monotonic() < deadline:
+            await asyncio.sleep(0.001)
+        assert started.is_set()
+        start = time.monotonic()
+        assert (await client.get("/healthz")).status_code == 200
+        assert time.monotonic() - start < 0.15
+        assert (await authenticated).status_code == 200
+
+
+def test_key_discovery_failure_is_explicit_unavailable(keypair) -> None:
+    app = cloud_app(keypair[1])
+
+    def unavailable(_token):
+        raise jwt.PyJWKClientConnectionError("offline")
+
+    app.state.operator_token_validator._jwks_client = SimpleNamespace(
+        get_signing_key_from_jwt=unavailable
+    )
+    with TestClient(app) as client:
+        response = client.get("/providers", headers={"Authorization": "Bearer token"})
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "identity_provider_unavailable"

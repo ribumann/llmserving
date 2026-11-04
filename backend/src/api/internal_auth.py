@@ -60,8 +60,11 @@ class EntraTokenVerifier:
     ) -> None:
         self._tenant_id = tenant_id
         self._audience = audience
-        factory = jwks_client_factory or PyJWKClient
-        self._jwks_client = factory(_jwks_uri(tenant_id))
+        self._jwks_client = (
+            jwks_client_factory(_jwks_uri(tenant_id))
+            if jwks_client_factory
+            else PyJWKClient(_jwks_uri(tenant_id), timeout=5)
+        )
 
     def decode(self, token: str) -> dict[str, Any]:
         signing_key = self._jwks_client.get_signing_key_from_jwt(token)

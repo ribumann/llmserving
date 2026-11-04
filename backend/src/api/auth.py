@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import jwt
 from fastapi import FastAPI, Request
+from starlette.concurrency import run_in_threadpool
 
 from src.api.errors import ApiError
 from src.api.internal_auth import EntraTokenVerifier
@@ -22,6 +23,12 @@ class OperatorTokenValidator(EntraTokenVerifier):
     def validate(self, token: str) -> AuthenticatedUser:
         try:
             claims = self.decode(token)
+        except jwt.PyJWKClientConnectionError as error:
+            raise ApiError(
+                status_code=503,
+                code="identity_provider_unavailable",
+                message="The identity provider signing keys are temporarily unavailable.",
+            ) from error
         except jwt.PyJWTError as error:
             raise ApiError(
                 status_code=401,
@@ -109,7 +116,7 @@ def install_auth_middleware(app: FastAPI, settings: Settings) -> None:
             scheme, _, bearer = authorization.partition(" ")
             token = bearer.strip() if scheme.lower() == "bearer" else ""
             token = token or request.headers.get("X-MS-TOKEN-AAD-ID-TOKEN", "")
-            user = validator.validate(token) if token else None
+            user = await run_in_threadpool(validator.validate, token) if token else None
         if user is None:
             raise ApiError(
                 status_code=401,

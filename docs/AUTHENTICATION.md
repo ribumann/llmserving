@@ -17,6 +17,11 @@ cannot impersonate operators merely by supplying a username header. Internal
 workflow callbacks still use their separate audience-restricted managed-identity
 validator.
 
+Signing-key discovery has a five-second network timeout; synchronous signature
+validation/discovery runs off the API event loop so it cannot block liveness
+probes. Operator key-discovery connection failures return the explicit
+`identity_provider_unavailable` 503, not a demo fallback.
+
 `AUTH_MODE=local-demo` is an explicit local development opt-in that preserves
 the original demo workflow. It is rejected for production and Azure Container
 Apps/App Service hosting. Tests opt into local-demo explicitly; separate tests
