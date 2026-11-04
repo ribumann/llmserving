@@ -198,7 +198,7 @@ variable "auth_allowed_email_domains" {
 variable "auth_bypass_paths" {
   description = "Comma-separated auth-bypass paths (health checks, OpenAPI docs, and /internal - the Internal Orchestration Callback API, which is authenticated separately via managed-identity bearer tokens validated by src/api/internal_auth.py, never by the browser-session headers the SSO middleware checks for). Plain CSV — NOT JSON-array syntax. Must be kept in sync with backend/src/config.py's Settings.auth_bypass_paths default_factory, which this Terraform-injected env var otherwise silently overrides."
   type        = string
-  default     = "/healthz,/openapi.json,/docs,/docs/oauth2-redirect,/redoc,/internal"
+  default     = "/healthz,/readyz,/openapi.json,/docs,/docs/oauth2-redirect,/redoc,/internal"
 }
 
 variable "backend_extra_app_settings" {

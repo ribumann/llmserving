@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,7 +13,7 @@ from src.api.internal_auth import build_internal_token_validator
 from src.api.routes import create_router
 from src.api.telemetry import OperationTelemetry, install_telemetry_middleware
 from src.config import Settings, get_settings
-from src.persistence.db import create_session_factory
+from src.persistence.db import DatabaseReadiness, create_session_factory
 from src.providers.azure import AzureProviderAdapter
 from src.providers.local.adapter import LocalProviderAdapter
 from src.providers.registry import CompositeProviderAdapter
@@ -19,12 +21,21 @@ from src.providers.registry import CompositeProviderAdapter
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
+    readiness = DatabaseReadiness(resolved_settings)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            readiness.close()
 
     app = FastAPI(
         title=resolved_settings.app_name,
         version="0.1.0",
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
     # Wires the `workflowId` correlation ID (FR-086) into every log record and,
     # when configured, into Application Insights via OpenTelemetry - must run
@@ -33,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_monitoring(app)
     session_factory = create_session_factory(resolved_settings)
     app.state.settings = resolved_settings
+    app.state.database_readiness = readiness
     app.state.session_factory = session_factory
     app.state.telemetry = OperationTelemetry(session_factory=session_factory)
     azure_provider = AzureProviderAdapter(
