@@ -1,4 +1,4 @@
-"""evaluation_worker Container Apps Job (T136): runs golden-dataset/benchmark
+"""evaluation_worker Container Apps Job (T136): runs golden-dataset
 prompt cases against the deployed vLLM endpoint and reports a Result Report
 `quality` object back through the internal callback API (data-model.md's
 Result Report entity; FastAPI persists the actual Result Report record from
@@ -16,11 +16,14 @@ activity as a job-start template override):
 A case's `status` is `pass`/`fail` when a `deterministicCheck` substring was
 supplied and matched/didn't match the response, `skipped` when no check was
 supplied (no automated verdict possible), or `errored` when the request
-itself failed (contracts/engine-interface.md; data-model.md Result Report).
+or rule fails. Canonical input/evaluationRule cases use the shared backend
+scorer; legacy substring checks also grade the final answer, not reasoning.
+This does not certify benchmark, invocation or report parity with the API.
 """
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,11 +39,12 @@ from common.callback_client import (  # noqa: E402
 )
 from common.telemetry import configure_job_telemetry  # noqa: E402
 from common.vllm_client import submit_prompt  # noqa: E402
+from src.evaluation.scoring import evaluate_golden_case  # noqa: E402
 
 
 def _evaluate_case(base_url: str, case: dict[str, Any], submit: Any) -> dict[str, Any]:
     case_id = str(case.get("caseId", ""))
-    prompt = str(case.get("prompt", ""))
+    prompt = str(case.get("input", case.get("prompt", "")))
     deterministic_check = case.get("deterministicCheck")
 
     result = submit(base_url, prompt)
@@ -53,10 +57,27 @@ def _evaluate_case(base_url: str, case: dict[str, Any], submit: Any) -> dict[str
             "error": result.error,
         }
 
-    if deterministic_check is None:
+    if deterministic_check is None and not case.get("evaluationRule"):
         status = "skipped"
     else:
-        status = "pass" if str(deterministic_check) in result.text else "fail"
+        rule = (
+            case
+            if case.get("evaluationRule")
+            else {
+                "evaluationRule": "contains",
+                "expectedSubstring": str(deterministic_check),
+            }
+        )
+        try:
+            status = "pass" if evaluate_golden_case(rule, result.text) else "fail"
+        except (ValueError, re.error) as error:
+            return {
+                "caseId": case_id,
+                "status": "errored",
+                "responseText": result.text,
+                "latencySeconds": result.latency_seconds,
+                "error": str(error),
+            }
 
     return {
         "caseId": case_id,

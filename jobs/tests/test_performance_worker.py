@@ -19,7 +19,9 @@ def _fake_result(latency: float, error: str | None = None):
     return R()
 
 
-def test_run_computes_percentiles_and_throughput() -> None:
+def test_run_computes_percentiles_and_throughput(monkeypatch) -> None:
+    ticks = iter([100.0, 102.0])
+    monkeypatch.setattr(entrypoint, "perf_counter", lambda: next(ticks))
     callback = MagicMock()
     latencies = [0.1, 0.2, 0.3, 0.4, 0.5]
     responses = iter(_fake_result(lat) for lat in latencies)
@@ -44,6 +46,7 @@ def test_run_computes_percentiles_and_throughput() -> None:
     assert perf["failures"]["count"] == 0
     assert perf["failures"]["total"] == 5
     assert perf["endToEndLatencySeconds"]["p50"] == 0.3
+    assert perf["throughput"] == {"value": 2.5, "unit": "requests_per_second"}
     assert perf["timeToFirstToken"] == {"available": False}
     assert perf["acceleratorUtilization"] == {"available": False}
     assert diagnostics["completenessIndicator"] == "complete"

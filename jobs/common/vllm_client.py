@@ -2,10 +2,9 @@
 (contracts/engine-interface.md), used by `evaluation_worker`/`performance_worker`
 to submit prompts directly against the demo VM's private IP:8000.
 
-Per contracts/engine-interface.md's Azure Implementation Notes, `deploy()` and
-`runPerformanceWorkload()` (and, by extension, the golden/benchmark quality
-runs implemented here) execute inside these isolated Container Apps Jobs, not
-inside FastAPI - never through the backend.
+This is the legacy isolated-job HTTP client, not the current backend evaluation
+or genuine LLMPerf runner. API evaluation remains in process until durable
+invocation/report/restart/cancellation parity is demonstrated.
 """
 
 from __future__ import annotations

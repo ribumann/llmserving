@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -29,6 +28,7 @@ from src.domain.model_configuration import ModelConfiguration
 from src.domain.performance_workload import PerformanceWorkload
 from src.domain.result_report_repo import ResultReportRepository, build_quality_aggregate
 from src.evaluation.lm_eval_runner import LmEvalRunner
+from src.evaluation.scoring import evaluate_golden_case, strip_reasoning_trace
 from src.performance.llmperf_runner import PerformanceRunOverloadError
 from src.performance.run_performance import PerformanceRunner
 
@@ -746,20 +746,8 @@ class QualityRunOrchestrator:
         # only what comes after the last closing think tag, mirroring the
         # `think_end_token` handling already applied to lm-eval benchmark runs
         # (see lm_eval_runner.py).
-        _, _, tail = observed.rpartition("</think>")
-        return tail if tail.strip() else observed
+        return strip_reasoning_trace(observed)
 
     @classmethod
     def _evaluate_case(cls, case: Mapping[str, Any], observed: str) -> bool:
-        graded_text = cls._strip_reasoning_trace(observed)
-        rule = str(case.get("evaluationRule") or "").strip().lower()
-        if rule == "exact-match":
-            expected = str(case.get("expectedOutput") or "").strip()
-            return graded_text.strip() == expected
-        if rule == "contains":
-            expected = str(case.get("expectedSubstring") or "").strip()
-            return expected in graded_text
-        if rule.startswith("regex:"):
-            pattern = rule.split(":", 1)[1]
-            return re.search(pattern, graded_text) is not None
-        raise ValueError(f"Unsupported evaluation rule '{case.get('evaluationRule')}'.")
+        return evaluate_golden_case(case, observed)
