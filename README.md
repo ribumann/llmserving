@@ -19,6 +19,7 @@ Several later-stage UI areas are still scaffolded rather than fully productized 
 - [`specs/001-llm-serving-demo/`](specs/001-llm-serving-demo/) - spec-kit artifacts (`spec.md`, `plan.md`, `research.md`, `tasks.md`) that describe the feature intent and planned architecture
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) - deeper architecture reference with multiple views and runtime diagrams
 - [`docs/AZURE_CANARY.md`](docs/AZURE_CANARY.md) - protected OIDC and independent failure/cancellation cleanup gate; not application or billable-resource cleanup validation
+- [`docs/TESTING.md`](docs/TESTING.md) - complete CI commands, real PostgreSQL coverage, and explicit mocked/full-stack evidence boundaries
 
 ## Prerequisites
 

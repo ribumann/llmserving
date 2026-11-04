@@ -28,6 +28,23 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-test
+          POSTGRES_DB: llmserving_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d llmserving_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:ci-only-test@127.0.0.1:5432/llmserving_ci
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:ci-only-test@127.0.0.1:5432/llmserving_ci
     steps:
       - uses: actions/checkout@v4
 
@@ -49,9 +66,18 @@ jobs:
         working-directory: backend
         run: black --check src tests
 
-      - name: Unit tests
+      - name: Migrate disposable PostgreSQL and seed reference data
         working-directory: backend
-        run: pytest -q
+        run: |
+          python -m alembic upgrade head
+          python -m src.persistence.seed_catalog
+          python -m src.evaluation.seed_benchmarks
+          python -m src.evaluation.seed_golden_datasets
+          python -m src.performance.seed_workloads
+
+      - name: Full backend suite including integration and real PostgreSQL
+        working-directory: backend
+        run: python -m pytest -q -o addopts=""
 
   deploy:
     needs: test
