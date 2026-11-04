@@ -101,18 +101,18 @@ jobs:
             --name "$CONTAINER_APP_NAME" \
             --image "${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${{ github.sha }}"
 
-      - name: Wait for healthz
+      - name: Wait for database-backed readiness
         run: |
           fqdn=$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$CONTAINER_APP_NAME" --query "properties.configuration.ingress.fqdn" -o tsv)
-          url="https://${fqdn}/healthz"
+          url="https://${fqdn}/readyz"
           for i in $(seq 1 30); do
             status=$(curl -s -o /dev/null -w "%{http_code}" "$url" || echo "000")
             echo "attempt $i: $status"
             if [ "$status" = "200" ]; then
-              echo "Backend healthy."
+              echo "Backend database-ready."
               exit 0
             fi
             sleep 10
           done
-          echo "Backend did not become healthy in time." >&2
+          echo "Backend database did not become ready in time." >&2
           exit 1
