@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
+from azure.core.exceptions import AzureError
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True, frozen=True)
@@ -19,6 +23,7 @@ class QuotaCheckResult:
     available: bool | None
     checkedAt: datetime
     evidence: list[str] = field(default_factory=list)
+    requestedVcpus: int | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -30,6 +35,8 @@ class SkuAvailabilityResult:
     restrictions: list[str] = field(default_factory=list)
     zones: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
+    vcpus: int | None = None
+    family: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -72,10 +79,21 @@ class AzureCapacityPreflight:
             self._compute_client = ComputeManagementClient(credential, self._subscription_id)
         return self._compute_client
 
-    def evaluate_region(self, *, region: str, vm_size: str) -> CapacityPreflightResult:
+    def evaluate_region(
+        self, *, region: str, vm_size: str, priority: Literal["Regular", "Spot"] = "Spot"
+    ) -> CapacityPreflightResult:
+        if priority not in {"Regular", "Spot"}:
+            raise ValueError(f"Unsupported VM priority '{priority}'.")
         checked_at = datetime.now(UTC)
-        quota = self._check_quota(region=region, vm_size=vm_size, checked_at=checked_at)
         sku = self._check_sku(region=region, vm_size=vm_size, checked_at=checked_at)
+        quota = self._check_quota(
+            region=region,
+            vm_size=vm_size,
+            checked_at=checked_at,
+            requested_vcpus=sku.vcpus,
+            sku_family=sku.family,
+            priority=priority,
+        )
 
         evidence = [*quota.evidence, *sku.evidence]
         uncertainty_reasons: list[str] = []
@@ -115,11 +133,21 @@ class AzureCapacityPreflight:
             uncertaintyReasons=uncertainty_reasons,
         )
 
-    def _check_quota(self, *, region: str, vm_size: str, checked_at: datetime) -> QuotaCheckResult:
+    def _check_quota(
+        self,
+        *,
+        region: str,
+        vm_size: str,
+        checked_at: datetime,
+        requested_vcpus: int | None,
+        sku_family: str | None,
+        priority: str,
+    ) -> QuotaCheckResult:
         usage_hint_tokens = SKU_FAMILY_HINTS.get(vm_size.lower(), ())
         try:
             usage_entries = list(self.compute_client.usage.list(location=region))
-        except Exception as exc:  # pragma: no cover - exercised via tests with mocks
+        except AzureError as exc:
+            LOGGER.warning("Azure quota lookup unavailable (%s).", type(exc).__name__)
             return QuotaCheckResult(
                 region=region,
                 vmSize=vm_size,
@@ -128,10 +156,32 @@ class AzureCapacityPreflight:
                 limit=None,
                 available=None,
                 checkedAt=checked_at,
-                evidence=[f"Quota lookup failed for {region}: {exc}"],
+                evidence=[f"Quota lookup failed for {region}: {type(exc).__name__}"],
             )
 
-        usage_match = self._match_usage(usage_entries, usage_hint_tokens)
+        if priority == "Spot":
+            usage_match = next(
+                (
+                    entry
+                    for entry in usage_entries
+                    if str(getattr(getattr(entry, "name", None), "value", "")).lower()
+                    == "lowprioritycores"
+                ),
+                None,
+            )
+        else:
+            usage_match = next(
+                (
+                    entry
+                    for entry in usage_entries
+                    if sku_family
+                    and str(getattr(getattr(entry, "name", None), "value", "")).lower()
+                    == sku_family.lower()
+                ),
+                None,
+            )
+            if usage_match is None and not sku_family:
+                usage_match = self._match_usage(usage_entries, usage_hint_tokens)
         if usage_match is None:
             return QuotaCheckResult(
                 region=region,
@@ -142,14 +192,51 @@ class AzureCapacityPreflight:
                 available=None,
                 checkedAt=checked_at,
                 evidence=[
-                    f"No matching GPU-family usage record was returned for {vm_size} in {region}."
+                    f"No matching {priority} quota record was returned for {vm_size} in {region}."
                 ],
+                requestedVcpus=requested_vcpus,
             )
 
         current_value = getattr(usage_match, "current_value", None)
         limit = getattr(usage_match, "limit", None)
-        available = None if current_value is None or limit is None else current_value < limit
+        available = (
+            None
+            if current_value is None or limit is None or requested_vcpus is None
+            else current_value + requested_vcpus <= limit
+        )
         usage_name = self._usage_name(usage_match)
+        evidence = [
+            f"{priority} quota {usage_name or 'unknown'} in {region}: "
+            f"current={current_value}, limit={limit}, requestedVcpus={requested_vcpus}."
+        ]
+        if requested_vcpus is None:
+            evidence.append(
+                "Requested SKU vCPU count is unavailable; quota sufficiency is unknown."
+            )
+        if priority == "Regular":
+            regional = next(
+                (
+                    entry
+                    for entry in usage_entries
+                    if str(getattr(getattr(entry, "name", None), "value", "")).lower() == "cores"
+                ),
+                None,
+            )
+            regional_usage = getattr(regional, "current_value", None)
+            regional_limit = getattr(regional, "limit", None)
+            regional_available = (
+                None
+                if regional_usage is None or regional_limit is None or requested_vcpus is None
+                else regional_usage + requested_vcpus <= regional_limit
+            )
+            evidence.append(
+                f"Total regional vCPUs: current={regional_usage}, limit={regional_limit}, "
+                f"requestedVcpus={requested_vcpus}."
+            )
+            if regional_available is False:
+                available = False
+            elif available is not False and regional_available is None:
+                available = None
 
         return QuotaCheckResult(
             region=region,
@@ -159,10 +246,8 @@ class AzureCapacityPreflight:
             limit=limit,
             available=available,
             checkedAt=checked_at,
-            evidence=[
-                f"Quota {usage_name or 'unknown'} in {region}: current={current_value}, "
-                f"limit={limit}."
-            ],
+            evidence=evidence,
+            requestedVcpus=requested_vcpus,
         )
 
     def _check_sku(
@@ -172,13 +257,14 @@ class AzureCapacityPreflight:
             sku_entries = list(
                 self.compute_client.resource_skus.list(filter=f"location eq '{region}'")
             )
-        except Exception as exc:  # pragma: no cover - exercised via tests with mocks
+        except AzureError as exc:
+            LOGGER.warning("Azure SKU lookup unavailable (%s).", type(exc).__name__)
             return SkuAvailabilityResult(
                 region=region,
                 vmSize=vm_size,
                 available=None,
                 checkedAt=checked_at,
-                evidence=[f"SKU lookup failed for {region}: {exc}"],
+                evidence=[f"SKU lookup failed for {region}: {type(exc).__name__}"],
             )
 
         sku_entry = next(
@@ -201,6 +287,23 @@ class AzureCapacityPreflight:
             )
 
         restrictions = self._restriction_messages(getattr(sku_entry, "restrictions", []) or [])
+        raw_vcpus = next(
+            (
+                getattr(item, "value", None)
+                for item in getattr(sku_entry, "capabilities", []) or []
+                if str(getattr(item, "name", "")).lower() == "vcpus"
+            ),
+            None,
+        )
+        vcpus = (
+            int(raw_vcpus)
+            if isinstance(raw_vcpus, (str, int))
+            and not isinstance(raw_vcpus, bool)
+            and str(raw_vcpus).isdecimal()
+            else None
+        )
+        if vcpus is not None and vcpus <= 0:
+            vcpus = None
         zones = list(getattr(sku_entry, "location_info", []) or [])
         normalized_zones = [
             zone
@@ -221,12 +324,13 @@ class AzureCapacityPreflight:
             restrictions=restrictions,
             zones=normalized_zones,
             evidence=evidence,
+            vcpus=vcpus,
+            family=getattr(sku_entry, "family", None),
         )
 
     @staticmethod
     def _match_usage(usage_entries: Iterable[Any], hint_tokens: tuple[str, ...]) -> Any | None:
         lowered_hints = tuple(token.lower() for token in hint_tokens)
-        fallback: Any | None = None
         for entry in usage_entries:
             name_parts = " ".join(
                 part
@@ -236,11 +340,9 @@ class AzureCapacityPreflight:
                 ]
                 if part
             ).lower()
-            if "gpu" in name_parts or "family" in name_parts:
-                fallback = fallback or entry
             if any(token in name_parts for token in lowered_hints):
                 return entry
-        return fallback
+        return None
 
     @staticmethod
     def _restriction_messages(restrictions: Iterable[Any]) -> list[str]:

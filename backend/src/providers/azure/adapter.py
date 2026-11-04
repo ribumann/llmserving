@@ -12,7 +12,7 @@ from src.domain.profile import CloudDeploymentProfile
 from src.engines.vllm.adapter import VllmEngineAdapter
 from src.providers.azure.deploy import AzureDeployer, DeploymentContext
 from src.providers.azure.preflight import AzureCapacityPreflight
-from src.providers.azure.preview import AzurePreviewService, PreviewEvaluation
+from src.providers.azure.preview import AzurePreviewService, PreviewEvaluation, resolve_vm_size
 from src.providers.azure.provision import AzureProvisioner, ProvisioningContext
 from src.providers.azure.state import AzureEnvironmentStateService
 from src.providers.base import (
@@ -129,7 +129,7 @@ class AzureProviderAdapter(ProviderAdapter):
             region=region,
             profileId=profile.profileId,
             profileSizeClass=profile.modelSizeClass.value,
-            vmSize=profile.vmSku,
+            vmSize=resolve_vm_size(profile, {"vmSizeOverride": terraform_variables.get("vm_size")}),
             bootstrapModelRepo=bootstrap_model_repo,
             terraformVariables=terraform_variables,
             fallbackRegions=list(profile.eligibleRegions),
@@ -142,11 +142,17 @@ class AzureProviderAdapter(ProviderAdapter):
         return evaluation.recommendation
 
     def preview_with_details(
-        self, *, profileId: str, regionOverride: str | None = None
+        self,
+        *,
+        profileId: str,
+        regionOverride: str | None = None,
+        configurableInputs: Mapping[str, object] | None = None,
     ) -> PreviewEvaluation:
         profile = self._load_profile(profileId)
         return self._preview_service.preview_environment(
-            profile=profile, region_override=regionOverride
+            profile=profile,
+            region_override=regionOverride,
+            configurable_inputs=configurableInputs,
         )
 
     def provisionEnvironment(self, profileId: str, region: str) -> ProvisioningHandle:

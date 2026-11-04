@@ -89,5 +89,5 @@ def test_preview_environment_returns_contract_shape() -> None:
     assert body["recommendedRegion"] == "eastus2"
     assert body["assessments"][0]["region"] == "eastus2"
     assert body["assessments"][0]["quotaStatus"] == "sufficient"
-    assert body["assessments"][0]["capacityStatus"] == "available"
+    assert body["assessments"][0]["capacityStatus"] == "unknown"
     assert body["assessments"][0]["compatibilityStatus"] == "compatible"

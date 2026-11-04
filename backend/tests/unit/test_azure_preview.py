@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from src.domain.enums import ModelSizeClass, ProviderType
 from src.domain.profile import CloudDeploymentProfile
 from src.providers.azure.preflight import (
@@ -62,3 +63,47 @@ def test_preview_picks_first_available_fallback_region() -> None:
 
     assert evaluation.recommendation.recommendedRegion == "southcentralus"
     assert evaluation.checks[1].available is True
+
+
+@pytest.mark.parametrize(
+    "defaults,inputs,expected",
+    [
+        ({}, {}, "Standard_NC16as_T4_v3"),
+        ({"vmSizeOverride": "Standard_NC24ads_A100_v4"}, {}, "Standard_NC24ads_A100_v4"),
+        (
+            {"vmSizeOverride": "Standard_NC24ads_A100_v4"},
+            {"vmSizeOverride": "Standard_NC80adis_H100_v5"},
+            "Standard_NC80adis_H100_v5",
+        ),
+        (
+            {"vmSizeOverride": "Standard_NC24ads_A100_v4"},
+            {"vmSizeOverride": None},
+            "Standard_NC16as_T4_v3",
+        ),
+    ],
+)
+def test_preflight_checks_effective_requested_sku(defaults, inputs, expected) -> None:
+    profile = CloudDeploymentProfile(
+        profileId="azure",
+        provider=ProviderType.AZURE,
+        modelSizeClass=ModelSizeClass.THREE_B,
+        eligibleRegions=["eastus2"],
+        vmSku="Standard_NC16as_T4_v3",
+        capacityAssumptions={},
+        configurableInputs=defaults,
+        knownLimitations=[],
+        version=1,
+    )
+    result = AzurePreviewService(preflight=FakePreflight()).preview_environment(
+        profile=profile, configurable_inputs=inputs
+    )
+    assert result.checks[0].vmSize == expected
+
+
+@pytest.mark.parametrize("size", ["", " ", 16, False])
+def test_invalid_override_does_not_fall_back_to_another_sku(size) -> None:
+    from src.providers.azure.preview import resolve_vm_size
+
+    profile = CloudDeploymentProfile(vmSku="Standard_NC16as_T4_v3", configurableInputs={})
+    with pytest.raises(ValueError, match="vmSizeOverride"):
+        resolve_vm_size(profile, {"vmSizeOverride": size})

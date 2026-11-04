@@ -66,7 +66,11 @@ class LocalProviderAdapter(ProviderAdapter):
         ).recommendation
 
     def preview_with_details(
-        self, *, profileId: str, regionOverride: str | None = None
+        self,
+        *,
+        profileId: str,
+        regionOverride: str | None = None,
+        configurableInputs: Mapping[str, object] | None = None,
     ) -> PreviewEvaluation:
         profile = self._load_profile(profileId)
         region = regionOverride or LOCAL_REGION

@@ -12,6 +12,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from azure.core.exceptions import HttpResponseError, ResourceNotFoundError, ServiceRequestError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from src.api.routes.environments import _generate_admin_ssh_keypair
@@ -408,4 +409,51 @@ def test_state_service_reads_vm_power_state(monkeypatch, tmp_path) -> None:
 
     assert state.lifecycleState == "ready"
     assert state.context["resourceState"] == "running"
+    assert state.context["inferenceState"] == "unverified"
     assert state.providerState["public_ip_address"] == "1.2.3.4"
+
+
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        (ResourceNotFoundError("missing"), "not_found"),
+        (HttpResponseError("forbidden"), "unknown"),
+        (ServiceRequestError("unreachable"), "unknown"),
+    ],
+)
+def test_vm_lookup_failure_does_not_invent_resource_absence(error, expected) -> None:
+    def failed_lookup(*_args):
+        raise error
+
+    service = AzureEnvironmentStateService(
+        session_factory=lambda: None,
+        settings=Settings(azure_subscription_id="test"),
+        compute_client=SimpleNamespace(
+            virtual_machines=SimpleNamespace(instance_view=failed_lookup)
+        ),
+    )
+    assert service._resolve_vm_status({"resourceGroupName": "test", "vmName": "test"}) == expected
+
+
+@pytest.mark.parametrize("power", ["starting", "stopped", "deallocated", "deallocating"])
+def test_gpu_power_state_does_not_claim_model_is_warm(session, power) -> None:
+    environment = session.environments["env-demo"]
+    environment.providerState = {"resourceGroupName": "test", "vmName": "test"}
+    environment.lifecycleState = DemoEnvironmentState.READY
+    environment.activeDeploymentRevisionId = None
+    service = AzureEnvironmentStateService(
+        session_factory=_session_factory(session),
+        settings=Settings(azure_subscription_id="test"),
+        compute_client=SimpleNamespace(
+            virtual_machines=SimpleNamespace(
+                instance_view=lambda *_: SimpleNamespace(
+                    statuses=[SimpleNamespace(code=f"PowerState/{power}")]
+                )
+            )
+        ),
+    )
+    result = service.getEnvironmentState("env-demo")
+    assert result.context["resourceState"] == power
+    assert result.context["inferenceState"] == "unavailable"
+    assert result.context["coldStartRequired"] is True
+    assert result.lifecycleState == "ready"

@@ -26,6 +26,24 @@ availability, model VRAM fit, networking, consent, or authentication. A
 deallocated GPU VM is not a running model; restarting and warming the model are
 separate states. Database readiness is also independent of API process liveness.
 
+Preflight and Terraform resolve the same effective SKU: the profile's `vmSku`,
+optionally overridden by profile defaults and then request `configurableInputs`.
+The preview endpoint accepts the same optional inputs as creation. Invalid
+non-string/empty SKU overrides fail explicitly rather than selecting another VM.
+Preflight reads that requested SKU's `vCPUs` capability. The deployed Spot path
+checks `lowPriorityCores`; Regular checks its SKU-family quota and total regional
+vCPUs. Sufficiency requires `usage + requested vCPUs <= limit`. Missing metadata
+or quota records remain unknown, and an unrelated GPU family is never substituted.
+The API reports physical `capacityStatus=unknown` even when those checks pass:
+only an actual successful allocation establishes capacity.
+
+Environment `lifecycleState` is the persisted workflow state, not a live model
+health check. `context.resourceState` reports VM power transitions and distinguishes
+an actual 404 from an unavailable lookup. `context.inferenceState=unverified` on a
+running VM does not claim that vLLM is warm; stopped/deallocated/starting VMs report
+unavailable inference and `coldStartRequired=true`. No saved revision proves
+current model health. Permission/network failures report unknown, not deleted.
+
 Capability flags describe checked-in routing, not deployment test evidence.
 In particular, `durableEvaluation=false` must remain honest until golden,
 benchmark, LLMPerf and report semantics match the proven backend path and

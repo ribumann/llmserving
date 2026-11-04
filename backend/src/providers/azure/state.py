@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
 
+from azure.core.exceptions import AzureError, ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
 from sqlalchemy.orm import Session, sessionmaker
@@ -16,6 +18,8 @@ from src.domain.environment import DemoEnvironment
 from src.domain.inference_configuration import InferenceConfiguration
 from src.domain.model_configuration import ModelConfiguration
 from src.providers.base import EnvironmentStateView
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AzureEnvironmentStateService:
@@ -66,6 +70,16 @@ class AzureEnvironmentStateService:
                 "profileId": environment.profileId,
                 "region": environment.region,
                 "resourceState": vm_status,
+                "inferenceState": (
+                    "unverified"
+                    if vm_status == "running"
+                    else "unknown" if vm_status == "unknown" else "unavailable"
+                ),
+                "coldStartRequired": (
+                    True
+                    if vm_status in {"starting", "stopped", "deallocated", "deallocating"}
+                    else None
+                ),
                 "resourceGroupName": provider_state.get("resourceGroupName"),
                 "vmName": provider_state.get("vmName"),
                 "vmSize": provider_state.get("vmSize"),
@@ -126,18 +140,25 @@ class AzureEnvironmentStateService:
             instance_view = self.compute_client.virtual_machines.instance_view(
                 resource_group_name, vm_name
             )
-        except Exception:
+        except ResourceNotFoundError:
             return "not_found"
+        except AzureError as error:
+            LOGGER.warning("VM power-state lookup unavailable (%s).", type(error).__name__)
+            return "unknown"
 
         statuses = list(getattr(instance_view, "statuses", []) or [])
         for status in statuses:
             code = str(getattr(status, "code", "")).lower()
-            if code.endswith("/running"):
-                return "running"
-            if code.endswith("/stopped"):
-                return "stopped"
-            if code.endswith("/deallocated"):
-                return "deallocated"
+            prefix, _, state = code.partition("/")
+            if prefix == "powerstate" and state in {
+                "running",
+                "starting",
+                "stopping",
+                "stopped",
+                "deallocated",
+                "deallocating",
+            }:
+                return state
         return "unknown"
 
     def _resolve_outputs(self, provider_state: dict[str, Any]) -> dict[str, Any]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from src.domain.profile import CloudDeploymentProfile
@@ -28,17 +29,38 @@ class PreviewEvaluation:
     checks: list[CapacityPreflightResult]
 
 
+class InvalidVmSizeError(ValueError):
+    pass
+
+
+def resolve_vm_size(
+    profile: CloudDeploymentProfile, inputs: Mapping[str, object] | None = None
+) -> str:
+    merged = dict(profile.configurableInputs or {})
+    merged.update(inputs or {})
+    size = merged.get("vmSizeOverride")
+    if size is None:
+        return profile.vmSku
+    if not isinstance(size, str) or not size.strip():
+        raise InvalidVmSizeError("vmSizeOverride must be a non-empty VM SKU string.")
+    return size
+
+
 class AzurePreviewService:
     def __init__(self, *, preflight: AzureCapacityPreflight) -> None:
         self._preflight = preflight
 
     def preview_environment(
-        self, *, profile: CloudDeploymentProfile, region_override: str | None = None
+        self,
+        *,
+        profile: CloudDeploymentProfile,
+        region_override: str | None = None,
+        configurable_inputs: Mapping[str, object] | None = None,
     ) -> PreviewEvaluation:
         regions = self._ordered_regions(profile.eligibleRegions, region_override)
+        vm_size = resolve_vm_size(profile, configurable_inputs)
         checks = [
-            self._preflight.evaluate_region(region=region, vm_size=profile.vmSku)
-            for region in regions
+            self._preflight.evaluate_region(region=region, vm_size=vm_size) for region in regions
         ]
 
         if region_override is not None:
