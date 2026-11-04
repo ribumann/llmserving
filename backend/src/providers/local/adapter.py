@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from src.config import Settings
 from src.domain.deployment_revision import DeploymentRevision
@@ -187,21 +188,36 @@ class LocalProviderAdapter(ProviderAdapter):
                 DemoEnvironmentState.PROVISIONING,
                 DemoEnvironmentState.PROVISIONING_FAILED,
             }:
-                environment.lifecycleState = DemoEnvironmentState.READY
-                environment.activeOperationId = None
-                provider_state = self._provider_state(
-                    base_state=provider_state,
-                    phase="completed",
-                    state=DemoEnvironmentState.READY.value,
-                    operation_id=str(
-                        dict(provider_state.get("currentOperation") or {}).get("operationId")
-                        or f"prov-{environmentId}"
-                    ),
-                    diagnostics=[],
-                )
-                environment.providerState = provider_state
-                session.add(environment)
-                session.commit()
+                environment = session.execute(
+                    select(DemoEnvironment)
+                    .where(DemoEnvironment.environmentId == environmentId)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                ).scalar_one_or_none()
+                if environment is None:
+                    raise LookupError(f"Environment '{environmentId}' was not found.")
+                if (
+                    environment.lifecycleState
+                    in {
+                        DemoEnvironmentState.PROVISIONING,
+                        DemoEnvironmentState.PROVISIONING_FAILED,
+                    }
+                    and environment.activeOperationId is None
+                ):
+                    provider_state = dict(environment.providerState or {})
+                    environment.lifecycleState = DemoEnvironmentState.READY
+                    environment.providerState = self._provider_state(
+                        base_state=provider_state,
+                        phase="completed",
+                        state=DemoEnvironmentState.READY.value,
+                        operation_id=str(
+                            dict(provider_state.get("currentOperation") or {}).get("operationId")
+                            or f"prov-{environmentId}"
+                        ),
+                        diagnostics=[],
+                    )
+                    session.add(environment)
+                    session.commit()
             elif runtime_message is not None:
                 diagnostics = [runtime_message]
 
