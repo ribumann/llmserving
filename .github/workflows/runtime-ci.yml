@@ -1,0 +1,160 @@
+name: Runtime CI
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install every job's real dependencies (separate from backend SDK versions)
+        run: |
+          python -m pip install pytest pytest-asyncio \
+            -r jobs/common/requirements.txt \
+            -r jobs/terraform_runner/requirements.txt \
+            -r jobs/model_deployment/requirements.txt \
+            -r jobs/evaluation_worker/requirements.txt \
+            -r jobs/performance_worker/requirements.txt \
+            -r jobs/export_worker/requirements.txt
+      - name: All worker and shared job tests
+        working-directory: jobs
+        run: python -m pytest -q tests
+
+  functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Functions runtime and test dependencies
+        run: python -m pip install pytest pytest-asyncio -r functions/requirements.txt
+      - name: All Functions tests
+        working-directory: functions
+        run: python -m pytest -q tests
+      - name: Build deployment package including runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="$RUNNER_TEMP/functions-package"
+          mkdir -p "$package"
+          cp -R functions/function_app.py functions/host.json functions/requirements.txt \
+            functions/activities functions/orchestrators functions/orchestration_lib "$package/"
+          python -m pip install --target "$package/.python_packages/lib/site-packages" \
+            -r functions/requirements.txt
+          cd "$package"
+          python -m zipfile -c "$RUNNER_TEMP/functions.zip" .
+      - name: Import and enumerate functions from extracted deployment package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m zipfile -e "$RUNNER_TEMP/functions.zip" "$RUNNER_TEMP/functions-smoke"
+          cd "$RUNNER_TEMP/functions-smoke"
+          PYTHONPATH="$PWD/.python_packages/lib/site-packages" python - <<'PY'
+          import function_app
+          registered = function_app.app.get_functions()
+          assert len(registered) >= 8, f"Missing function registrations: {len(registered)}"
+          print(f"Packaged Functions import/registration smoke passed ({len(registered)} functions).")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: functions-${{ github.sha }}
+          path: ${{ runner.temp }}/functions.zip
+          retention-days: 7
+
+  mocked-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm ci
+        working-directory: e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - name: Existing API-mocked browser suite (not full-stack)
+        run: npm test
+        working-directory: e2e
+
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [backend, frontend, terraform_runner, model_deployment, evaluation_worker, performance_worker, export_worker]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build real image without registry credentials or push
+        env:
+          IMAGE: ${{ matrix.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$IMAGE" in
+            backend|frontend) dockerfile="$IMAGE/Dockerfile" ;;
+            *) dockerfile="jobs/$IMAGE/Dockerfile" ;;
+          esac
+          docker build --file "$dockerfile" --tag "llmserving-ci:$IMAGE" .
+      - name: Smoke real image runtime imports or HTTP
+        env:
+          IMAGE: ${{ matrix.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$IMAGE" in
+            backend)
+              docker run --rm --network none --entrypoint python "llmserving-ci:$IMAGE" -c \
+                'import json, pathlib; from importlib.metadata import distribution; from src.api.app import app; import llmperf; d=json.loads(distribution("llmperf").read_text("direct_url.json")); assert d["vcs_info"]["commit_id"]=="f1d6bed47e4501b0e371082b41601b59ab55269f"; assert pathlib.Path(llmperf.__file__).with_name("token_benchmark_ray.py").is_file(); print("API and pinned genuine LLMPerf import smoke passed")'
+              ;;
+            frontend)
+              trap 'docker rm --force llmserving-ci-frontend >/dev/null' EXIT
+              docker run --detach --name llmserving-ci-frontend --network none "llmserving-ci:$IMAGE"
+              for attempt in $(seq 1 30); do
+                if docker exec llmserving-ci-frontend wget -qO- http://127.0.0.1/ >/dev/null; then
+                  echo "Frontend container HTTP smoke passed"
+                  exit 0
+                fi
+                echo "Waiting for frontend HTTP (attempt $attempt/30)"
+                sleep 1
+              done
+              echo "::error::Frontend image did not serve HTTP."
+              exit 1
+              ;;
+            *)
+              docker run --rm --network none --entrypoint python "llmserving-ci:$IMAGE" -c \
+                'import entrypoint; assert callable(entrypoint.run); print("Worker runtime import smoke passed")'
+              if [ "$IMAGE" = terraform_runner ]; then
+                docker run --rm --network none --entrypoint terraform "llmserving-ci:$IMAGE" version
+                docker run --rm --network none --entrypoint az "llmserving-ci:$IMAGE" version
+              fi
+              ;;
+          esac
