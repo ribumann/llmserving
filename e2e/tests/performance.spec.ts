@@ -3,6 +3,7 @@ import { environmentResponse, fulfillJson, fulfillRunCatalog } from './support/f
 
 test('quickstart scenario 4 performance run and partial report flow', async ({ page }) => {
   let runPollCount = 0;
+  let completeRun = false;
 
   await page.route('http://localhost:8000/**', async (route) => {
     if (await fulfillRunCatalog(route)) return;
@@ -43,7 +44,7 @@ test('quickstart scenario 4 performance run and partial report flow', async ({ p
 
     if (pathname === '/environments/env-456/runs/run-perf-123' && request.method() === 'GET') {
       runPollCount += 1;
-      const completed = runPollCount > 1;
+      const completed = completeRun;
 
       await route.fulfill({
         status: 200,
@@ -152,6 +153,7 @@ test('quickstart scenario 4 performance run and partial report flow', async ({ p
   await page.getByRole('button', { name: /start run/i }).click();
 
   await expect(page.getByText('0 / 1 cases complete')).toBeVisible();
+  completeRun = true;
   await expect(page.getByText('1 / 1 cases complete')).toBeVisible();
   await expect(page.getByText(/monitoring data incomplete/i)).toBeVisible();
 
