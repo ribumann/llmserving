@@ -1,0 +1,70 @@
+name: Azure OIDC canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      outcome:
+        description: Deliberate failure, or wait for an external cancellation
+        required: true
+        type: choice
+        options: [failure, cancellation]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-oidc-canary-resource
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    if: github.ref == 'refs/heads/main' && github.repository == 'ribumann/llmserving'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: azure-e2e
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_CANARY_RESOURCE_GROUP: ${{ vars.AZURE_CANARY_RESOURCE_GROUP }}
+      AZURE_CANARY_REGION: ${{ vars.AZURE_CANARY_REGION }}
+      AZURE_CORE_OUTPUT: none
+    steps:
+      - name: Validate and mask protected configuration
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          for key in ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID",
+                      "AZURE_CANARY_RESOURCE_GROUP", "AZURE_CANARY_REGION"):
+              value = os.environ.get(key)
+              if not value:
+                  raise SystemExit(f"Missing protected configuration: {key}")
+              print(f"::add-mask::{value}")
+          PY
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Azure OIDC login
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Create and verify fixed owned canary
+        run: python scripts/azure_canary.py create
+      - name: Deliberately fail for independent cleanup verification
+        if: inputs.outcome == 'failure'
+        run: |
+          echo "::error::Intentional failure after canary creation; independent cleanup must run."
+          exit 1
+      - name: Wait for external cancellation
+        if: inputs.outcome == 'cancellation'
+        run: |
+          echo "Canary verified. Cancel this workflow externally to test independent cleanup."
+          sleep 900
+          echo "::error::External cancellation was not observed within the bounded window."
+          exit 1

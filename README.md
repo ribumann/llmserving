@@ -18,6 +18,7 @@ Several later-stage UI areas are still scaffolded rather than fully productized 
 - [`infra/README.md`](infra/README.md) - Terraform module split, bring-up order, and control-plane vs. demo-environment isolation
 - [`specs/001-llm-serving-demo/`](specs/001-llm-serving-demo/) - spec-kit artifacts (`spec.md`, `plan.md`, `research.md`, `tasks.md`) that describe the feature intent and planned architecture
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) - deeper architecture reference with multiple views and runtime diagrams
+- [`docs/AZURE_CANARY.md`](docs/AZURE_CANARY.md) - protected OIDC and independent failure/cancellation cleanup gate; not application or billable-resource cleanup validation
 
 ## Prerequisites
 
