@@ -162,6 +162,12 @@ def test_real_local_api_flow() -> None:
             )
             revision = deployment["deploymentRevisionId"]
             _wait(client, f"{base}/deployments/{revision}", "lifecycleState", "ready")
+            deployed_models = (
+                httpx.get(f"{ollama_url}/api/tags", timeout=10).raise_for_status().json()["models"]
+            )
+            assert next(
+                item["digest"] for item in deployed_models if item["name"] == model_tag
+            ) == (expected_digest)
             prompt = post(
                 f"{base}/prompts",
                 {
