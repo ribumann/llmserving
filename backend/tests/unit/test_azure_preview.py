@@ -69,6 +69,9 @@ def test_preview_picks_first_available_fallback_region() -> None:
     "defaults,inputs,expected",
     [
         ({}, {}, "Standard_NC16as_T4_v3"),
+        ({}, {"profileSizeClass": "medium"}, "Standard_NC24ads_A100_v4"),
+        ({"profileSizeClass": "large"}, {}, "Standard_NC80adis_H100_v5"),
+        ({"profileSizeClass": "large"}, {"profileSizeClass": "small"}, "Standard_NC16as_T4_v3"),
         ({"vmSizeOverride": "Standard_NC24ads_A100_v4"}, {}, "Standard_NC24ads_A100_v4"),
         (
             {"vmSizeOverride": "Standard_NC24ads_A100_v4"},
@@ -107,3 +110,22 @@ def test_invalid_override_does_not_fall_back_to_another_sku(size) -> None:
     profile = CloudDeploymentProfile(vmSku="Standard_NC16as_T4_v3", configurableInputs={})
     with pytest.raises(ValueError, match="vmSizeOverride"):
         resolve_vm_size(profile, {"vmSizeOverride": size})
+
+
+def test_size_class_mapping_matches_existing_terraform() -> None:
+    from pathlib import Path
+
+    from src.providers.azure.preview import VM_SIZE_BY_CLASS
+
+    terraform = (Path(__file__).resolve().parents[3] / "infra/demo/main.tf").read_text()
+    for size_class, sku in VM_SIZE_BY_CLASS.items():
+        assert f'{size_class}  = "{sku}"' in terraform or f'{size_class} = "{sku}"' in terraform
+
+
+@pytest.mark.parametrize("size_class", ["unknown", None, [], 16])
+def test_invalid_size_class_is_explicit(size_class) -> None:
+    from src.providers.azure.preview import InvalidVmSizeError, resolve_vm_size
+
+    profile = CloudDeploymentProfile(configurableInputs={})
+    with pytest.raises(InvalidVmSizeError, match="profileSizeClass"):
+        resolve_vm_size(profile, {"profileSizeClass": size_class})

@@ -88,8 +88,17 @@ class FakeSession:
         self.committed = True
 
 
-@pytest.mark.parametrize("overrides", [{}, {"vmSizeOverride": "Standard_NC24ads_A100_v4"}])
-def test_create_environment_returns_accepted_and_binds_context(monkeypatch, overrides) -> None:
+@pytest.mark.parametrize(
+    "overrides,expected_sku",
+    [
+        ({}, "Standard_NC16as_T4_v3"),
+        ({"vmSizeOverride": "Standard_NC24ads_A100_v4"}, "Standard_NC24ads_A100_v4"),
+        ({"profileSizeClass": "large"}, "Standard_NC80adis_H100_v5"),
+    ],
+)
+def test_create_environment_returns_accepted_and_binds_context(
+    monkeypatch, overrides, expected_sku
+) -> None:
     app = create_app()
     app.state.provider_adapter = FakeProvider()
     app.state.session_factory = lambda: NoopPersistenceSession()
@@ -142,7 +151,7 @@ def test_create_environment_returns_accepted_and_binds_context(monkeypatch, over
     terraform_variables = app.state.provider_adapter.bound_contexts[0]["terraform_variables"]
     assert terraform_variables["environment_id"]
     assert terraform_variables["admin_ssh_public_key"].startswith("ssh-rsa ")
-    assert terraform_variables["vm_size"] == overrides.get("vmSizeOverride", profile.vmSku)
+    assert terraform_variables["vm_size"] == expected_sku
     assert app.state.provider_adapter.preview_inputs == (overrides or None)
 
 

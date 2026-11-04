@@ -26,8 +26,9 @@ availability, model VRAM fit, networking, consent, or authentication. A
 deallocated GPU VM is not a running model; restarting and warming the model are
 separate states. Database readiness is also independent of API process liveness.
 
-Preflight and Terraform resolve the same effective SKU: the profile's `vmSku`,
-optionally overridden by profile defaults and then request `configurableInputs`.
+Preflight and Terraform resolve the same effective SKU using the existing
+`profileSizeClass` mapping (small/medium/large) unless `vmSizeOverride` is set.
+Profile defaults are merged with request `configurableInputs` in both paths.
 The preview endpoint accepts the same optional inputs as creation. Invalid
 non-string/empty SKU overrides fail explicitly rather than selecting another VM.
 Preflight reads that requested SKU's `vCPUs` capability. The deployed Spot path

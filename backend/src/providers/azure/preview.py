@@ -22,6 +22,13 @@ DEFAULT_UNCERTAINTY_NOTE = (
     "with AllocationFailed, try an alternate region or SKU."
 )
 
+# Keep aligned with infra/demo/main.tf's existing default_vm_size_by_class.
+VM_SIZE_BY_CLASS = {
+    "small": "Standard_NC16as_T4_v3",
+    "medium": "Standard_NC24ads_A100_v4",
+    "large": "Standard_NC80adis_H100_v5",
+}
+
 
 @dataclass(slots=True, frozen=True)
 class PreviewEvaluation:
@@ -38,9 +45,12 @@ def resolve_vm_size(
 ) -> str:
     merged = dict(profile.configurableInputs or {})
     merged.update(inputs or {})
+    size_class = merged.get("profileSizeClass", "small")
+    if not isinstance(size_class, str) or size_class not in VM_SIZE_BY_CLASS:
+        raise InvalidVmSizeError("profileSizeClass must be small, medium or large.")
     size = merged.get("vmSizeOverride")
     if size is None:
-        return profile.vmSku
+        return VM_SIZE_BY_CLASS[size_class]
     if not isinstance(size, str) or not size.strip():
         raise InvalidVmSizeError("vmSizeOverride must be a non-empty VM SKU string.")
     return size
