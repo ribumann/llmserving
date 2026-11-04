@@ -175,12 +175,32 @@ variable "enable_sso" {
     Whether to provision the Entra ID app registration/service principal and wire Container
     Apps' built-in (Easy Auth) sign-in. Requires the identity running Terraform to hold the
     Application Administrator (or equivalent Microsoft Graph Application.ReadWrite.All)
-    directory role. Set to false to deploy the rest of the stack when that role isn't
-    available (e.g. in a restricted sandbox tenant) — the apps come up without SSO enforced
-    until an admin grants the role and this is re-applied with the default true.
+    directory role, unless existing_sso_client_id and existing_sso_secret_id are supplied
+    by an authorized external bootstrap. Disabling Easy Auth does not disable backend
+    JWT authentication; an unconfigured operator audience fails closed.
   EOT
   type        = bool
   default     = true
+}
+
+variable "existing_sso_client_id" {
+  description = "Optional externally bootstrapped Entra application client ID. Avoids Graph application/SP/password creation; never use an existing production application's identity."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.existing_sso_client_id == null || can(regex("^[0-9a-fA-F-]{36}$", var.existing_sso_client_id))
+    error_message = "existing_sso_client_id must be an application client UUID."
+  }
+}
+
+variable "existing_sso_secret_id" {
+  description = "Versionless HTTPS Key Vault secret URI for the external application's credential, not its secret value. A tenant-approved operator must write the secret through private connectivity."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.existing_sso_secret_id == null || can(regex("^https://[a-zA-Z0-9-]+\\.vault\\.azure\\.net/secrets/[a-zA-Z0-9-]+/?$", var.existing_sso_secret_id))
+    error_message = "existing_sso_secret_id must be a versionless Azure Key Vault secret URI, never a secret value."
+  }
 }
 
 variable "entra_app_display_name" {

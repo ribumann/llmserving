@@ -105,17 +105,26 @@ one. Container Apps and rollout checks use readiness; Docker's liveness check
 remains `/healthz`. Existing custom `AUTH_BYPASS_PATHS` must include `/readyz`
 before using it as an unauthenticated platform probe.
 
-## Authentication behavior in this foundational phase
+## Explicit local versus cloud authentication
 
-The auth middleware expects an upstream organization SSO layer to inject one of these headers:
+The safe default is `AUTH_MODE=entra-jwt`. Configure `AZURE_TENANT_ID` and
+`AUTH_AUDIENCE`; an unconfigured cloud API returns 503, not a demo identity.
+Operator tokens must have a valid RS256 signature, tenant issuer, audience,
+expiry, issued-at, tenant claim and user identity. Supply a bearer token or the
+real Easy Auth `X-MS-TOKEN-AAD-ID-TOKEN`; unsigned identity-name headers are
+ignored. Internal managed-identity callback authentication remains separate.
 
-- `X-MS-CLIENT-PRINCIPAL-NAME`
-- `X-Forwarded-Email`
-- `X-User-Email`
-- `X-Demo-User`
+For local development only, explicitly use `AUTH_MODE=local-demo` (included in
+`.env.example`). This preserves the existing demo/forwarded identity headers and
+allowed-email-domain checks. Production or Azure Container Apps/App Service
+hosting refuses local-demo mode, even if a cloud deployment labels itself
+development. Never set `VITE_DEMO_USER` as cloud authentication.
 
 Requests to `/healthz`, `/readyz`, `/docs`, `/redoc`, and `/openapi.json` are exempt so local bootstrapping
 works before a real identity layer is wired in.
+
+See [the authentication bootstrap guide](../docs/AUTHENTICATION.md) for external
+SSO prerequisites when the deployment identity cannot create Graph applications.
 
 ## Validation commands
 
