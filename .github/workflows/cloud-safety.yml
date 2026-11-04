@@ -1,0 +1,25 @@
+name: Cloud safety CI
+
+on:
+  pull_request:
+    paths: ["scripts/azure_canary.py", "scripts/tests/**", ".github/workflows/**", "docs/AZURE_CANARY.md"]
+  push:
+    branches: [main]
+    paths: ["scripts/azure_canary.py", "scripts/tests/**", ".github/workflows/**", "docs/AZURE_CANARY.md"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  canary-guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Unit-test scope and cleanup guards without Azure credentials
+        run: python -m unittest discover -s scripts/tests -v
+      - name: Validate workflow syntax without Azure credentials
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
