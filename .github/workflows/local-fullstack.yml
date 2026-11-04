@@ -1,11 +1,7 @@
 name: Real local API
 
 on:
-  pull_request:
-    paths: ["backend/**", ".github/workflows/local-fullstack.yml"]
-  push:
-    branches: [main]
-    paths: ["backend/**", ".github/workflows/local-fullstack.yml"]
+  workflow_call: {}
   workflow_dispatch: {}
 
 permissions:
