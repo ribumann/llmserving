@@ -52,6 +52,14 @@ class OllamaEngineAdapter(InferenceEngineAdapter):
         locator = deployment_locator
         if locator is None and session_factory is not None:
             locator = build_locator_from_session_factory(session_factory)
+        if locator is not None:
+            source_locator = locator
+
+            # Ollama serves local tags, not the catalog's Hugging Face repository IDs.
+            def local_locator(revision_id: str) -> Mapping[str, Any]:
+                return {**source_locator(revision_id), "huggingFaceRepoId": None}
+
+            locator = local_locator
         self._prompt_client = VllmPromptClient(
             http_client=self._http_client,
             deployment_locator=locator,
@@ -147,11 +155,10 @@ class OllamaEngineAdapter(InferenceEngineAdapter):
         parameters: Mapping[str, Any] | None = None,
     ):
         ollama_options = dict(parameters or {})
-        if "max_tokens" in ollama_options and "num_predict" not in ollama_options:
-            ollama_options["num_predict"] = ollama_options.pop("max_tokens")
-        return self._prompt_client.submitPrompt(
-            deploymentRevisionId, prompt, {"options": ollama_options}
-        )
+        num_predict = ollama_options.pop("num_predict", None)
+        if num_predict is not None:
+            ollama_options.setdefault("max_tokens", num_predict)
+        return self._prompt_client.submitPrompt(deploymentRevisionId, prompt, ollama_options)
 
     def runPerformanceWorkload(
         self,
@@ -173,8 +180,17 @@ class OllamaEngineAdapter(InferenceEngineAdapter):
             dict(workload.get("inputProfile") or {}).get("prompt")
             or "Explain why low-latency inference matters for interactive applications."
         )
-        generation = {"options": {"num_predict": int(workload.get("outputTokens") or 64)}}
+        generation = {
+            "max_tokens": int(
+                workload.get("outputTokens")
+                or dict(workload.get("inputProfile") or {}).get("meanOutputTokens")
+                or 64
+            )
+        }
 
+        warmup_requests = int(dict(workload.get("warmup") or {}).get("requestCount") or 0)
+        for _ in range(warmup_requests):
+            self._issue_completion(model_id=model_id, prompt=prompt, options=generation)
         started = perf_counter()
         samples: list[_CompletionSample] = []
         with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="ollama-perf") as pool:
