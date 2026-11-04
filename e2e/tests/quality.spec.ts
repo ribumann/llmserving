@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { environmentResponse, fulfillJson } from './support/fixtures';
+import { environmentResponse, fulfillJson, fulfillRunCatalog } from './support/fixtures';
 
 test('quickstart scenario 3 quality run and report flow', async ({ page }) => {
   let runPollCount = 0;
 
   await page.route('http://localhost:8000/**', async (route) => {
+    if (await fulfillRunCatalog(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const { pathname } = url;
@@ -133,7 +134,7 @@ test('quickstart scenario 3 quality run and report flow', async ({ page }) => {
   await page.goto('/quality/run?environmentId=env-123');
 
   await page.getByRole('button', { name: /load environment/i }).click();
-  await page.getByRole('textbox', { name: /golden dataset id/i }).fill('golden-demo-v1');
+  await page.getByRole('combobox', { name: /^golden dataset$/i }).fill('golden-demo-v1');
   await page.getByRole('button', { name: /start run/i }).click();
 
   await expect(page.getByText('2 / 5 cases complete')).toBeVisible();
