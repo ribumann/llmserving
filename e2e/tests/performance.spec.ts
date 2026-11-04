@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { environmentResponse, fulfillJson } from './support/fixtures';
+import { environmentResponse, fulfillJson, fulfillRunCatalog } from './support/fixtures';
 
 test('quickstart scenario 4 performance run and partial report flow', async ({ page }) => {
   let runPollCount = 0;
+  let completeRun = false;
 
   await page.route('http://localhost:8000/**', async (route) => {
+    if (await fulfillRunCatalog(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const { pathname } = url;
@@ -42,7 +44,7 @@ test('quickstart scenario 4 performance run and partial report flow', async ({ p
 
     if (pathname === '/environments/env-456/runs/run-perf-123' && request.method() === 'GET') {
       runPollCount += 1;
-      const completed = runPollCount > 1;
+      const completed = completeRun;
 
       await route.fulfill({
         status: 200,
@@ -147,10 +149,11 @@ test('quickstart scenario 4 performance run and partial report flow', async ({ p
   await page.goto('/performance/run?environmentId=env-456');
 
   await page.getByRole('button', { name: /load environment/i }).click();
-  await page.getByRole('textbox', { name: /performance workload id/i }).fill('workload-demo-v1');
+  await page.getByRole('combobox', { name: /^performance workload$/i }).fill('workload-demo-v1');
   await page.getByRole('button', { name: /start run/i }).click();
 
   await expect(page.getByText('0 / 1 cases complete')).toBeVisible();
+  completeRun = true;
   await expect(page.getByText('1 / 1 cases complete')).toBeVisible();
   await expect(page.getByText(/monitoring data incomplete/i)).toBeVisible();
 
@@ -171,6 +174,7 @@ test('quickstart scenario 4 performance run cancellation updates run state', asy
   let cancelCount = 0;
 
   await page.route('http://localhost:8000/**', async (route) => {
+    if (await fulfillRunCatalog(route)) return;
     const request = route.request();
     const url = new URL(request.url());
     const { pathname } = url;
@@ -276,7 +280,7 @@ test('quickstart scenario 4 performance run cancellation updates run state', asy
   await page.goto('/performance/run?environmentId=env-cancel');
 
   await page.getByRole('button', { name: /load environment/i }).click();
-  await page.getByRole('textbox', { name: /performance workload id/i }).fill('workload-demo-v1');
+  await page.getByRole('combobox', { name: /^performance workload$/i }).fill('workload-demo-v1');
   await page.getByRole('button', { name: /start run/i }).click();
 
   await expect(page.getByRole('button', { name: /cancel run/i })).toBeVisible();

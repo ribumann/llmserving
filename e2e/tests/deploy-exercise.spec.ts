@@ -258,5 +258,7 @@ test('quickstart scenario 2 deploy and exercise flow', async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByText(/210 ms/i)).toBeVisible();
   await expect(page.getByText(/880 ms/i)).toBeVisible();
-  await expect(page.getByText(/active revision:\s*rev-001/i)).toBeVisible();
+  await expect(
+    page.locator('dt').filter({ hasText: /^Active revision$/ }).locator('..').locator('dd'),
+  ).toHaveText('rev-001');
 });

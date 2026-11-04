@@ -146,3 +146,29 @@ export async function fulfillJson(route: Route, status: number, body: unknown) {
     body: JSON.stringify(body),
   });
 }
+
+export async function fulfillRunCatalog(route: Route): Promise<boolean> {
+  if (route.request().method() !== 'GET') return false;
+  const { pathname } = new URL(route.request().url());
+  const responses: Record<string, Record<string, unknown>> = {
+    '/golden-datasets': {
+      goldenDatasets: [{
+        goldenDatasetId: 'golden-demo-v1', name: 'Demo golden', version: 1,
+        provenance: 'curated', reviewStatus: 'reviewed', caseCount: 5,
+      }],
+    },
+    '/benchmark-definitions': {
+      benchmarkDefinitions: [{ benchmarkId: 'gsm8k', version: 'test-v1' }],
+    },
+    '/performance-workloads': {
+      performanceWorkloads: [{ workloadId: 'workload-demo-v1', version: 1, concurrency: 8 }],
+    },
+  };
+  if (/^\/environments\/[^/]+\/runs$/.test(pathname)) {
+    await fulfillJson(route, 200, { requestId: 'req-history', runs: [] });
+    return true;
+  }
+  if (!(pathname in responses)) return false;
+  await fulfillJson(route, 200, { requestId: 'req-run-catalog', ...responses[pathname] });
+  return true;
+}

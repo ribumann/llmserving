@@ -71,3 +71,31 @@ python -m unittest discover -s scripts/tests -v
 
 Never transfer local cached Azure/GitHub credentials to a cloud runner. Record
 denied consent or policy as a blocker rather than disabling authentication.
+
+## Recorded exercise: 2026-11-04 UTC
+
+Reviewed main commit: `f52fcacffd8734de84cd4443744862982e8f9a71`
+([canary implementation PR](https://github.com/ribumann/llmserving/pull/2)).
+
+| Exercise | Canary outcome | Independent cleanup |
+| --- | --- | --- |
+| Deliberate failure after verified creation | [Failed as intended](https://github.com/ribumann/llmserving/actions/runs/41922899569) | [Succeeded; absence verified](https://github.com/ribumann/llmserving/actions/runs/41922982864) |
+| External cancellation after verified creation | [Cancelled as intended](https://github.com/ribumann/llmserving/actions/runs/41923092659) | [Succeeded; absence verified](https://github.com/ribumann/llmserving/actions/runs/41923357529) |
+
+An [initial attempt](https://github.com/ribumann/llmserving/actions/runs/41922340020)
+failed OIDC before creation because the actual GitHub subject used immutable
+owner/repository IDs rather than the configured name-only subject. The operator
+corrected only the isolated login identity's exact federated subject; issuer,
+audience and resource scopes were not broadened. Trust the observed environment
+subject, not an assumed historical formatting template.
+
+Both successful cleanup runs verified the fixed identity absent and preserved
+the resource group. Only non-compute managed identities were created; estimated
+incremental Azure compute/storage exposure for these exercises was $0. This is
+not a billing reconciliation or a billable-resource cleanup test.
+
+GitHub environment execution required no local approval. Target-tenant Graph
+SSO bootstrap remains separately blocked by device Conditional Access; no app,
+service principal or SSO secret was created and no policy bypass was attempted.
+These results therefore do **not** certify unattended authenticated application
+deployment.
