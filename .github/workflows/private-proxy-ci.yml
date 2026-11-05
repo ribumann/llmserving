@@ -60,6 +60,7 @@ jobs:
             --security-opt no-new-privileges \
             --add-host llmreleasestate0ea5e6.blob.core.windows.net:127.0.0.1 \
             --add-host llmrelease-kv-0ea5e6.vault.azure.net:127.0.0.1 \
+            --add-host llmreleasefunc6ce138.blob.core.windows.net:127.0.0.1 \
             --tmpfs /tmp --tmpfs /run \
             --mount "type=bind,src=$PWD/tools/private_proxy/smoke.py,dst=/opt/smoke.py,readonly" \
             --entrypoint python llmserving-private-proxy:network /opt/smoke.py --network-only
@@ -69,6 +70,7 @@ jobs:
             --security-opt no-new-privileges \
             --add-host llmreleasestate0ea5e6.blob.core.windows.net:127.0.0.1 \
             --add-host llmrelease-kv-0ea5e6.vault.azure.net:127.0.0.1 \
+            --add-host llmreleasefunc6ce138.blob.core.windows.net:127.0.0.1 \
             --tmpfs /tmp --tmpfs /run --tmpfs /var/log/squid \
             --mount "type=bind,src=$RUNNER_TEMP/vault-client,dst=/opt/vault-client,readonly" \
             --entrypoint python llmserving-private-proxy:ci /opt/llmserving/proxy-smoke.py

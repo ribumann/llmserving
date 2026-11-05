@@ -16,6 +16,7 @@ from unittest import TestCase
 
 HOST = "llmreleasestate0ea5e6.blob.core.windows.net"
 VAULT = "llmrelease-kv-0ea5e6.vault.azure.net"
+FUNCTIONS = "llmreleasefunc6ce138.blob.core.windows.net"
 
 
 def request(authority: str, method: str = "CONNECT") -> int:
@@ -37,6 +38,10 @@ def main() -> None:
     checks.assertIn("dns_nameservers 10.20.31.4", configuration)
     checks.assertNotIn("ssl_bump", configuration)
     checks.assertNotIn("cert=", configuration)
+    checks.assertEqual(
+        Path("/etc/llmserving/hosts.txt").read_text().splitlines(),
+        [HOST, VAULT, FUNCTIONS],
+    )
     subprocess.run(
         ["squid", "-k", "parse", "-f", "/etc/llmserving/squid.conf"], check=True
     )
@@ -61,7 +66,7 @@ def main() -> None:
                 "-subj",
                 f"/CN={HOST}",
                 "-addext",
-                f"subjectAltName=DNS:{HOST},DNS:{VAULT}",
+                f"subjectAltName=DNS:{HOST},DNS:{VAULT},DNS:{FUNCTIONS}",
             ],
             check=True,
             stdout=subprocess.DEVNULL,
@@ -70,6 +75,7 @@ def main() -> None:
         # CI supplies fixture-only container hosts entries, never production DNS.
         checks.assertEqual(socket.gethostbyname(HOST), "127.0.0.1")
         checks.assertEqual(socket.gethostbyname(VAULT), "127.0.0.1")
+        checks.assertEqual(socket.gethostbyname(FUNCTIONS), "127.0.0.1")
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(cert, key)
         seen: set[str] = set()
@@ -117,7 +123,7 @@ def main() -> None:
                         }
                     ).encode()
                     status, content_type = 200, "application/json"
-                elif host == HOST and self.path == "/tls-fixture":
+                elif host in {HOST, FUNCTIONS} and self.path == "/tls-fixture":
                     body = b"tls-end-to-end"
                     status, content_type = 200, "text/plain"
                 else:
@@ -155,6 +161,9 @@ def main() -> None:
                     ("example.com:443", "CONNECT"),
                     (f"{HOST}.evil.example:443", "CONNECT"),
                     (f"sub.{HOST}:443", "CONNECT"),
+                    (f"{FUNCTIONS}.evil.example:443", "CONNECT"),
+                    (f"sub.{FUNCTIONS}:443", "CONNECT"),
+                    ("llmreleasefunc6ce139.blob.core.windows.net:443", "CONNECT"),
                     ("127.0.0.1:443", "CONNECT"),
                     (f"{HOST}:80", "CONNECT"),
                     (f"http://{HOST}/", "GET"),
@@ -163,28 +172,29 @@ def main() -> None:
                         request(authority, method), 403, (authority, method)
                     )
                 client = ssl.create_default_context(cafile=str(cert))
-                with socket.create_connection(("127.0.0.1", 3128), timeout=3) as sock:
-                    sock.sendall(
-                        f"CONNECT {HOST}:443 HTTP/1.1\r\nHost: {HOST}:443\r\n\r\n".encode()
-                    )
-                    header = bytearray()
-                    while not header.endswith(b"\r\n\r\n"):
-                        chunk = sock.recv(1)
-                        if not chunk:
-                            raise RuntimeError("Proxy closed before CONNECT response")
-                        header.extend(chunk)
-                    checks.assertIn(b" 200 ", header.split(b"\r\n")[0])
-                    with client.wrap_socket(sock, server_hostname=HOST) as tls:
-                        checks.assertEqual(
-                            ssl.PEM_cert_to_DER_cert(cert.read_text()),
-                            tls.getpeercert(binary_form=True),
+                for host in (HOST, FUNCTIONS):
+                    with socket.create_connection(("127.0.0.1", 3128), timeout=3) as sock:
+                        sock.sendall(
+                            f"CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\n\r\n".encode()
                         )
-                        tls.sendall(
-                            f"GET /tls-fixture HTTP/1.1\r\nHost: {HOST}\r\n\r\n".encode()
-                        )
-                        response = http.client.HTTPResponse(tls)
-                        response.begin()
-                        checks.assertEqual(response.read(), b"tls-end-to-end")
+                        header = bytearray()
+                        while not header.endswith(b"\r\n\r\n"):
+                            chunk = sock.recv(1)
+                            if not chunk:
+                                raise RuntimeError("Proxy closed before CONNECT response")
+                            header.extend(chunk)
+                        checks.assertIn(b" 200 ", header.split(b"\r\n")[0])
+                        with client.wrap_socket(sock, server_hostname=host) as tls:
+                            checks.assertEqual(
+                                ssl.PEM_cert_to_DER_cert(cert.read_text()),
+                                tls.getpeercert(binary_form=True),
+                            )
+                            tls.sendall(
+                                f"GET /tls-fixture HTTP/1.1\r\nHost: {host}\r\n\r\n".encode()
+                            )
+                            response = http.client.HTTPResponse(tls)
+                            response.begin()
+                            checks.assertEqual(response.read(), b"tls-end-to-end")
                 if args.network_only:
                     print("Network-only Squid ACL and unchanged TLS peer passed")
                     return
