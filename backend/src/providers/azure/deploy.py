@@ -11,6 +11,7 @@ module docstring).
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -22,8 +23,16 @@ from src.config import Settings
 from src.domain.deployment_revision import DeploymentRevision
 from src.domain.enums import DeploymentRevisionState, WorkflowStatus, WorkflowType
 from src.domain.environment import DemoEnvironment
-from src.domain.environment_lock import EnvironmentLockService
-from src.domain.orchestration_workflow_service import OrchestrationWorkflowService
+from src.domain.environment_lock import (
+    EnvironmentLockedError,
+    EnvironmentLockService,
+    EnvironmentNotFoundError,
+)
+from src.domain.orchestration_workflow_service import (
+    OrchestrationWorkflowService,
+    WorkflowNotFoundError,
+    WorkflowNotRunningError,
+)
 from src.domain.workflow_reconciliation import DEPLOYMENT_REVISION_ID_KEY
 from src.providers.azure.container_jobs import JobDispatchResult, dispatch_job
 from src.providers.azure.functions_client import OrchestrationFunctionsClient
@@ -220,8 +229,8 @@ class AzureDeployer:
         self, context: DeploymentContext, *, workflow_id: str | None, error: Exception
     ) -> None:
         with self._session_factory() as session:
-            if workflow_id is not None:
-                try:
+            try:
+                if workflow_id is not None:
                     self._workflow_service.complete_workflow(
                         session,
                         workflow_id=workflow_id,
@@ -229,8 +238,27 @@ class AzureDeployer:
                         phase="failed",
                         diagnostics={"error": str(error)},
                     )
-                except Exception:
-                    pass  # workflow may already be terminal (e.g. a racing callback)
+                else:
+                    EnvironmentLockService().release(
+                        session,
+                        environment_id=context.environmentId,
+                        operation_id=context.operationId,
+                    )
+            except (
+                EnvironmentLockedError,
+                EnvironmentNotFoundError,
+                WorkflowNotFoundError,
+                WorkflowNotRunningError,
+            ) as exc:
+                logging.getLogger(__name__).warning(
+                    "Rejected dispatch-failure cleanup environment=%s operation=%s "
+                    "workflow=%s reason=%s",
+                    context.environmentId,
+                    context.operationId,
+                    workflow_id,
+                    type(exc).__name__,
+                )
+                return
 
             self._mark_revision(
                 session,
@@ -241,18 +269,6 @@ class AzureDeployer:
                 diagnostics=[str(error)],
             )
 
-            if workflow_id is None:
-                environment = session.get(DemoEnvironment, context.environmentId)
-                if environment is not None:
-                    try:
-                        EnvironmentLockService().release(
-                            session,
-                            environment_id=context.environmentId,
-                            operation_id=context.operationId,
-                            force=True,
-                        )
-                    except Exception:
-                        environment.activeOperationId = None
             session.commit()
 
         if self._telemetry is not None:

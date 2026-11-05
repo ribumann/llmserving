@@ -175,7 +175,7 @@ def test_start_teardown_fails_cleanly_without_persisted_variables(
     )
     environment = session.environments["env-demo"]
     environment.providerState = {}
-    environment.activeOperationId = None
+    environment.activeOperationId = "op-teardown-2"
 
     provisioner._run_teardown("env-demo", "op-teardown-2", "presenter@example.com")
 

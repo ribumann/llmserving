@@ -116,7 +116,13 @@ as the sole writer of domain state while orchestration/execution happen outside 
 - `POST /internal/workflows/{workflowId}/complete` -> reports the terminal result (`ready`/
   `provisioning_failed`/`deployment_failed`/`teardown_failed`/etc. per the relevant entity's state
   machine in data-model.md); FastAPI writes the corresponding domain record(s) and releases the
-  environment lock atomically in the same transaction.
+  environment lock atomically in the same transaction. Completion first checks the
+  current database lock owner under a row lock. If the workflow's operation no longer
+  owns the environment (including an already-cleared lock), it returns
+  `409 environment_locked` without changing the workflow, environment/revision state,
+  or current lock. A late callback must never force-release another operation's lock.
+  Dispatch-failure recovery uses the same ownership gate before changing environment
+  or revision state; a missing/terminal workflow does not authorize fallback cleanup.
 - `POST /internal/workflows/{workflowId}/cancel-ack` -> a Container Apps Job acknowledges an
   idempotent cancellation request propagated from `POST /environments/{environmentId}/runs/{runId}/
   cancel` (FR-054); repeat acknowledgements are no-ops.

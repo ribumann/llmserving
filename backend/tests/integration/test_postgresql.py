@@ -10,9 +10,14 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from src.api.app import create_app
 from src.config import Settings
-from src.domain.enums import DemoEnvironmentState, ProviderType
+from src.domain.enums import DemoEnvironmentState, ProviderType, WorkflowStatus, WorkflowType
 from src.domain.environment import DemoEnvironment
 from src.domain.environment_lock import EnvironmentLockedError, EnvironmentLockService
+from src.domain.orchestration_workflow import OrchestrationWorkflow
+from src.domain.orchestration_workflow_service import (
+    OrchestrationWorkflowService,
+    WorkflowNotRunningError,
+)
 from src.domain.profile import CloudDeploymentProfile
 from src.persistence.db import create_engine_from_settings
 from src.providers.local.adapter import LocalProviderAdapter
@@ -103,6 +108,149 @@ def test_jsonb_roundtrip_and_owner_safe_lock_release(environment) -> None:
         session.commit()
     with session_factory() as session:
         assert locks.current(session, environment_id=environment_id).operation_id is None
+
+
+@pytest.mark.parametrize("operation", ["acquire", "release"])
+def test_lock_ownership_refreshes_cached_environment_without_losing_other_changes(
+    environment, operation
+) -> None:
+    session_factory, environment_id = environment
+    locks = EnvironmentLockService()
+    with session_factory() as session:
+        locks.acquire(session, environment_id=environment_id, operation_id="old-owner")
+        session.commit()
+    with session_factory(autoflush=False) as stale:
+        cached = stale.get(DemoEnvironment, environment_id)
+        assert cached.activeOperationId == "old-owner"
+        cached.lastModifiedBy = "pending-change@example.com"
+        with session_factory() as fresh:
+            locks.release(fresh, environment_id=environment_id, operation_id="old-owner")
+            locks.acquire(fresh, environment_id=environment_id, operation_id="new-owner")
+            fresh.commit()
+        action = getattr(locks, operation)
+        with pytest.raises(EnvironmentLockedError):
+            action(stale, environment_id=environment_id, operation_id="old-owner")
+        assert cached.activeOperationId == "new-owner"
+        assert cached.lastModifiedBy == "pending-change@example.com"
+        stale.commit()
+    with session_factory() as session:
+        saved = session.get(DemoEnvironment, environment_id)
+        assert saved.activeOperationId == "new-owner"
+        assert saved.lastModifiedBy == "pending-change@example.com"
+
+
+@pytest.fixture
+def workflow(environment):
+    session_factory, environment_id = environment
+    with session_factory() as session:
+        workflow = OrchestrationWorkflowService().create_workflow(
+            session,
+            environment_id=environment_id,
+            operation_id="original-operation",
+            workflow_type=WorkflowType.PROVISION,
+        )
+        workflow_id = workflow.workflowId
+        session.commit()
+    try:
+        yield session_factory, environment_id, workflow_id
+    finally:
+        with session_factory() as session:
+            session.execute(
+                delete(OrchestrationWorkflow).where(OrchestrationWorkflow.workflowId == workflow_id)
+            )
+            session.commit()
+
+
+@pytest.mark.parametrize("owner", ["new-operation", None])
+@pytest.mark.parametrize(
+    "status", [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED]
+)
+def test_restarted_workflow_completion_preserves_new_owner_and_original_state(
+    workflow, owner, status
+) -> None:
+    session_factory, environment_id, workflow_id = workflow
+    with session_factory() as session:
+        saved = session.get(DemoEnvironment, environment_id)
+        saved.activeOperationId = owner
+        session.commit()
+    with session_factory() as callback:
+        with pytest.raises(EnvironmentLockedError):
+            OrchestrationWorkflowService().complete_workflow(
+                callback,
+                workflow_id=workflow_id,
+                status=status,
+                phase="late-completion",
+                diagnostics={"late": True},
+            )
+        callback.commit()
+    with session_factory() as session:
+        saved = session.get(OrchestrationWorkflow, workflow_id)
+        assert saved.status == WorkflowStatus.RUNNING
+        assert saved.phase == "accepted"
+        assert saved.diagnostics == {}
+        assert saved.endedAt is None
+        assert session.get(DemoEnvironment, environment_id).activeOperationId == owner
+
+
+@pytest.mark.parametrize(
+    "status", [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED]
+)
+def test_restarted_completion_and_duplicate_preserve_new_lock(workflow, status) -> None:
+    session_factory, environment_id, workflow_id = workflow
+    with session_factory() as callback:
+        OrchestrationWorkflowService().complete_workflow(
+            callback,
+            workflow_id=workflow_id,
+            status=status,
+            phase="finished",
+            diagnostics={"retained": True},
+        )
+        callback.commit()
+    with session_factory() as session:
+        assert session.get(DemoEnvironment, environment_id).activeOperationId is None
+        EnvironmentLockService().acquire(
+            session, environment_id=environment_id, operation_id="new-operation"
+        )
+        session.commit()
+    with session_factory() as duplicate:
+        with pytest.raises(WorkflowNotRunningError):
+            OrchestrationWorkflowService().complete_workflow(
+                duplicate,
+                workflow_id=workflow_id,
+                status=WorkflowStatus.FAILED,
+                phase="late-completion",
+                diagnostics={"late": True},
+            )
+        duplicate.commit()
+    with session_factory() as session:
+        saved = session.get(OrchestrationWorkflow, workflow_id)
+        assert saved.status == status
+        assert saved.phase == "finished"
+        assert saved.diagnostics == {"retained": True}
+        assert saved.endedAt is not None
+        assert session.get(DemoEnvironment, environment_id).activeOperationId == "new-operation"
+
+
+def test_workflow_completion_rollback_retains_lock_and_nonterminal_state(workflow) -> None:
+    session_factory, environment_id, workflow_id = workflow
+    with session_factory() as callback:
+        OrchestrationWorkflowService().complete_workflow(
+            callback,
+            workflow_id=workflow_id,
+            status=WorkflowStatus.COMPLETED,
+            phase="uncommitted",
+            diagnostics={"uncommitted": True},
+        )
+        callback.rollback()
+    with session_factory() as session:
+        saved = session.get(OrchestrationWorkflow, workflow_id)
+        assert saved.status == WorkflowStatus.RUNNING
+        assert saved.phase == "accepted"
+        assert saved.diagnostics == {}
+        assert saved.endedAt is None
+        assert (
+            session.get(DemoEnvironment, environment_id).activeOperationId == "original-operation"
+        )
 
 
 def test_postgres_serializes_concurrent_lock_acquisition(environment) -> None:
