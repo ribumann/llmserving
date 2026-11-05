@@ -11,7 +11,7 @@ import azure_shared_lifecycle as lifecycle
 import validate_operator_access_plan as scope
 from azure_disk_probe import mask_subject
 from azure_release_import import ReleaseImportError, az
-from azure_retained_platform import preserve_storage_topic
+from azure_retained_platform import preserve_external_nsg, preserve_storage_topic
 
 WORKFLOW = ".github/workflows/azure-operator-access-cleanup.yml"
 ORDER = [
@@ -243,7 +243,7 @@ def inventory(selected: dict) -> dict:
                     )
         found[address] = subnet
     for record in generated:
-        if preserve_storage_topic(record):
+        if preserve_storage_topic(record) or preserve_external_nsg(record):
             continue
         identifier = record["id"]
         prefix = f"{scope.ROOT}/providers/Microsoft.Network/networkInterfaces/"

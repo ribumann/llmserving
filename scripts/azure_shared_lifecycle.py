@@ -25,7 +25,7 @@ from azure_release_import import (
     az,
     command,
 )
-from azure_retained_platform import preserve_storage_topic
+from azure_retained_platform import preserve_external_nsg, preserve_storage_topic
 from validate_retained_group_plan import PlanRejected
 
 REPOSITORY = "ribumann/llmserving"
@@ -782,7 +782,7 @@ def inventory(owner: dict | None, *, bridge: bool = False) -> dict[str, dict]:
             records[address] = link
     endpoint = scope.RESOURCES["azurerm_private_endpoint.vault"]["id"]
     for resource in generated:
-        if preserve_storage_topic(resource):
+        if preserve_storage_topic(resource) or preserve_external_nsg(resource):
             continue
         identifier = resource["id"]
         prefix = f"{scope.ROOT}/providers/Microsoft.Network/networkInterfaces/"

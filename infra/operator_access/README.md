@@ -187,3 +187,13 @@ recognition of platform metadata: never GET, adopt or delete the referenced
 platform load balancer or its subscription. The owned inbound endpoint is
 deleted first; if its backlinks remain or ownership cannot be verified,
 cleanup stops rather than cascading into the subnet/platform dependency.
+
+Five subsequently observed external NSGs are recognized preserve-only at exact
+IDs for `snet-private-endpoints`, `snet-functions`, `snet-operator-dns`,
+`snet-data` and `snet-containerapps`. Each GET must confirm the exact shared
+campaign tags, Italy North, successful provisioning, zero custom rules, no NIC
+associations and only its exact same-named owned subnet association. Actual
+activity identified an external creator; a causal policy assignment was **not**
+verified. This is not general trust in policy resources or tag-based ownership.
+These NSGs never enter either cleanup deletion set or Terraform ownership;
+no security rules, policies or external identities are modified.

@@ -1,14 +1,73 @@
-"""Preserve-only recognition of one verified storage antimalware system topic."""
+"""Exact preserve-only recognition of observed external platform resources."""
 
 from __future__ import annotations
 
 from azure_release_import import ReleaseImportError, az
-from validate_shared_plan import REGION, ROOT, equal
+from validate_shared_plan import REGION, ROOT, TAGS, equal
 
 ACCOUNT = f"{ROOT}/providers/Microsoft.Storage/storageAccounts/llmreleasestate0ea5e6"
 NAME = "llmreleasestate0ea5e6-e8ee3cde-435b-41d3-bd0b-ec07e5d98c99"
 TOPIC = f"{ROOT}/providers/Microsoft.EventGrid/systemTopics/{NAME}"
 SUBSCRIPTION = f"{TOPIC}/eventSubscriptions/StorageAntimalwareSubscription"
+EXTERNAL_NSGS = {
+    f"{ROOT}/providers/Microsoft.Network/networkSecurityGroups/"
+    f"llmrelease-shared-vnet-snet-{name}-nsg-italynorth": f"{ROOT}/providers/Microsoft.Network/virtualNetworks/"
+    f"llmrelease-shared-vnet/subnets/snet-{name}"
+    for name in (
+        "private-endpoints",
+        "functions",
+        "operator-dns",
+        "data",
+        "containerapps",
+    )
+}
+
+
+def preserve_external_nsg(record: dict) -> bool:
+    identifier = next(
+        (
+            identifier
+            for identifier in EXTERNAL_NSGS
+            if equal(record.get("id"), identifier)
+        ),
+        None,
+    )
+    if identifier is None:
+        return False
+    metadata = az(
+        "rest",
+        "--method",
+        "GET",
+        "--url",
+        f"https://management.azure.com{identifier}?api-version=2023-09-01",
+    )
+    properties = metadata.get("properties") if isinstance(metadata, dict) else None
+    if (
+        not isinstance(metadata, dict)
+        or not equal(metadata.get("id"), identifier)
+        or metadata.get("name") != identifier.rsplit("/", 1)[1]
+        or not isinstance(metadata.get("type"), str)
+        or metadata["type"].casefold() != "microsoft.network/networksecuritygroups"
+        or metadata.get("location") != REGION
+        or metadata.get("tags") != TAGS
+        or not isinstance(properties, dict)
+        or properties.get("provisioningState") != "Succeeded"
+        or properties.get("securityRules") != []
+        or properties.get("networkInterfaces", []) != []
+    ):
+        raise ReleaseImportError("Exact externally created NSG metadata differs.")
+    subnets = properties.get("subnets")
+    if (
+        not isinstance(subnets, list)
+        or len(subnets) != 1
+        or not isinstance(subnets[0], dict)
+        or not equal(subnets[0].get("id"), EXTERNAL_NSGS[identifier])
+    ):
+        raise ReleaseImportError(
+            "External NSG must bind only its exact observed subnet."
+        )
+    # Recognition is never a Terraform address or permission to mutate the NSG.
+    return True
 
 
 def preserve_storage_topic(record: dict) -> bool:
