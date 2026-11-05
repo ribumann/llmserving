@@ -12,7 +12,11 @@ from src.domain.profile import CloudDeploymentProfile
 from src.engines.vllm.adapter import VllmEngineAdapter
 from src.providers.azure.deploy import AzureDeployer, DeploymentContext
 from src.providers.azure.preflight import AzureCapacityPreflight
-from src.providers.azure.preview import AzurePreviewService, PreviewEvaluation, resolve_vm_size
+from src.providers.azure.preview import (
+    AzurePreviewService,
+    PreviewEvaluation,
+    resolve_vm_size,
+)
 from src.providers.azure.provision import AzureProvisioner, ProvisioningContext
 from src.providers.azure.state import AzureEnvironmentStateService
 from src.providers.base import (
@@ -41,8 +45,12 @@ class AzureProviderAdapter(ProviderAdapter):
         self._session_factory = session_factory
         self._settings = settings
         self._telemetry = telemetry
-        preflight = AzureCapacityPreflight(subscription_id=settings.azure_subscription_id or "")
-        self._preview_service = preview_service or AzurePreviewService(preflight=preflight)
+        preflight = AzureCapacityPreflight(
+            subscription_id=settings.azure_subscription_id or ""
+        )
+        self._preview_service = preview_service or AzurePreviewService(
+            preflight=preflight
+        )
         self._provisioner = provisioner or AzureProvisioner(
             session_factory=session_factory,
             settings=settings,
@@ -120,7 +128,9 @@ class AzureProviderAdapter(ProviderAdapter):
         # this is read straight from the profile's configurable defaults rather
         # than from terraform_variables.
         bootstrap_model_repo = str(
-            dict(profile.configurableInputs or {}).get("bootstrapModelRepo", "Qwen/Qwen3-4B")
+            dict(profile.configurableInputs or {}).get(
+                "bootstrapModelRepo", "Qwen/Qwen3-4B"
+            )
         )
         return ProvisioningContext(
             environmentId=environment_id,
@@ -129,7 +139,9 @@ class AzureProviderAdapter(ProviderAdapter):
             region=region,
             profileId=profile.profileId,
             profileSizeClass=profile.modelSizeClass.value,
-            vmSize=resolve_vm_size(profile, {"vmSizeOverride": terraform_variables.get("vm_size")}),
+            vmSize=resolve_vm_size(
+                profile, {"vmSizeOverride": terraform_variables.get("vm_size")}
+            ),
             bootstrapModelRepo=bootstrap_model_repo,
             terraformVariables=terraform_variables,
             fallbackRegions=list(profile.eligibleRegions),
@@ -138,7 +150,9 @@ class AzureProviderAdapter(ProviderAdapter):
     def previewEnvironment(
         self, profileId: str, regionOverride: str | None = None
     ) -> RegionRecommendation:
-        evaluation = self.preview_with_details(profileId=profileId, regionOverride=regionOverride)
+        evaluation = self.preview_with_details(
+            profileId=profileId, regionOverride=regionOverride
+        )
         return evaluation.recommendation
 
     def preview_with_details(
@@ -170,7 +184,9 @@ class AzureProviderAdapter(ProviderAdapter):
     ) -> DeploymentHandle:
         return self.start_deployment(
             environment_id=environmentId,
-            deployment_revision_id=str(modelConfig.get("deploymentRevisionId") or "pending"),
+            deployment_revision_id=str(
+                modelConfig.get("deploymentRevisionId") or "pending"
+            ),
             operation_id=f"deploy-{environmentId}",
             actor_email="system",
             model_config=dict(modelConfig),
@@ -221,7 +237,9 @@ class AzureProviderAdapter(ProviderAdapter):
 
         resources: list[dict[str, Any]] = []
         resource_group_name = provider_state.get("resourceGroupName")
-        if resource_group_name:
+        variables = (provider_state.get("terraform") or {}).get("variables") or {}
+        retained_group = variables.get("existing_resource_group_name") is not None
+        if resource_group_name and not retained_group:
             resources.append({"type": "resourceGroup", "name": resource_group_name})
         vm_name = provider_state.get("vmName")
         if vm_name:
@@ -232,13 +250,21 @@ class AzureProviderAdapter(ProviderAdapter):
             previewToken=f"teardown-{environmentId}",
             resources=resources,
             consequences=[
-                "Terraform destroy will remove every resource in this environment's "
-                "resource group, including the GPU VM and any deployed model state. "
-                "This action cannot be undone."
+                (
+                    "Terraform destroy removes only this environment's state-owned resources. "
+                    "The retained resource group, other environments and its existing role grants "
+                    "are not deleted. This action cannot be undone."
+                    if retained_group
+                    else "Terraform destroy will remove every resource in this environment's "
+                    "resource group, including the GPU VM and any deployed model state. "
+                    "This action cannot be undone."
+                )
             ],
         )
 
-    def teardownEnvironment(self, environmentId: str, previewToken: str) -> TeardownHandle:
+    def teardownEnvironment(
+        self, environmentId: str, previewToken: str
+    ) -> TeardownHandle:
         _ = previewToken  # not independently validated; mirrors providers/local/adapter.py
         return self._provisioner.start_teardown(
             environment_id=environmentId,

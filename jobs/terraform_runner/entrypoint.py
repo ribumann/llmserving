@@ -149,7 +149,7 @@ def _storage_bearer_headers() -> dict[str, str]:
         ) from exc
 
 
-def _validate_state(content: bytes) -> None:
+def _validate_state(content: bytes) -> dict[str, Any]:
     try:
         payload = json.loads(content)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -165,6 +165,116 @@ def _validate_state(content: bytes) -> None:
         raise TerraformRunError(
             "Terraform state has invalid structure.", stdout="", stderr=""
         )
+    return payload
+
+
+def _validate_group_ownership(
+    working_dir: Path, environment_id: str, variables: dict[str, Any]
+) -> None:
+    existing = variables.get("existing_resource_group_name")
+    if existing is not None and (
+        not isinstance(existing, str)
+        or not re.fullmatch(r"[A-Za-z0-9._()-]{1,90}", existing)
+        or existing.endswith(".")
+    ):
+        raise TerraformRunError(
+            "Invalid retained resource group name.", stdout="", stderr=""
+        )
+    state_file = working_dir / _STATE_FILE_NAME
+    if not state_file.exists():
+        return
+    state = _validate_state(state_file.read_bytes())
+    expected = existing or f"rg-llm-demo-{environment_id}"
+    for resource in state["resources"]:
+        if not isinstance(resource, dict):
+            raise TerraformRunError("Invalid resource state.", stdout="", stderr="")
+        resource_type = resource.get("type")
+        mode = resource.get("mode", "managed")
+        if not isinstance(resource_type, str) or not isinstance(mode, str):
+            raise TerraformRunError(
+                "Invalid resource type or ownership mode.", stdout="", stderr=""
+            )
+        if mode not in {"managed", "data"} or (
+            mode == "managed"
+            and resource_type
+            not in {
+                "azurerm_resource_group",
+                "azurerm_network_interface",
+                "azurerm_linux_virtual_machine",
+                "azurerm_virtual_machine_extension",
+            }
+        ):
+            raise TerraformRunError(
+                "Unexpected managed resource or ownership mode in demo state.",
+                stdout="",
+                stderr="",
+            )
+        if (
+            resource_type
+            in {
+                "azurerm_network_interface",
+                "azurerm_linux_virtual_machine",
+                "azurerm_virtual_machine_extension",
+            }
+            and mode == "managed"
+        ):
+            instances = resource.get("instances")
+            if not isinstance(instances, list):
+                raise TerraformRunError(
+                    "Invalid environment resource state.", stdout="", stderr=""
+                )
+            for instance in instances:
+                attributes = (
+                    instance.get("attributes") if isinstance(instance, dict) else None
+                )
+                tags = attributes.get("tags") if isinstance(attributes, dict) else None
+                if (
+                    not isinstance(tags, dict)
+                    or tags.get("environmentId") != environment_id
+                ):
+                    raise TerraformRunError(
+                        "Terraform resource does not match the environment owner.",
+                        stdout="",
+                        stderr="",
+                    )
+                if resource_type != "azurerm_virtual_machine_extension":
+                    name = attributes.get("resource_group_name")
+                    if not isinstance(name, str) or name.lower() != expected.lower():
+                        raise TerraformRunError(
+                            "Terraform resource group does not match the environment owner.",
+                            stdout="",
+                            stderr="",
+                        )
+        if resource_type != "azurerm_resource_group":
+            continue
+        instances = resource.get("instances")
+        if mode not in {"managed", "data"} or not isinstance(instances, list):
+            raise TerraformRunError(
+                "Invalid resource group state.", stdout="", stderr=""
+            )
+        for instance in instances:
+            attributes = (
+                instance.get("attributes") if isinstance(instance, dict) else None
+            )
+            name = attributes.get("name") if isinstance(attributes, dict) else None
+            if not isinstance(name, str):
+                raise TerraformRunError(
+                    "Invalid resource group state.", stdout="", stderr=""
+                )
+            if (mode == "managed" and existing is not None) or (
+                mode == "data" and existing is None
+            ):
+                raise TerraformRunError(
+                    "Resource group ownership mode cannot change; use fresh environment state.",
+                    stdout="",
+                    stderr="",
+                )
+            if name.lower() != expected.lower():
+                raise TerraformRunError(
+                    "Terraform state resource group does not match the environment owner.",
+                    stdout="",
+                    stderr="",
+                )
 
 
 def _download_state(url: str, destination: Path, *, allow_missing: bool) -> bool:
@@ -541,6 +651,7 @@ def run(
         _download_remote_state(
             working_dir, environment_id, allow_missing=action == "apply"
         )
+        _validate_group_ownership(working_dir, environment_id, terraform_variables)
         _write_tfvars(working_dir, terraform_variables)
 
         init_result = _run_terraform(

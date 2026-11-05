@@ -1,0 +1,78 @@
+mock_provider "azurerm" {
+  mock_data "azurerm_resource_group" {
+    defaults = {
+      name     = "rg-retained"
+      location = "eastus"
+      id       = "/subscriptions/44444444-4444-4444-4444-444444444444/resourceGroups/rg-retained"
+    }
+  }
+}
+
+override_data {
+  target = data.terraform_remote_state.shared
+  values = {
+    outputs = {
+      location      = "polandcentral"
+      gpu_subnet_id = "/subscriptions/44444444-4444-4444-4444-444444444444/resourceGroups/shared/providers/Microsoft.Network/virtualNetworks/shared/subnets/gpu"
+    }
+  }
+}
+
+variables {
+  subscription_id      = "44444444-4444-4444-4444-444444444444"
+  environment_id       = "demo123"
+  admin_ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCrgP4wSJC13w+p6GqIevlv3vtqFJWop44L3cB6qXluVnMaWRw+cg8QB14zziphwTiJG6ZbiFze4Yoa4oKovFDnqtn2jQmhtgwp5K64yn2Ra6hsXSpsmdRwtOlVPcD1g+93Joc8KBFz99NmM1u1iTnBqpc0ZC9kLFmfPWxadFtyrz7sFuxzzX7jpA/y5UbGi6mEYvsJmKHIivHBDKA0Z3XMBFmD0oOwGrUZN55Dz/UdP6FukoYEEDeZh1Y0bInjtq8G9x/qSwZC95njuUOy0IPpAyqY7MxZBEq/I4aUrYhwHLujrz/bt+Q2L29VgCHuWGRzLK6H7KCeRQZ2GElnMVMR test-only-discarded-private-half"
+}
+
+run "managed_default" {
+  command = plan
+  variables {
+    tags = {
+      managedBy = "previously-ignored"
+    }
+  }
+  assert {
+    condition     = length(azurerm_resource_group.demo) == 1 && length(data.azurerm_resource_group.demo) == 0 && azurerm_resource_group.demo[0].name == "rg-llm-demo-demo123"
+    error_message = "The original managed group must remain the default."
+  }
+  assert {
+    condition     = azurerm_network_interface.demo.name == "llm-demo123-nic" && azurerm_linux_virtual_machine.demo.name == "llm-demo123-vm"
+    error_message = "Existing environment resource names must not change."
+  }
+  assert {
+    condition     = azurerm_linux_virtual_machine.demo.tags["managedBy"] == "terraform"
+    error_message = "Legacy managed mode must continue ignoring a caller's managedBy tag."
+  }
+}
+
+run "retained_group" {
+  command = plan
+  variables {
+    existing_resource_group_name = "rg-retained"
+    tags = {
+      managedBy     = "copilot-release"
+      project       = "owned-test"
+      environmentId = "forged"
+    }
+  }
+  assert {
+    condition     = length(azurerm_resource_group.demo) == 0 && length(data.azurerm_resource_group.demo) == 1 && output.resource_group_name == "rg-retained"
+    error_message = "Retained mode must not manage or adopt the resource group."
+  }
+  assert {
+    condition     = azurerm_network_interface.demo.resource_group_name == "rg-retained" && azurerm_linux_virtual_machine.demo.resource_group_name == "rg-retained" && azurerm_linux_virtual_machine.demo.location == "polandcentral"
+    error_message = "Compute must use the retained group and shared subnet's region, not group metadata location."
+  }
+  assert {
+    condition     = azurerm_linux_virtual_machine.demo.tags["managedBy"] == "copilot-release" && azurerm_network_interface.demo.tags["project"] == "owned-test" && azurerm_virtual_machine_extension.nvidia_driver.tags["environmentId"] == "demo123"
+    error_message = "Owned resource tags must preserve operator tags and enforce the environment id."
+  }
+}
+
+run "reject_blank_group" {
+  command = plan
+  variables {
+    existing_resource_group_name = ""
+  }
+  expect_failures = [var.existing_resource_group_name]
+}

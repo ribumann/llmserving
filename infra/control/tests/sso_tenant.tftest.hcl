@@ -53,12 +53,34 @@ variables {
 run "external_same_tenant_default" {
   command = plan
   assert {
+    condition     = length([for env in azurerm_container_app.backend.template[0].container[0].env : env if env.name == "AZURE_DEMO_RESOURCE_GROUP_NAME"]) == 0
+    error_message = "Default deployment must not enable retained demo groups."
+  }
+  assert {
     condition     = local.sso_tenant_id == "11111111-1111-1111-1111-111111111111"
     error_message = "Omitting the external SSO tenant must retain deployment-tenant auth."
   }
   assert {
     condition     = length(azuread_application.sso) == 0 && length(azuread_application_password.sso) == 0
     error_message = "External mode must not create an application or password."
+  }
+}
+
+run "operator_demo_group_configuration" {
+  command = plan
+  variables {
+    demo_resource_group_name = "rg-retained"
+    demo_resource_tags = {
+      project   = "owned-test"
+      managedBy = "copilot-release"
+    }
+  }
+  assert {
+    condition = (
+      one([for env in azurerm_container_app.backend.template[0].container[0].env : env.value if env.name == "AZURE_DEMO_RESOURCE_GROUP_NAME"]) == "rg-retained"
+      && tomap(jsondecode(one([for env in azurerm_container_app.backend.template[0].container[0].env : env.value if env.name == "AZURE_RESOURCE_TAGS"]))) == var.demo_resource_tags
+    )
+    error_message = "Backend must receive exact operator-owned demo group and tags."
   }
 }
 

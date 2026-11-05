@@ -2,7 +2,8 @@
 
 **A clean reproducible Azure release is not yet demonstrated.** The modules
 describe shared/control/demo layers, but still have local cross-module state,
-placeholder image defaults and create/manage their own groups. Existing
+placeholder image defaults and default to managing their own groups. Demo-only
+retained-group mode is now opt-in; shared/control still manage groups. Existing
 deployment workflows update API/UI images only; they are not an end-to-end
 bootstrap or independent cleanup of billable resources.
 Their privileged checkout/login actions are now commit-pinned. Resource-name
@@ -14,6 +15,17 @@ establish current-target access.
 Do not run the default modules against an original deployment or pre-existing
 protected test groups. Validation (`init -backend=false`/`validate`) proves
 neither an applicable plan nor ownership-safe migration.
+
+For a **fresh demo state**, control inputs `demo_resource_group_name` and
+`demo_resource_tags` wire operator-owned group/ownership tags into the backend.
+The group name is omitted from the environment when unset, rather than silently
+treating a blank typo as managed mode. Caller input cannot select a group or
+override enforced operator tags. This does not adopt existing group state or
+change already-saved teardown configuration; see
+[state ownership and CLI limitations](TERRAFORM_STATE.md#retained-demo-resource-groups).
+Shared/control persistent-group ownership, protected bootstrap and independently
+verified actual-resource cleanup are still pending. No Azure or GPU acceptance
+gate is satisfied by credential-free plan tests.
 
 ## Prerequisites before any billable resource
 

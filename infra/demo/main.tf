@@ -34,18 +34,29 @@ locals {
 
   vm_size = coalesce(var.vm_size, local.default_vm_size_by_class[var.profile_size_class])
 
-  resource_group_name = "rg-llm-demo-${var.environment_id}"
+  resource_group_name = coalesce(var.existing_resource_group_name, "rg-llm-demo-${var.environment_id}")
   name_prefix         = "${var.name_prefix}-${var.environment_id}"
 
   common_tags = merge(var.tags, {
     feature       = "azure-llm-serving-demo"
-    managedBy     = "terraform"
+    managedBy     = var.existing_resource_group_name == null ? "terraform" : lookup(var.tags, "managedBy", "terraform")
     profile       = var.profile_size_class
     environmentId = var.environment_id
   })
 }
 
+moved {
+  from = azurerm_resource_group.demo
+  to   = azurerm_resource_group.demo[0]
+}
+
+data "azurerm_resource_group" "demo" {
+  count = var.existing_resource_group_name == null ? 0 : 1
+  name  = var.existing_resource_group_name
+}
+
 resource "azurerm_resource_group" "demo" {
+  count    = var.existing_resource_group_name == null ? 1 : 0
   name     = local.resource_group_name
   location = data.terraform_remote_state.shared.outputs.location
   tags     = local.common_tags
@@ -57,8 +68,8 @@ resource "azurerm_resource_group" "demo" {
 # directly over the private network.
 resource "azurerm_network_interface" "demo" {
   name                = "${local.name_prefix}-nic"
-  resource_group_name = azurerm_resource_group.demo.name
-  location            = azurerm_resource_group.demo.location
+  resource_group_name = local.resource_group_name
+  location            = data.terraform_remote_state.shared.outputs.location
   tags                = local.common_tags
 
   ip_configuration {
@@ -70,8 +81,8 @@ resource "azurerm_network_interface" "demo" {
 
 resource "azurerm_linux_virtual_machine" "demo" {
   name                = "${local.name_prefix}-vm"
-  resource_group_name = azurerm_resource_group.demo.name
-  location            = azurerm_resource_group.demo.location
+  resource_group_name = local.resource_group_name
+  location            = data.terraform_remote_state.shared.outputs.location
   size                = local.vm_size
   admin_username      = var.admin_username
   network_interface_ids = [
