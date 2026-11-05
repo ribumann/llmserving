@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
+from pathlib import Path
 
 
 class PlanRejected(ValueError):
@@ -105,7 +106,13 @@ def validate_plan(plan: object, group: str) -> None:
 
 
 def run_saved_plan(
-    plan_path: Path, group: str, log_path: Path, *, terraform: str, apply: bool
+    plan_path: Path,
+    group: str,
+    log_path: Path,
+    *,
+    terraform: str,
+    apply: bool,
+    validator: Callable[[object, str], None] = validate_plan,
 ) -> None:
     # A private copy prevents a caller replacing the original after validation.
     with tempfile.TemporaryDirectory(prefix="retained-group-plan-") as directory:
@@ -134,7 +141,7 @@ def run_saved_plan(
                 plan = json.loads(shown.stdout)
             except json.JSONDecodeError as error:
                 raise PlanRejected("Terraform returned malformed plan JSON.") from error
-            validate_plan(plan, group)
+            validator(plan, group)
             if apply:
                 result = subprocess.run(
                     [terraform, "apply", "-input=false", "-no-color", str(saved)],
