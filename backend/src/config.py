@@ -5,6 +5,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -17,6 +18,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     auth_mode: Literal["entra-jwt", "local-demo"] = "entra-jwt"
     auth_audience: str | None = None
+    auth_tenant_id: str | None = None
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/llmserving"
     database_echo: bool = False
     database_readiness_timeout_seconds: float = Field(default=3.0, gt=0, le=10)
@@ -90,6 +92,16 @@ class Settings(BaseSettings):
                 "local-demo authentication is not allowed in cloud/production hosting."
             )
         return self
+
+    @field_validator("auth_tenant_id")
+    @classmethod
+    def _validate_auth_tenant(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            return str(UUID(value))
+        except ValueError as exc:
+            raise ValueError("AUTH_TENANT_ID must be an explicit tenant UUID.") from exc
 
     @field_validator(
         "auth_allowed_email_domains",
