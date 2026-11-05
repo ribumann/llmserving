@@ -2,10 +2,10 @@ name: Private operator access source CI
 
 on:
   pull_request:
-    paths: ["infra/operator_access/**", "scripts/validate_operator_access_plan.py", "scripts/azure_operator_access.py", "scripts/tests/test*operator_access*.py", ".github/workflows/operator-access-ci.yml"]
+    paths: ["infra/operator_access/**", "scripts/validate_operator_access_plan.py", "scripts/azure_operator_access.py", "scripts/azure_operator_apply.py", "scripts/tests/test*operator*.py", ".github/workflows/operator-access-ci.yml"]
   push:
     branches: [main]
-    paths: ["infra/operator_access/**", "scripts/validate_operator_access_plan.py", "scripts/azure_operator_access.py", "scripts/tests/test*operator_access*.py", ".github/workflows/operator-access-ci.yml"]
+    paths: ["infra/operator_access/**", "scripts/validate_operator_access_plan.py", "scripts/azure_operator_access.py", "scripts/azure_operator_apply.py", "scripts/tests/test*operator*.py", ".github/workflows/operator-access-ci.yml"]
   workflow_dispatch: {}
 
 permissions:
@@ -31,4 +31,4 @@ jobs:
           terraform validate -no-color
           terraform test -no-color
       - name: Check fixed native plan policy without Azure credentials
-        run: python -m unittest discover -s scripts/tests -p 'test*operator_access*.py' -v
+        run: python -m unittest discover -s scripts/tests -p 'test*operator*.py' -v
