@@ -91,9 +91,9 @@ jobs:
       group: deploy-backend
       cancel-in-progress: false
     env:
-      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-      ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
-      CONTAINER_APP_NAME: ${{ vars.AZURE_BACKEND_APP_NAME }}
+      RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+      ACR_NAME: ${{ secrets.AZURE_ACR_NAME }}
+      CONTAINER_APP_NAME: ${{ secrets.AZURE_BACKEND_APP_NAME }}
       IMAGE_NAME: llmserving-backend
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}

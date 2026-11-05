@@ -58,8 +58,13 @@ before enabling deployment. Configure OIDC trust for that environment, not arbit
 pull requests.
 
 Set `AZURE_RESOURCE_GROUP`, `AZURE_ACR_NAME`, `AZURE_BACKEND_APP_NAME`, and
-`AZURE_FRONTEND_APP_NAME` as environment variables in GitHub's environment settings
-(configuration variables, not shell variables). No Azure identity or resources are
+`AZURE_FRONTEND_APP_NAME` as **secrets** in the protected `azure-deployment`
+GitHub environment, alongside the Azure identity IDs. Although resource names
+are not credentials, secret-backed values are masked before runner step headers
+are printed; runtime `add-mask` alone cannot redact earlier headers. Operators
+with legacy configuration variables must explicitly copy these settings to
+environment secrets before enabling deployment; no automatic fallback to
+unmasked variables is provided. No Azure identity or resources are
 configured by importing this repository.
 
 ### Backend environment variables

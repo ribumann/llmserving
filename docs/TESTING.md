@@ -11,6 +11,9 @@ escaped multiline/percent values. They also verify protected manual-main deploy
 gates, absence of deployment credentials in PR checks and fixed privileged
 checkout/login commits. These credential-free tests never invoke Azure login,
 push images, enable deployment or establish current target authorization.
+Protected resource names must also use environment secrets so GitHub masks
+runner-generated environment headers before the masking script starts; direct
+Python snippet execution alone cannot prove runner log redaction.
 
 | Surface | CI coverage | What it does not prove |
 | --- | --- | --- |

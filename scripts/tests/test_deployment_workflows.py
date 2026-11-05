@@ -49,6 +49,14 @@ class DeploymentWorkflowTests(unittest.TestCase):
                 self.assertNotIn("uses: azure/login@v", deployment)
                 self.assertIn("persist-credentials: false", deployment)
                 self.assertLess(deployment.index("python - <<'PY'"), deployment.index(LOGIN))
+                for identifier in (
+                    "AZURE_RESOURCE_GROUP",
+                    "AZURE_ACR_NAME",
+                    "AZURE_BACKEND_APP_NAME",
+                    *(("AZURE_FRONTEND_APP_NAME",) if name == "frontend" else ()),
+                ):
+                    self.assertIn("${{ secrets." + identifier + " }}", deployment)
+                    self.assertNotIn("${{ vars." + identifier + " }}", deployment)
 
     def test_deployment_remains_protected_opt_in_and_pr_checks_have_no_credentials(self):
         for name, read_only, deployment, _ in self.deployments():
