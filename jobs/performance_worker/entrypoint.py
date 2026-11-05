@@ -28,6 +28,7 @@ from __future__ import annotations
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -88,6 +89,7 @@ def run(
 
     latencies: list[float] = []
     failures = 0
+    started = perf_counter()
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         for result in pool.map(lambda _: submit(base_url, prompt), range(request_count)):
             if result.ok:
@@ -96,8 +98,8 @@ def run(
                 failures += 1
 
     sorted_latencies = sorted(latencies)
-    total_latency = sum(latencies)
-    throughput = (len(latencies) / total_latency) if total_latency > 0 else 0.0
+    elapsed_seconds = max(perf_counter() - started, 0.001)
+    throughput = len(latencies) / elapsed_seconds
 
     callback.complete_workflow(
         workflow_id,
