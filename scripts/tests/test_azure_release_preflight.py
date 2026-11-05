@@ -240,7 +240,7 @@ class ReadOnlyPreflightTests(unittest.TestCase):
     def test_missing_duplicate_or_malformed_quota_cannot_be_a_success_report(self):
         complete = self.azure("vm", "list-usage")
         malformed = copy.deepcopy(complete)
-        malformed[0]["limit"] = "8"
+        malformed[0]["limit"] = "8.0"
         boolean = copy.deepcopy(complete)
         boolean[0]["currentValue"] = False
         negative = copy.deepcopy(complete)
@@ -263,6 +263,79 @@ class ReadOnlyPreflightTests(unittest.TestCase):
 
             with self.subTest(rows=rows), self.assertRaises(preflight.PreflightError):
                 self.inspect(changed)
+
+    def test_actual_cli_string_counts_and_exact_spaced_family_are_normalized(self):
+        family = "Standard NCASv3_T4 Family"
+        rows = [
+            {
+                "name": {
+                    "value": "lowPriorityCores",
+                    "localizedValue": "Total Regional Low-priority vCPUs",
+                },
+                "currentValue": "0",
+                "limit": "100",
+            },
+            {
+                "name": {"value": "cores", "localizedValue": "Total Regional vCPUs"},
+                "currentValue": "0",
+                "limit": "108",
+            },
+            {
+                "name": {"value": family, "localizedValue": family + " vCPUs"},
+                "currentValue": "0",
+                "limit": "8",
+            },
+        ]
+
+        def changed(*arguments):
+            if arguments[:2] == ("vm", "list-usage"):
+                return rows
+            result = self.azure(*arguments)
+            if arguments[:2] == ("vm", "list-skus"):
+                result[0]["family"] = family
+                result[0]["locations"] = ["ItalyNorth"]
+            return result
+
+        report = self.inspect(changed)
+        self.assertEqual(
+            report["quota"],
+            [
+                {"name": "lowPriorityCores", "current": 0, "limit": 100},
+                {"name": "cores", "current": 0, "limit": 108},
+                {"name": family, "current": 0, "limit": 8},
+            ],
+        )
+        self.assertFalse(report["deploymentAuthorizedByThisReport"])
+        rows[2]["name"]["value"] = "anotherFamily"
+        with self.assertRaises(preflight.PreflightError):
+            self.inspect(changed)
+
+    def test_quota_count_only_accepts_nonnegative_int_or_bounded_ascii_decimal(self):
+        for raw, expected in ((0, 0), (8, 8), ("0", 0), ("8", 8), ("0008", 8)):
+            with self.subTest(raw=raw):
+                self.assertEqual(preflight.quota_count(raw), expected)
+        for raw in (
+            None,
+            True,
+            False,
+            -1,
+            8.0,
+            {},
+            [],
+            "",
+            " ",
+            " 8",
+            "8 ",
+            "-1",
+            "+8",
+            "8.0",
+            "1e2",
+            "８",
+            "٨",
+            "9" * 21,
+        ):
+            with self.subTest(raw=raw), self.assertRaises(preflight.PreflightError):
+                preflight.quota_count(raw)
 
     def test_missing_family_cannot_silently_drop_family_quota(self):
         for family in (None, "", " "):

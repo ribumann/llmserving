@@ -42,6 +42,14 @@ metadata failure was not an SKU eligibility denial; zonal restriction contents
 are preserved unchanged. A successful rerun is still needed for a complete
 fresh quota/SKU report.
 
+Azure CLI can serialize usage counts as strings. Preflight normalizes
+nonnegative JSON integers or 1–20 ASCII decimal digits to integers; booleans,
+floats, signs, whitespace, scientific notation, non-ASCII digits and missing
+values remain errors. The exact SKU family matches quota `name.value`
+(case-insensitive), never a localized display label or an unrelated GPU family.
+All three unique family/regional/low-priority rows remain mandatory. The second
+inspection reached this count check, not an Azure quota denial.
+
 For a **fresh demo state**, control inputs `demo_resource_group_name` and
 `demo_resource_tags` wire operator-owned group/ownership tags into the backend.
 The group name is omitted from the environment when unset, rather than silently
