@@ -208,6 +208,98 @@ rights, or enable cloud demo identity.
 
 ## Reproducible deployment sequence still required
 
+### Minimum fallback path using the existing application
+
+Keep the current public frontend/backend and Easy Auth pattern. Do not fork
+the app into an anonymous playground, force private backend ingress or expose
+the database/GPU inference port to make deployment simpler. Local/self-hosted
+UI and headless API usage are documented in [UI deployment options](UI_DEPLOYMENT.md).
+
+Use the already verified retained shared/control/demo groups and the exact
+approved additional ACA platform group `rg-llmserving-e2e-aca-infra`. Its scope
+approval is not proof of effective create/delete rights, permission for new
+role grants, or evidence that ACA accepts an existing group. Check those exact
+platform behaviors and effective grants before creating a Container Apps
+environment; preserve all persistent groups and their existing grants.
+
+The smallest existing-stack bring-up still has separate, ordered phases:
+
+1. Prepare checked image/Functions candidate archives without Azure access.
+   Record source/run/checksum identity as described below. An archive bundle
+   removes the need to rebuild code during bootstrap; it does not create ACR.
+2. Verify narrowly scoped bootstrap/state permissions and independent cleanup
+   of the exact owned resource types. Prepare protected state/locking and the
+   isolated registry/shared network/vault resources. No subscription-wide
+   grant or provider-registration fallback.
+3. Import verified image archives into the isolated registry and record actual
+   registry pull digests. Complete the approved fallback Easy Auth application:
+   final new callbacks, client UUID, approved domains/consent and a privately
+   written versionless vault credential reference. No original app reuse.
+4. Apply an exact reviewed retained-control plan with those artifacts and SSO
+   inputs. Verify real UI/headless authentication, DB readiness and independent
+   cleanup before GPU work. Existing image-update workflows alone cannot
+   bootstrap empty groups.
+5. After exact GPU manifest/cleanup review, a non-mutating unzoned VM validation
+   may clarify SKU eligibility. The protected SKU listing is not that
+   validation. Use explicit `Standard_NC4as_T4_v3`, not the 16-vCPU default,
+   with an explicitly reviewed priority; do not infer restriction clearance
+   or change allocation policy from differing capability observations.
+
+These are execution phases, not a request for another architecture approval.
+Current incomplete app/secret/callback bootstrap and unverified effective
+platform-group/cleanup permissions are concrete target prerequisites; absence
+of Azure CLI on one machine is not a blocker when protected OIDC or an
+authorized isolated CLI profile is available.
+
+### Credential-free checked artifact candidates
+
+Runtime CI supports a **manual `main` dispatch only** with
+`package_release=true`. Normal push/PR checks and default manual runs do not
+export image archives, receive cloud credentials, push to a registry or deploy.
+The option exports the exact locally tagged image after its existing import/
+HTTP/toolkit checks, not a later rebuild:
+
+```sh
+gh workflow run runtime-ci.yml --repo ribumann/llmserving \
+  --ref main --field package_release=true
+```
+
+Each of seven `release-image-<component>-<attempt>` artifacts contains a gzip
+Docker-save archive. The Functions package remains in `functions-<source-sha>`.
+Small per-component records and `release-manifest-<attempt>` bind all eight
+files to source SHA, run ID and attempt, filename, size and SHA-256. The manifest
+job requires all runtime jobs (including real model/browser/toolkits) to pass
+and rejects incomplete or mixed-run records. Individual artifacts from a
+failed/partial attempt are **not a complete candidate**. To regenerate a
+candidate after failure, start a new full dispatch rather than mixing successful
+jobs from different attempts. Artifacts expire after seven days; retain approved
+copies in protected storage before expiry, not in Git.
+
+Before any archive import, obtain the expected source/run/attempt from the
+trusted Actions run, not from downloaded artifact content. Set
+`GITHUB_REPOSITORY`, `GITHUB_REF=refs/heads/main`,
+`GITHUB_EVENT_NAME=workflow_dispatch`, `GITHUB_SHA`, `GITHUB_RUN_ID` and
+`GITHUB_RUN_ATTEMPT` to that expected identity, then verify all eight archives:
+
+```sh
+python scripts/release_bundle.py verify \
+  --manifest /protected/candidate/release-manifest.json \
+  --archives /protected/candidate/archives
+```
+
+The verifier requires exact component filenames, rejects symlinks, duplicate/
+unknown/missing components and changed archives, and streams file hashing.
+It does not load or execute archives. After a successful hash verification,
+load only into an isolated trusted Docker host; verify each loaded image's
+config ID matches `imageConfigDigest` before registry import. A Docker config
+ID is **not** an OCI registry pull digest; record the actual pushed registry
+digest before deployment. This is checksum-bound retention of a checked build,
+not a signed provenance attestation, dependency lock, reproducible rebuild,
+public GitHub release or proof of cloud deployment. No model weights, secrets,
+Terraform state or database contents are bundled.
+
+### Remaining full release acceptance
+
 1. Establish private, encrypted remote Terraform state with least-privilege
    access, blob locking, recoverable versions and independent recovery.
    Separate registry/bootstrap, shared, control and each demo state key. Migrate
