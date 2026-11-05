@@ -399,7 +399,9 @@ class ReadOnlyPreflightTests(unittest.TestCase):
 
     def test_workflow_is_protected_main_dispatch_only_without_mutating_commands(self):
         source = (ROOT / preflight.WORKFLOW).read_text()
-        self.assertIn("workflow_dispatch: {}", source)
+        self.assertIn("workflow_dispatch:", source)
+        self.assertIn("inspect_bootstrap:", source)
+        self.assertIn("default: false", source)
         self.assertNotIn("pull_request:", source)
         self.assertIn("github.ref == 'refs/heads/main'", source)
         self.assertIn("environment: azure-e2e-fallback", source)
@@ -417,6 +419,208 @@ class ReadOnlyPreflightTests(unittest.TestCase):
             "--validate",
         ):
             self.assertNotIn(operation, source)
+
+    def permissions(self):
+        return {
+            "value": [
+                {
+                    "actions": ["*"],
+                    "notActions": ["Microsoft.Authorization/*/write"],
+                    "dataActions": [],
+                    "notDataActions": [],
+                }
+            ],
+            "nextLink": None,
+        }
+
+    def app(self):
+        return {
+            "appId": preflight.SSO_CLIENT,
+            "signInAudience": "AzureADMyOrg",
+            "web": {"redirectUris": []},
+            "passwordCredentials": [],
+            "requiredResourceAccess": [],
+        }
+
+    def test_permission_rules_exclusions_and_union_are_not_deployment_proof(self):
+        rules = self.permissions()
+        summary = preflight.permission_summary(rules)
+        self.assertTrue(summary["reportedAllowRules"]["containerAppEnvironmentWrite"])
+        self.assertFalse(summary["reportedAllowRules"]["roleAssignmentWrite"])
+        self.assertFalse(summary["reportedAllowRules"]["stateBlobWrite"])
+        self.assertFalse(summary["denyAssignmentsVerified"])
+        self.assertFalse(summary["platformCreateDeleteBehaviorVerified"])
+        rules["value"].append(
+            {
+                "actions": ["MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/WRITE"],
+                "notActions": [],
+                "dataActions": [
+                    "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/*"
+                ],
+                "notDataActions": ["*/delete"],
+            }
+        )
+        summary = preflight.permission_summary(rules)
+        self.assertTrue(summary["reportedAllowRules"]["roleAssignmentWrite"])
+        self.assertTrue(summary["reportedAllowRules"]["stateBlobWrite"])
+        rules["value"] = []
+        self.assertFalse(
+            any(preflight.permission_summary(rules)["reportedAllowRules"].values())
+        )
+
+    def test_missing_malformed_or_partial_permission_metadata_fails_closed(self):
+        for field in ("actions", "notActions", "dataActions", "notDataActions"):
+            for value in (None, {}, "*", [None]):
+                rules = self.permissions()
+                rules["value"][0][field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(
+                    preflight.PreflightError
+                ):
+                    preflight.permission_summary(rules)
+        for rules in (
+            None,
+            {},
+            {"value": [None]},
+            {**self.permissions(), "nextLink": "next"},
+        ):
+            with self.assertRaises(preflight.PreflightError):
+                preflight.permission_summary(rules)
+
+    def test_exact_existing_app_summary_never_claims_secret_or_browser_acceptance(self):
+        summary = preflight.app_summary(self.app())
+        self.assertTrue(summary["exactExistingAppVerified"])
+        self.assertEqual(summary["redirectUriCount"], 0)
+        self.assertEqual(summary["activePasswordCredentialCount"], 0)
+        self.assertEqual(summary["requestedResourceCount"], 0)
+        self.assertFalse(summary["secretValueRead"])
+        self.assertFalse(summary["exactNewTargetCallbacksVerified"])
+        self.assertFalse(summary["consentAssignmentsAndBrowserTokenFlowVerified"])
+        app = self.app()
+        app["passwordCredentials"] = [
+            {
+                "startDateTime": "2020-01-01T00:00:00Z",
+                "endDateTime": "2050-01-01T00:00:00Z",
+                "secretText": "DO_NOT_LOG_CREDENTIAL",
+            }
+        ]
+        summary = preflight.app_summary(app)
+        self.assertEqual(summary["activePasswordCredentialCount"], 1)
+        self.assertNotIn("DO_NOT_LOG", json.dumps(summary))
+        for key in app:
+            changed = copy.deepcopy(app)
+            changed[key] = None
+            with self.subTest(key=key), self.assertRaises(preflight.PreflightError):
+                preflight.app_summary(changed)
+        for date in (None, "invalid", "2020-01-01T00:00:00", "2010-01-01T00:00:00Z"):
+            changed = copy.deepcopy(app)
+            changed["passwordCredentials"][0]["endDateTime"] = date
+            with self.subTest(date=date), self.assertRaises(preflight.PreflightError):
+                preflight.app_summary(changed)
+
+    def bootstrap(self, fail_scopes=()):
+        def azure(*arguments):
+            if arguments[:2] == ("account", "show"):
+                return self.azure(*arguments)
+            if arguments[:2] == ("provider", "show"):
+                namespace = arguments[arguments.index("--namespace") + 1]
+                if namespace in fail_scopes:
+                    raise preflight.PreflightError("Sanitized read failure.")
+                return {"namespace": namespace, "registrationState": "Registered"}
+            self.assertEqual(arguments[:4], ("rest", "--method", "GET", "--url"))
+            url = arguments[-1]
+            alias = next(
+                (
+                    name
+                    for name, value in preflight.PERMISSION_URLS.items()
+                    if value == url
+                ),
+                "existingTestApp",
+            )
+            if alias in fail_scopes:
+                raise preflight.PreflightError("Sanitized read failure.")
+            if url == preflight.APP_URL:
+                return self.app()
+            self.assertIn(url, preflight.PERMISSION_URLS.values())
+            return self.permissions()
+
+        with patch.dict(os.environ, self.environment(), clear=True), patch.object(
+            preflight, "read_azure", side_effect=azure
+        ):
+            return preflight.inspect_bootstrap()
+
+    def test_all_bootstrap_reads_succeed_without_claiming_bootstrap_or_extra_permissions(
+        self,
+    ):
+        report = self.bootstrap()
+        self.assertTrue(report["allReadsSucceeded"])
+        self.assertEqual(set(report["permissions"]), set(preflight.PERMISSION_URLS))
+        self.assertEqual(set(report["providers"]), set(preflight.PROVIDERS))
+        self.assertFalse(report["deploymentReady"])
+        self.assertFalse(report["resourcesOrRolesChanged"])
+        self.assertFalse(report["subscriptionLevelGroupCreationVerified"])
+        self.assertFalse(report["vaultCredentialAccessVerified"])
+        self.assertEqual(report["testApp"]["activePasswordCredentialCount"], 0)
+        for identifier in (
+            preflight.FALLBACK_TARGET.subscription,
+            preflight.FALLBACK_TARGET.client,
+            preflight.FALLBACK_TARGET.tenant,
+            preflight.SSO_CLIENT,
+        ):
+            self.assertNotIn(identifier, json.dumps(report))
+
+    def test_denied_or_unread_scopes_explicitly_remain_unverified(self):
+        report = self.bootstrap(
+            ("acaInfrastructure", "existingTestApp", "Microsoft.App")
+        )
+        self.assertFalse(report["allReadsSucceeded"])
+        self.assertIsNone(report["testApp"])
+        self.assertNotIn("acaInfrastructure", report["permissions"])
+        self.assertEqual(
+            {row["scope"] for row in report["readErrors"]},
+            {
+                "acaInfrastructure",
+                "existingTestApp",
+                "Microsoft.App",
+            },
+        )
+        with patch.object(
+            preflight, "inspect_bootstrap", return_value=report
+        ), patch.object(sys, "argv", ["preflight", "inspect-bootstrap"]), patch(
+            "builtins.print"
+        ) as output, self.assertRaises(
+            SystemExit
+        ) as error:
+            preflight.main()
+        self.assertIn("unread/unverified", str(error.exception))
+        self.assertFalse(json.loads(output.call_args.args[0])["allReadsSucceeded"])
+
+    def test_rest_rejects_mutation_arbitrary_urls_and_additional_arguments(self):
+        forbidden = (
+            ("rest", "--method", "POST", "--url", preflight.APP_URL),
+            ("rest", "--method", "PATCH", "--url", preflight.APP_URL),
+            (
+                "rest",
+                "--method",
+                "GET",
+                "--url",
+                "https://management.azure.com/arbitrary",
+            ),
+            ("rest", "--method", "GET", "--url", preflight.APP_URL, "--body", "{}"),
+        )
+        for arguments in forbidden:
+            with self.subTest(arguments=arguments), patch.object(
+                subprocess, "run"
+            ) as run, self.assertRaises(preflight.PreflightError):
+                preflight.read_azure(*arguments)
+            run.assert_not_called()
+        result = subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+        for url in (*preflight.PERMISSION_URLS.values(), preflight.APP_URL):
+            with patch.object(subprocess, "run", return_value=result) as run:
+                preflight.read_azure("rest", "--method", "GET", "--url", url)
+            self.assertEqual(
+                run.call_args.args[0][1:6], ["rest", "--method", "GET", "--url", url]
+            )
+            self.assertIn("--subscription", run.call_args.args[0])
 
 
 if __name__ == "__main__":

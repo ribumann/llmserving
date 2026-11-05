@@ -7,6 +7,8 @@ import json
 import os
 import subprocess
 from collections import Counter
+from datetime import UTC, datetime
+from fnmatch import fnmatchcase
 
 from azure_canary import FALLBACK_TARGET
 
@@ -19,6 +21,34 @@ GROUPS = {
     "demo": "rg-llmserving-e2e-demo",
     "canary": "rg-llmserving-e2e-canary",
 }
+INFRASTRUCTURE_GROUP = "rg-llmserving-e2e-aca-infra"
+SSO_CLIENT = "962740a1-be3e-454f-87c3-537ed1f02b78"
+SUBSCRIPTION_SCOPE = f"/subscriptions/{FALLBACK_TARGET.subscription}"
+PERMISSION_SCOPES = {
+    alias: f"{SUBSCRIPTION_SCOPE}/resourceGroups/{name}"
+    for alias, name in {**GROUPS, "acaInfrastructure": INFRASTRUCTURE_GROUP}.items()
+}
+PERMISSION_URLS = {
+    alias: f"https://management.azure.com{scope}/providers/Microsoft.Authorization/permissions?api-version=2022-04-01"
+    for alias, scope in PERMISSION_SCOPES.items()
+}
+APP_URL = (
+    f"https://graph.microsoft.com/v1.0/applications(appId='{SSO_CLIENT}')?"
+    "$select=appId,signInAudience,web,passwordCredentials,requiredResourceAccess"
+)
+PROVIDERS = (
+    "Microsoft.App",
+    "Microsoft.Compute",
+    "Microsoft.Network",
+    "Microsoft.Storage",
+    "Microsoft.KeyVault",
+    "Microsoft.DBforPostgreSQL",
+    "Microsoft.OperationalInsights",
+    "Microsoft.ManagedIdentity",
+    "Microsoft.Web",
+    "Microsoft.Insights",
+    "Microsoft.ContainerRegistry",
+)
 
 
 class PreflightError(RuntimeError):
@@ -46,8 +76,16 @@ def read_azure(*arguments: str) -> object:
         ("resource", "list"),
         ("vm", "list-skus"),
         ("vm", "list-usage"),
+        ("provider", "show"),
     }
-    if arguments[:2] not in allowed:
+    if arguments[:2] == ("rest", "--method"):
+        if (
+            len(arguments) != 5
+            or arguments[2:4] != ("GET", "--url")
+            or arguments[4] not in {*PERMISSION_URLS.values(), APP_URL}
+        ):
+            raise PreflightError("REST read is outside the fixed GET URL allowlist.")
+    elif arguments[:2] not in allowed:
         raise PreflightError("Operation is outside the read-only command allowlist.")
     try:
         result = subprocess.run(
@@ -134,8 +172,7 @@ def quota_count(value: object) -> int:
     )
 
 
-def inspect() -> dict:
-    validate_config()
+def validate_account() -> None:
     account = read_azure("account", "show")
     if (
         not isinstance(account, dict)
@@ -146,6 +183,164 @@ def inspect() -> dict:
         or account.get("user", {}).get("name") != FALLBACK_TARGET.client
     ):
         raise PreflightError("Azure account/principal does not match the fixed target.")
+
+
+def permission_summary(payload: object) -> dict:
+    fields = ("actions", "notActions", "dataActions", "notDataActions")
+    if (
+        not isinstance(payload, dict)
+        or payload.get("nextLink")
+        or not isinstance(payload.get("value"), list)
+        or any(
+            not isinstance(entry, dict)
+            or any(
+                not isinstance(entry.get(field), list)
+                or any(not isinstance(value, str) for value in entry[field])
+                for field in fields
+            )
+            for entry in payload["value"]
+        )
+    ):
+        raise PreflightError("Caller permission-rule metadata is malformed/incomplete.")
+
+    def permits(action: str, data: bool = False) -> bool:
+        allow, exclude = (
+            ("dataActions", "notDataActions") if data else ("actions", "notActions")
+        )
+        return any(
+            any(fnmatchcase(action.lower(), rule.lower()) for rule in entry[allow])
+            and not any(
+                fnmatchcase(action.lower(), rule.lower()) for rule in entry[exclude]
+            )
+            for entry in payload["value"]
+        )
+
+    return {
+        "permissionRuleCount": len(payload["value"]),
+        "reportedAllowRules": {
+            "resourceGroupWrite": permits(
+                "Microsoft.Resources/subscriptions/resourceGroups/write"
+            ),
+            "containerAppEnvironmentWrite": permits(
+                "Microsoft.App/managedEnvironments/write"
+            ),
+            "roleAssignmentWrite": permits(
+                "Microsoft.Authorization/roleAssignments/write"
+            ),
+            "stateBlobWrite": permits(
+                "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write",
+                True,
+            ),
+        },
+        "denyAssignmentsVerified": False,
+        "platformCreateDeleteBehaviorVerified": False,
+    }
+
+
+def app_summary(payload: object) -> dict:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("appId") != SSO_CLIENT
+        or not isinstance(payload.get("web"), dict)
+        or not isinstance(payload["web"].get("redirectUris"), list)
+        or any(not isinstance(uri, str) for uri in payload["web"]["redirectUris"])
+        or not isinstance(payload.get("passwordCredentials"), list)
+        or not isinstance(payload.get("requiredResourceAccess"), list)
+        or payload.get("signInAudience")
+        not in {
+            "AzureADMyOrg",
+            "AzureADMultipleOrgs",
+            "AzureADandPersonalMicrosoftAccount",
+            "PersonalMicrosoftAccount",
+        }
+    ):
+        raise PreflightError("Exact existing fallback test app metadata is malformed.")
+    active = 0
+    try:
+        for credential in payload["passwordCredentials"]:
+            start = datetime.fromisoformat(credential["startDateTime"])
+            end = datetime.fromisoformat(credential["endDateTime"])
+            if start.tzinfo is None or end.tzinfo is None or end <= start:
+                raise ValueError("Invalid credential lifetime.")
+            active += start <= datetime.now(UTC) < end
+    except (KeyError, TypeError, ValueError):
+        raise PreflightError(
+            "Test app credential lifetime metadata is malformed."
+        ) from None
+    return {
+        "exactExistingAppVerified": True,
+        "signInAudience": payload["signInAudience"],
+        "redirectUriCount": len(payload["web"]["redirectUris"]),
+        "activePasswordCredentialCount": active,
+        "requestedResourceCount": len(payload["requiredResourceAccess"]),
+        "secretValueRead": False,
+        "exactNewTargetCallbacksVerified": False,
+        "consentAssignmentsAndBrowserTokenFlowVerified": False,
+    }
+
+
+def inspect_bootstrap() -> dict:
+    validate_config()
+    validate_account()
+    report = {
+        "sourceSha": os.environ.get("GITHUB_SHA"),
+        "scope": "Read-only caller rules and existing fallback test app metadata",
+        "permissions": {},
+        "providers": {},
+        "testApp": None,
+        "readErrors": [],
+        "deploymentReady": False,
+        "resourcesOrRolesChanged": False,
+        "subscriptionLevelGroupCreationVerified": False,
+        "vaultCredentialAccessVerified": False,
+    }
+    for namespace in PROVIDERS:
+        try:
+            provider = read_azure(
+                "provider",
+                "show",
+                "--namespace",
+                namespace,
+                "--query",
+                "{namespace:namespace,registrationState:registrationState}",
+            )
+            if (
+                not isinstance(provider, dict)
+                or provider.get("namespace") != namespace
+                or provider.get("registrationState")
+                not in {
+                    "Registered",
+                    "NotRegistered",
+                    "Registering",
+                    "Unregistering",
+                }
+            ):
+                raise PreflightError(
+                    "Exact provider registration metadata is malformed."
+                )
+            report["providers"][namespace] = provider["registrationState"]
+        except PreflightError as exc:
+            report["readErrors"].append({"scope": namespace, "error": str(exc)})
+    for alias, url in PERMISSION_URLS.items():
+        try:
+            report["permissions"][alias] = permission_summary(
+                read_azure("rest", "--method", "GET", "--url", url)
+            )
+        except PreflightError as exc:
+            report["readErrors"].append({"scope": alias, "error": str(exc)})
+    try:
+        report["testApp"] = app_summary(
+            read_azure("rest", "--method", "GET", "--url", APP_URL)
+        )
+    except PreflightError as exc:
+        report["readErrors"].append({"scope": "existingTestApp", "error": str(exc)})
+    report["allReadsSucceeded"] = not report["readErrors"]
+    return report
+
+
+def inspect() -> dict:
+    validate_config()
+    validate_account()
     inventory = {}
     for alias, name in GROUPS.items():
         group = read_azure("group", "show", "--name", name)
@@ -222,12 +417,21 @@ def inspect() -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("validate-config", "inspect"))
+    parser.add_argument(
+        "operation", choices=("validate-config", "inspect", "inspect-bootstrap")
+    )
     operation = parser.parse_args().operation
     try:
         if operation == "validate-config":
             validate_config()
             print("Fixed protected read-only target verified.")
+        elif operation == "inspect-bootstrap":
+            report = inspect_bootstrap()
+            print(json.dumps(report, indent=2))
+            if not report["allReadsSucceeded"]:
+                raise PreflightError(
+                    "Bootstrap inspection has explicit unread/unverified scopes; no permission expansion attempted."
+                )
         else:
             print(json.dumps(inspect(), indent=2))
     except PreflightError as exc:
