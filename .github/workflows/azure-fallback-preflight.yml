@@ -1,0 +1,57 @@
+name: Azure fallback read-only preflight
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-fallback-readonly-preflight
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main' && github.repository == 'ribumann/llmserving'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: azure-e2e-fallback
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_CORE_OUTPUT: none
+    steps:
+      - name: Mask protected identity before login
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          for key in ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"):
+              value = os.environ.get(key, "")
+              if value:
+                  value = value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  print(f"::add-mask::{value}")
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          owner_id = os.environ.get("GITHUB_REPOSITORY_OWNER_ID", "")
+          repo_id = os.environ.get("GITHUB_REPOSITORY_ID", "")
+          if "/" in repo and owner_id and repo_id:
+              owner, name = repo.split("/", 1)
+              print(f"::add-mask::repo:{owner}@{owner_id}/{name}@{repo_id}:environment:azure-e2e-fallback")
+          PY
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify fixed target before Azure login
+        run: python scripts/azure_release_preflight.py validate-config
+      - name: Azure OIDC login
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Inspect fixed groups and exact Italy North T4 SKU and quota
+        run: python scripts/azure_release_preflight.py inspect
