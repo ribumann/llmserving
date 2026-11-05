@@ -127,8 +127,10 @@ jobs:
             *) dockerfile="jobs/$IMAGE/Dockerfile" ;;
           esac
           docker build --file "$dockerfile" --tag "llmserving-ci:$IMAGE" .
-      - name: Actual packaged benchmark and genuine pinned LLMPerf on bounded CPU Ollama
-        if: matrix.image == 'backend'
+      - name: Actual packaged toolkits on bounded CPU Ollama
+        if: matrix.image == 'backend' || matrix.image == 'performance_worker'
+        env:
+          IMAGE: ${{ matrix.image }}
         shell: bash
         run: |
           set -euo pipefail
@@ -145,7 +147,13 @@ jobs:
             --data '{"model":"qwen2.5:0.5b-instruct","stream":false}' \
             http://127.0.0.1:11434/api/pull
           mkdir -p "$RUNNER_TEMP/toolkit-evidence"
-          for tool in benchmark llmperf; do
+          tools=(benchmark llmperf)
+          runtime_env=()
+          if [ "$IMAGE" = performance_worker ]; then
+            tools=(llmperf)
+            runtime_env=(-e PYTHONPATH=/app)
+          fi
+          for tool in "${tools[@]}"; do
             timeout --signal=TERM --kill-after=10s 240s docker run --rm \
               --name "llmserving-ci-toolkit-$tool" --network llmserving-ci-toolkits \
               --cpus=2 --memory=4g --shm-size=256m --pids-limit=512 \
@@ -154,19 +162,20 @@ jobs:
               -e GITHUB_SHA -e OPENAI_API_KEY=ci-local-unused \
               -e RAY_USAGE_STATS_ENABLED=0 -e HF_HUB_DISABLE_TELEMETRY=1 \
               -e DO_NOT_TRACK=1 -e TOKENIZERS_PARALLELISM=false -e OMP_NUM_THREADS=1 \
+              "${runtime_env[@]}" \
               --mount "type=bind,src=$PWD/scripts/validate_local_toolkits.py,dst=/validation.py,readonly" \
               --mount "type=bind,src=$RUNNER_TEMP/toolkit-evidence,dst=/evidence" \
-              --entrypoint python llmserving-ci:backend /validation.py \
+              --entrypoint python "llmserving-ci:$IMAGE" /validation.py \
               --tool "$tool" --output "/evidence/$tool.json"
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always() && matrix.image == 'backend'
+        if: always() && (matrix.image == 'backend' || matrix.image == 'performance_worker')
         with:
-          name: genuine-local-toolkit-evidence
+          name: ${{ matrix.image == 'backend' && 'genuine-local-toolkit-evidence' || 'genuine-performance-worker-toolkit-evidence' }}
           path: ${{ runner.temp }}/toolkit-evidence/
           retention-days: 7
       - name: Remove only this job's toolkit containers and private network
-        if: always() && matrix.image == 'backend'
+        if: always() && (matrix.image == 'backend' || matrix.image == 'performance_worker')
         run: |
           set -euo pipefail
           containers=$(docker ps -a --format '{{.Names}}')
@@ -232,6 +241,9 @@ jobs:
               if [ "$IMAGE" = terraform_runner ]; then
                 docker run --rm --network none --entrypoint terraform "llmserving-ci:$IMAGE" version
                 docker run --rm --network none --entrypoint az "llmserving-ci:$IMAGE" version
+              elif [ "$IMAGE" = performance_worker ]; then
+                docker run --rm --network none --entrypoint python "llmserving-ci:$IMAGE" -c \
+                  'import json, pathlib; from importlib.metadata import distribution; from src.performance.llmperf_runner import LlmPerfRunner; import llmperf; d=json.loads(distribution("llmperf").read_text("direct_url.json")); assert d["vcs_info"]["commit_id"]=="f1d6bed47e4501b0e371082b41601b59ab55269f"; assert pathlib.Path(llmperf.__file__).with_name("token_benchmark_ray.py").is_file(); assert pathlib.Path(llmperf.__file__).with_name("sonnet.txt").is_file(); print("Canonical worker runner and genuine pinned LLMPerf import smoke passed")'
               fi
               ;;
           esac

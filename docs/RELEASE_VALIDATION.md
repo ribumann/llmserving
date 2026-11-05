@@ -99,14 +99,44 @@ GPU streams or authenticated Azure acceptance.
 
 ## Blocked or not yet demonstrated
 
-Both primary canary/cleanup workflows are currently disabled pending exact
-approved target setup; their historical proof does not establish active cleanup
-or access to a fallback subscription. An operator-approved isolated external
-SSO app registration exists in a separate tenant, supported by the explicit
-operator-tenant input. It has no bootstrapped credential/callback configuration
-or deployed platform acceptance. That registration does not change the ARM
-deployment subscription, establish federated CI access there, or authorize
-additional fallback resources.
+### Performance-worker packaging boundary
+
+The performance image now packages the **same canonical API runner source**
+and genuine pinned LLMPerf commit/CLI/prompt data, following the evaluation
+worker's source-copy pattern. Its CI job invokes the existing real CPU validator
+inside that built image with `/app` explicitly on the Python import path,
+checks the exact model manifest/tool provenance and requires two successful
+concurrency-one requests with finite positive normalized metrics. Separate
+`genuine-performance-worker-toolkit-evidence` artifacts identify their own
+source/run; the historical backend numbers above are not new worker results.
+Unlike the backend gate, the worker gate has no preceding benchmark, so its
+first request may include model loading. Do not compare these short tests as
+an API optimization measurement.
+
+This is **packaging and canonical-runner execution**, not performance-worker
+entrypoint, report, snapshot, cancellation/restart or ownership parity.
+The existing worker entrypoint still uses its HTTP-only measurement path;
+TTFT/ITL remain unavailable there. API execution/routing and its image are
+unchanged. Complete lifecycle/report parity is required before switching
+durable routing or removing proven API runners.
+
+### Azure target boundary
+
+Both original primary canary/cleanup workflows remain disabled. The user
+selected the isolated fallback subscription as the future deployment target;
+its operator-provisioned scoped identity/federation/main-only environment is
+separate from historical primary proof. Reviewed fallback-only workflows are
+available in [PR 23](https://github.com/ribumann/llmserving/pull/23); actual
+failure/cancellation exchange and independent cleanup evidence must be recorded
+by their operator, not inferred from source or credential-free CI.
+
+The approved SSO registration is in that selected tenant, but still has no
+bootstrapped credential/callback configuration or deployed platform acceptance.
+The code keeps operator-auth and ARM/internal tenants separate even when their
+configured values coincide. T4/H100 quota and subscription SKU restrictions in
+checked fallback regions remain hardware gates; unrelated generic NC/NV quota
+does not establish a compatible allocatable GPU. No quota request, additional
+resources or GPU provisioning follows from these validations.
 
 | Gate | Status and next prerequisite |
 | --- | --- |
