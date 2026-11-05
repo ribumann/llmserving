@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
@@ -29,6 +30,8 @@ from src.evaluation.lm_eval_runner import LmEvalRunner
 from src.evaluation.scoring import evaluate_golden_case, strip_reasoning_trace
 from src.performance.llmperf_runner import PerformanceRunOverloadError
 from src.performance.run_performance import PerformanceRunner
+
+LOGGER = logging.getLogger(__name__)
 
 ACTIVE_STATUSES = {ExperimentRunStatus.QUEUED, ExperimentRunStatus.RUNNING}
 TERMINAL_STATUSES = {
@@ -128,19 +131,26 @@ class QualityRunOrchestrator:
         with self._cancel_lock:
             future = self._futures.get(run_id)
 
-        if future is not None:
+        cancelled_before_start = future is not None and future.cancel()
+        if future is not None and not cancelled_before_start:
             try:
                 future.result(timeout=30)
-            except Exception:
-                pass  # best-effort: fall through and report whatever state resulted
+            except TimeoutError:
+                LOGGER.warning("Run %s cancellation is awaiting worker acknowledgement.", run_id)
 
         with self._session_factory() as session:
             run = session.get(ExperimentRun, run_id)
-            if future is None and run is not None and run.status not in TERMINAL_STATUSES:
-                # No real background worker is tracked for this run (e.g. it never
-                # started, or a synchronous test double already returned before
-                # this point) — safe to finish the cancellation directly here.
+            if (
+                cancelled_before_start
+                and run is not None
+                and run.status == ExperimentRunStatus.QUEUED
+            ):
                 self._synchronously_cancel(session, run, requested_by=requested_by)
+                with self._cancel_lock:
+                    self._cancel_events.pop(run_id, None)
+                    self._futures.pop(run_id, None)
+            elif run is not None and run.status in ACTIVE_STATUSES:
+                LOGGER.warning("Run %s cancellation is awaiting worker acknowledgement.", run_id)
             return run
 
     def _synchronously_cancel(
@@ -206,6 +216,9 @@ class QualityRunOrchestrator:
                     # Already finalized (e.g. cancelled while still queued) before
                     # this worker got scheduled — nothing left to do.
                     return
+            if self._should_cancel(context.runId):
+                self._finish_cancelled(context)
+                return
             self._set_status(context=context, status=ExperimentRunStatus.RUNNING, phase="running")
             if context.runType == ExperimentRunType.QUALITY_GOLDEN:
                 self._run_golden(context)
@@ -673,11 +686,15 @@ class QualityRunOrchestrator:
                 return True
         with self._session_factory() as session:
             run = session.get(ExperimentRun, run_id)
-            return bool(run and run.status == ExperimentRunStatus.CANCELLED)
+            return bool(
+                run and (run.cancellationRequests or run.status == ExperimentRunStatus.CANCELLED)
+            )
 
     def _signal_cancel(self, run_id: str) -> None:
         with self._cancel_lock:
-            self._cancel_events.setdefault(run_id, Event()).set()
+            event = self._cancel_events.get(run_id)
+            if event is not None:
+                event.set()
 
     @staticmethod
     def _transition(run: ExperimentRun, status: ExperimentRunStatus) -> None:

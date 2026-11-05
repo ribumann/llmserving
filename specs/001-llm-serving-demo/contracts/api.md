@@ -88,7 +88,10 @@ audit (FR-004) and enforces the single-writer lock on the target `Demo Environme
 - `GET /environments/{environmentId}/runs/{runId}` -> status, diagnostics, partial results while
   running (FR-028, FR-029)
 - `POST /environments/{environmentId}/runs/{runId}/cancel` -> idempotent cancellation; repeat
-  calls do not duplicate cancellation records (FR-054)
+  calls do not duplicate cancellation records (FR-054). Returns the authoritative current
+  run status, which may remain `queued`/`running` with a persisted cancellation request until the
+  owning worker acknowledges it. Absence of a process-local worker handle is not proof
+  that inference stopped; it must not release a running worker's environment lock.
 - `GET /environments/{environmentId}/runs/{runId}/report` -> full `Result Report` (FR-024, FR-026,
   FR-027)
 
