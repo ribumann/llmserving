@@ -20,9 +20,7 @@ class Settings(BaseSettings):
     auth_mode: Literal["entra-jwt", "local-demo"] = "entra-jwt"
     auth_audience: str | None = None
     auth_tenant_id: str | None = None
-    database_url: str = (
-        "postgresql+psycopg://postgres:postgres@localhost:5432/llmserving"
-    )
+    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/llmserving"
     database_echo: bool = False
     database_readiness_timeout_seconds: float = Field(default=3.0, gt=0, le=10)
     azure_subscription_id: str | None = None

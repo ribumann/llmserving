@@ -151,9 +151,7 @@ def _terraform_variables(
         # persisting it would only be a needless secret to manage.
         admin_ssh_public_key, _admin_ssh_private_key_pem = _generate_admin_ssh_keypair()
 
-    tags = defaults.get(
-        "tags", {"owner": "azure-llm-serving-demo", "profileId": profile.profileId}
-    )
+    tags = defaults.get("tags", {"owner": "azure-llm-serving-demo", "profileId": profile.profileId})
     if not isinstance(tags, dict) or not all(
         isinstance(key, str) and isinstance(value, str) for key, value in tags.items()
     ):
@@ -171,9 +169,7 @@ def _terraform_variables(
         "vm_size": resolve_vm_size(profile, inputs),
         "admin_username": defaults.get("adminUsername", "azureuser"),
         "admin_ssh_public_key": admin_ssh_public_key,
-        "vllm_image": defaults.get(
-            "vllmImage", getattr(settings_obj, "vllm_image", "")
-        ),
+        "vllm_image": defaults.get("vllmImage", getattr(settings_obj, "vllm_image", "")),
         "tags": {
             **tags,
             "managedBy": "terraform",
@@ -232,9 +228,7 @@ def preview_environment(
             "assessments": [
                 {
                     "region": check.region,
-                    "quotaStatus": _status(
-                        check.quota.available, "sufficient", "insufficient"
-                    ),
+                    "quotaStatus": _status(check.quota.available, "sufficient", "insufficient"),
                     "capacityStatus": (
                         "constrained" if check.sku.available is False else "unknown"
                     ),
@@ -244,9 +238,7 @@ def preview_environment(
                     "checkedAt": checked_at,
                     "evidence": check.evidence,
                     "uncertainty": (
-                        " ".join(check.uncertaintyReasons)
-                        if check.uncertaintyReasons
-                        else None
+                        " ".join(check.uncertaintyReasons) if check.uncertaintyReasons else None
                     ),
                 }
                 for check in evaluation.checks
@@ -366,9 +358,7 @@ def create_environment(
         with request.app.state.session_factory() as retry_session:
             stored_environment = retry_session.get(DemoEnvironment, environment_id)
             if stored_environment is not None:
-                stored_environment.lifecycleState = (
-                    DemoEnvironmentState.PROVISIONING_FAILED
-                )
+                stored_environment.lifecycleState = DemoEnvironmentState.PROVISIONING_FAILED
                 stored_environment.providerState = {
                     **(stored_environment.providerState or {}),
                     "currentOperation": {
@@ -431,8 +421,7 @@ def list_environments(
             )
             .join(
                 InferenceConfiguration,
-                InferenceConfiguration.inferenceConfigId
-                == DeploymentRevision.inferenceConfigId,
+                InferenceConfiguration.inferenceConfigId == DeploymentRevision.inferenceConfigId,
             )
             .where(DeploymentRevision.deploymentRevisionId.in_(active_revision_ids))
         ).all()
@@ -445,9 +434,7 @@ def list_environments(
                 "resolvedCheckpointRef": model_configuration.resolvedCheckpointRef,
                 "modelSettings": dict(model_configuration.modelSettings or {}),
                 "servingSettings": dict(inference_configuration.servingSettings or {}),
-                "generationSettings": dict(
-                    inference_configuration.generationSettings or {}
-                ),
+                "generationSettings": dict(inference_configuration.generationSettings or {}),
             }
 
     return with_request_id(
@@ -465,14 +452,10 @@ def list_environments(
                         environment.activeDeploymentRevisionId or ""
                     ),
                     "createdAt": (
-                        environment.createdAt.isoformat()
-                        if environment.createdAt
-                        else None
+                        environment.createdAt.isoformat() if environment.createdAt else None
                     ),
                     "updatedAt": (
-                        environment.updatedAt.isoformat()
-                        if environment.updatedAt
-                        else None
+                        environment.updatedAt.isoformat() if environment.updatedAt else None
                     ),
                 }
                 for environment in environments

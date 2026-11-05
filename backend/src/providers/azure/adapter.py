@@ -45,12 +45,8 @@ class AzureProviderAdapter(ProviderAdapter):
         self._session_factory = session_factory
         self._settings = settings
         self._telemetry = telemetry
-        preflight = AzureCapacityPreflight(
-            subscription_id=settings.azure_subscription_id or ""
-        )
-        self._preview_service = preview_service or AzurePreviewService(
-            preflight=preflight
-        )
+        preflight = AzureCapacityPreflight(subscription_id=settings.azure_subscription_id or "")
+        self._preview_service = preview_service or AzurePreviewService(preflight=preflight)
         self._provisioner = provisioner or AzureProvisioner(
             session_factory=session_factory,
             settings=settings,
@@ -128,9 +124,7 @@ class AzureProviderAdapter(ProviderAdapter):
         # this is read straight from the profile's configurable defaults rather
         # than from terraform_variables.
         bootstrap_model_repo = str(
-            dict(profile.configurableInputs or {}).get(
-                "bootstrapModelRepo", "Qwen/Qwen3-4B"
-            )
+            dict(profile.configurableInputs or {}).get("bootstrapModelRepo", "Qwen/Qwen3-4B")
         )
         return ProvisioningContext(
             environmentId=environment_id,
@@ -139,9 +133,7 @@ class AzureProviderAdapter(ProviderAdapter):
             region=region,
             profileId=profile.profileId,
             profileSizeClass=profile.modelSizeClass.value,
-            vmSize=resolve_vm_size(
-                profile, {"vmSizeOverride": terraform_variables.get("vm_size")}
-            ),
+            vmSize=resolve_vm_size(profile, {"vmSizeOverride": terraform_variables.get("vm_size")}),
             bootstrapModelRepo=bootstrap_model_repo,
             terraformVariables=terraform_variables,
             fallbackRegions=list(profile.eligibleRegions),
@@ -150,9 +142,7 @@ class AzureProviderAdapter(ProviderAdapter):
     def previewEnvironment(
         self, profileId: str, regionOverride: str | None = None
     ) -> RegionRecommendation:
-        evaluation = self.preview_with_details(
-            profileId=profileId, regionOverride=regionOverride
-        )
+        evaluation = self.preview_with_details(profileId=profileId, regionOverride=regionOverride)
         return evaluation.recommendation
 
     def preview_with_details(
@@ -184,9 +174,7 @@ class AzureProviderAdapter(ProviderAdapter):
     ) -> DeploymentHandle:
         return self.start_deployment(
             environment_id=environmentId,
-            deployment_revision_id=str(
-                modelConfig.get("deploymentRevisionId") or "pending"
-            ),
+            deployment_revision_id=str(modelConfig.get("deploymentRevisionId") or "pending"),
             operation_id=f"deploy-{environmentId}",
             actor_email="system",
             model_config=dict(modelConfig),
@@ -262,9 +250,7 @@ class AzureProviderAdapter(ProviderAdapter):
             ],
         )
 
-    def teardownEnvironment(
-        self, environmentId: str, previewToken: str
-    ) -> TeardownHandle:
+    def teardownEnvironment(self, environmentId: str, previewToken: str) -> TeardownHandle:
         _ = previewToken  # not independently validated; mirrors providers/local/adapter.py
         return self._provisioner.start_teardown(
             environment_id=environmentId,
