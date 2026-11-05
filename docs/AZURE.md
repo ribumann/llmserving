@@ -740,6 +740,17 @@ view of the hash-bound canonical state. The original strict29 fresh-create
 guard remains unchanged; no adoption, arbitrary partial state, update,
 replacement, destroy, drift or automatic retry is supported.
 
+The actual refreshed recovery plan subsequently exposed only these explicitly
+reviewed Azure computed normalizations: NAT gateway `zones` null to empty;
+all five owned subnet `service_endpoints`/`service_endpoint_policy_ids` null
+to empty; vault DNS `number_of_record_sets` 1 to 2; and VNet's empty computed
+subnet set to exactly the five owned subnet IDs/names/prefixes with only GPU
+bound to the owned GPU NSG. The recovery guard accepts **only these exact
+deltas**. Every native drift record must match the preserved canonical
+before-value and refreshed prior after-value; missing, extra, duplicate or
+changed drift, CIDRs, NSG bindings and resource metadata are rejected. This
+does not allow general drift or change the 27-NOOP/two-create requirement.
+
 After independent review and passing exact-source CI, use the actual private
 full native plan generated after feature registration/provider refresh,
 Terraform **1.16.6**, the same reviewed no-purge override and restricted
