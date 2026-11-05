@@ -1,0 +1,74 @@
+name: Private CONNECT proxy CI
+
+on:
+  pull_request:
+    paths: ["tools/private_proxy/**", "tools/private_operator/Dockerfile", ".github/workflows/private-proxy-ci.yml"]
+  push:
+    branches: [main]
+    paths: ["tools/private_proxy/**", "tools/private_operator/Dockerfile", ".github/workflows/private-proxy-ci.yml"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  proxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build reviewed operator image from tracked public source
+        run: |
+          mkdir "$RUNNER_TEMP/proxy-source"
+          git archive HEAD infra scripts tools/private_operator tools/private_proxy |
+            tar -x -C "$RUNNER_TEMP/proxy-source"
+          docker build --target network --build-arg "SOURCE_REVISION=$(git rev-parse HEAD)" \
+            -f "$RUNNER_TEMP/proxy-source/tools/private_operator/Dockerfile" \
+            -t llmserving-private-proxy:network "$RUNNER_TEMP/proxy-source"
+          docker build --build-arg "SOURCE_REVISION=$(git rev-parse HEAD)" \
+            -f "$RUNNER_TEMP/proxy-source/tools/private_operator/Dockerfile" \
+            -t llmserving-private-proxy:ci "$RUNNER_TEMP/proxy-source"
+      - name: Network-only target has real tools, config and no CLI or state
+        run: |
+          docker run --rm --network none --user 13:13 --cap-drop ALL --read-only \
+            --security-opt no-new-privileges --tmpfs /tmp --tmpfs /run \
+            llmserving-private-proxy:network sh -ec '
+              openvpn --version >/dev/null
+              squid -k parse -f /etc/llmserving/squid.conf
+              for tool in az terraform gh; do
+                if command -v "$tool"; then
+                  echo "Network-only target unexpectedly includes $tool" >&2
+                  exit 1
+                fi
+              done
+              test ! -e /opt/llmserving/infra
+            '
+      - name: Compile the actual AzureRM 3.117.1 Key Vault SDK fixture
+        run: |
+          mkdir "$RUNNER_TEMP/vault-fixture"
+          cp tools/private_proxy/vault_fixture.go "$RUNNER_TEMP/vault-fixture/main.go"
+          cd "$RUNNER_TEMP/vault-fixture"
+          go mod init llmserving-proxy-fixture
+          go get github.com/tombuildsstuff/kermit@v0.20240122.1123108
+          go mod tidy
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/vault-client" .
+      - name: Actual network-only target CONNECT denial and unchanged TLS peer
+        run: |
+          docker run --rm --network none --read-only --user 13:13 --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --add-host llmreleasestate0ea5e6.blob.core.windows.net:127.0.0.1 \
+            --add-host llmrelease-kv-0ea5e6.vault.azure.net:127.0.0.1 \
+            --tmpfs /tmp --tmpfs /run \
+            --mount "type=bind,src=$PWD/tools/private_proxy/smoke.py,dst=/opt/smoke.py,readonly" \
+            --entrypoint python llmserving-private-proxy:network /opt/smoke.py --network-only
+      - name: Actual proxy ACL, TLS, Terraform backend and Key Vault SDK (no Azure)
+        run: |
+          docker run --rm --network none --read-only --user 13:13 --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --add-host llmreleasestate0ea5e6.blob.core.windows.net:127.0.0.1 \
+            --add-host llmrelease-kv-0ea5e6.vault.azure.net:127.0.0.1 \
+            --tmpfs /tmp --tmpfs /run --tmpfs /var/log/squid \
+            --mount "type=bind,src=$RUNNER_TEMP/vault-client,dst=/opt/vault-client,readonly" \
+            --entrypoint python llmserving-private-proxy:ci /opt/llmserving/proxy-smoke.py

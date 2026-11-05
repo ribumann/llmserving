@@ -703,3 +703,45 @@ cleanup, or supplies the outstanding state-data/auth/ACA permissions.
 These are unmet release requirements, not claims that a single command or the
 existing image-update workflows already implement them. Never turn a blocked
 gate into a success by omitting it or substituting old measurements.
+# Exact one-time shared partial recovery (2026-11-05)
+
+The guarded first shared29 apply persisted **27 managed resources**, then
+failed creating the NAT public IP: enforced organization policy appended
+`FirstPartyUsage=/Unprivileged`, while the subscription feature
+`Microsoft.Network/AllowBringYourOwnPublicIpAddress` was unregistered.
+The authorized operator registered that required feature without changing,
+exempting or disabling policy. This is not a generic retry approval.
+
+The separately guarded `local-reconcile` operation accepts only the preserved
+canonical snapshot lineage `c5fe615f-a6a1-0d7b-eff8-b17acb8252b2`, serial **29**,
+SHA256 `9ac867489cc393609edc99b2296bb6e3f69633c5d7b6befadb9fe4813c8b48b9`.
+It requires exactly two creates (`azurerm_public_ip.nat` and
+`azurerm_nat_gateway_public_ip_association.shared`) and all other 27 managed
+resources exact known NOOPs. The native prior state must match a fresh native
+view of the hash-bound canonical state. The original strict29 fresh-create
+guard remains unchanged; no adoption, arbitrary partial state, update,
+replacement, destroy, drift or automatic retry is supported.
+
+After independent review and passing exact-source CI, use the actual private
+full native plan generated after feature registration/provider refresh,
+Terraform **1.16.6**, the same reviewed no-purge override and restricted
+canonical directory. Preserve the existing failure log/checkpoints. The
+independent cleanup must still be armed, with a successful protected-main
+attempt1 no older than 30 minutes and a deadline **no later than
+2026-11-05T21:55:55Z**. Re-arm a read-only check if the evidence is stale; do
+not extend the deadline as part of recovery. No concurrent cleanup/apply.
+
+```text
+python <reviewed-source>/scripts/azure_shared_bridge.py local-reconcile \
+  --plan <PRIVATE-main-shared-after-feature-recovery.tfplan> \
+  --private-log <NEW-private-reconcile.log> \
+  --second-backup <RESTRICTED-EXTERNAL-BACKUP-DIRECTORY> \
+  --cleanup-run <RECENT-SUCCESSFUL-INDEPENDENT-ARM-CLEANUP-RUN>
+```
+
+The wrapper verifies registered feature status and exact live owned inventory
+missing only the NAT PIP, checks child attachments, and retains verified
+private before/after checkpoints even if apply fails. A second failure or
+changed canonical hash is a new incident requiring review, not another retry.
+Successful scope checks are not a claim that Azure allocation or the
+subsequent application deployment succeeds.

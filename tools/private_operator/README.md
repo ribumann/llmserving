@@ -2,7 +2,7 @@
 
 This image is separate from the application's Terraform job. It packages
 Terraform **1.16.6** with the verified official archive checksum, Azure CLI
-**2.80.0**, OpenVPN, Python, OpenSSL, GitHub CLI and the same reviewed `infra`/`scripts`
+**2.80.0**, OpenVPN, Squid, Python, OpenSSL, GitHub CLI and the same reviewed `infra`/`scripts`
 source. It does not change the job's Terraform 1.9.8 pin, run a job entrypoint,
 apply infrastructure, connect a VPN or contain credentials. Debian packages
 and Python transitive dependencies are not fully locked: retain the resulting
@@ -32,7 +32,7 @@ source only, without collecting local state, plans, overrides or keys:
 ```bash
 revision=REVIEWED_FULL_COMMIT_SHA
 mkdir operator-source
-git archive "$revision" infra scripts tools/private_operator |
+git archive "$revision" infra scripts tools/private_operator tools/private_proxy |
   tar -x -C operator-source
 docker build --platform linux/amd64 --build-arg "SOURCE_REVISION=$revision" \
   -f operator-source/tools/private_operator/Dockerfile \
@@ -58,6 +58,10 @@ to change the host. Pin the accepted local image ID for subsequent execution.
 CI tests this sandbox boundary and tool versions only, not a real VPN.
 
 ## Actual execution remains gated
+
+For the network-only route that keeps existing authentication and canonical
+Terraform entirely on Windows, see [private CONNECT mode](../private_proxy/README.md).
+That mode mounts only restricted VPN files, not state or authentication caches.
 
 Use the **same** reviewed `infra/operator_access` P2S gateway/resolver/endpoint,
 not duplicate resources. Its actual native plan, independent ARM cleanup
