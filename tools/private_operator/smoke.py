@@ -22,6 +22,7 @@ def main() -> None:
     if azure["azure-cli"] != "2.80.0":
         raise RuntimeError("Operator Azure CLI version differs from reviewed pin")
     subprocess.run(["openvpn", "--version"], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["gh", "--version"], check=True, stdout=subprocess.DEVNULL)
     for module in ("bootstrap", "shared", "control", "demo", "operator_access"):
         if not Path(f"/opt/llmserving/infra/{module}/main.tf").is_file():
             raise RuntimeError(f"Missing packaged native module: {module}")

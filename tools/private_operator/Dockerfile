@@ -5,7 +5,7 @@ LABEL org.opencontainers.image.revision="${SOURCE_REVISION}"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl unzip openvpn iproute2 openssl \
+        ca-certificates curl unzip openvpn iproute2 openssl gh \
     && curl --fail --silent --show-error --location \
         https://releases.hashicorp.com/terraform/1.16.6/terraform_1.16.6_linux_amd64.zip \
         --output /tmp/terraform.zip \

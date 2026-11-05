@@ -2,7 +2,7 @@
 
 This image is separate from the application's Terraform job. It packages
 Terraform **1.16.6** with the verified official archive checksum, Azure CLI
-**2.80.0**, OpenVPN, Python, OpenSSL and the same reviewed `infra`/`scripts`
+**2.80.0**, OpenVPN, Python, OpenSSL, GitHub CLI and the same reviewed `infra`/`scripts`
 source. It does not change the job's Terraform 1.9.8 pin, run a job entrypoint,
 apply infrastructure, connect a VPN or contain credentials. Debian packages
 and Python transitive dependencies are not fully locked: retain the resulting
@@ -81,6 +81,9 @@ connection within the container; use its resolver `10.20.31.4` with container
 DNS (never host DNS/hosts-file changes). Log in independently using device-code
 or interactive Azure CLI login with the intended tenant/subscription; its
 `/run/azure` cache is ephemeral. Do not copy cached host credentials.
+Helpers requiring GitHub cleanup-run verification also need an independent
+GitHub CLI login in the ephemeral container home; never mount the host's
+GitHub CLI cache or pass a token in command-line arguments.
 
 No launcher or live readiness is claimed here. Actual client-profile
 compatibility, DNS over P2S, private state/vault TLS, OAuth/lease operations and
