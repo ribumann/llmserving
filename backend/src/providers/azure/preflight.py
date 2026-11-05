@@ -6,11 +6,23 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from azure.core.exceptions import AzureError
+from azure.core.exceptions import AzureError, ClientAuthenticationError, HttpResponseError
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
 
 LOGGER = logging.getLogger(__name__)
+
+
+class AzurePreflightAuthorizationError(RuntimeError):
+    def __init__(self, *, operation: Literal["sku", "quota"]) -> None:
+        self.operation = operation
+        super().__init__("Azure capacity preflight authorization failed; provisioning is blocked.")
+
+
+def _authorization_failed(error: AzureError) -> bool:
+    return isinstance(error, ClientAuthenticationError) or (
+        isinstance(error, HttpResponseError) and error.status_code in {401, 403}
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -147,6 +159,9 @@ class AzureCapacityPreflight:
         try:
             usage_entries = list(self.compute_client.usage.list(location=region))
         except AzureError as exc:
+            if _authorization_failed(exc):
+                LOGGER.warning("Azure quota authorization failed (%s).", type(exc).__name__)
+                raise AzurePreflightAuthorizationError(operation="quota") from None
             LOGGER.warning("Azure quota lookup unavailable (%s).", type(exc).__name__)
             return QuotaCheckResult(
                 region=region,
@@ -258,6 +273,9 @@ class AzureCapacityPreflight:
                 self.compute_client.resource_skus.list(filter=f"location eq '{region}'")
             )
         except AzureError as exc:
+            if _authorization_failed(exc):
+                LOGGER.warning("Azure SKU authorization failed (%s).", type(exc).__name__)
+                raise AzurePreflightAuthorizationError(operation="sku") from None
             LOGGER.warning("Azure SKU lookup unavailable (%s).", type(exc).__name__)
             return SkuAvailabilityResult(
                 region=region,

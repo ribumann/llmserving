@@ -72,6 +72,17 @@ identifiers **before** `azure/login` and avoid dumping account/environment data.
 Do not expand permissions merely to read administration settings that runtime
 does not require. Stop on denied policy or unknown ownership.
 
+Azure capacity preflight needs approved read authorization for the subscription's
+Compute SKU catalog and regional usages (`Microsoft.Compute/skus/read` and
+`Microsoft.Compute/locations/usages/read`). Authentication failure or HTTP
+401/403 returns `azure_preflight_authorization_failed` (503) from both preview
+and creation, before creation-side persistence or provisioning dispatch. A
+manual region override cannot bypass it. API responses and preflight logs omit
+SDK error bodies/credentials; no new sign-in, alternate identity or grant is attempted.
+Non-authorization transport/service failures and missing metadata retain the
+existing explicit **unknown** advisory behavior. That fallback is not confirmed
+quota, allocation, authorization or permission to spend on GPUs.
+
 ## Minimal external SSO bootstrap
 
 The application can accept an externally approved app without granting Graph
