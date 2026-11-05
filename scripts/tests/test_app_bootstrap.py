@@ -1,0 +1,250 @@
+import copy
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import Mock, patch
+import zipfile
+
+
+SCRIPTS = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SCRIPTS))
+spec = importlib.util.spec_from_file_location("app_bootstrap", SCRIPTS / "app_bootstrap.py")
+bootstrap = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bootstrap)
+
+
+class BootstrapTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        package = self.root / "functions.zip"
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("host.json", "{}")
+            archive.writestr("function_app.py", "# synthetic fixture")
+        self.inputs = self.root / "inputs.json"
+        self.contract = {
+            "acr_login_server": "synthetic.azurecr.io",
+            "vault_name": "synthetic-vault",
+            "images": {
+                name: f"synthetic.azurecr.io/{name.replace('_', '-')}@sha256:{'a' * 64}"
+                for name in bootstrap.IMAGES
+            },
+            "functions_zip": "functions.zip",
+            "functions_sha256": hashlib.sha256(package.read_bytes()).hexdigest(),
+            "allowed_email_domains": ["liberatetheinnerchild.net"],
+            "operator_upn": "synthetic@liberatetheinnerchild.net",
+        }
+
+    def load(self):
+        self.inputs.write_text(json.dumps(self.contract))
+        return bootstrap.load_contract(self.inputs)
+
+    def responses(self):
+        return [
+            {"id": bootstrap.SUBSCRIPTION, "tenantId": bootstrap.TENANT},
+            {"id": bootstrap.ENVIRONMENT, "properties": {
+                "provisioningState": "Succeeded",
+                "defaultDomain": "synthetic.italynorth.azurecontainerapps.io",
+            }},
+            {"id": bootstrap.SHARED + "/providers/Microsoft.ContainerRegistry/registries/synthetic",
+             "properties": {"loginServer": "synthetic.azurecr.io"}},
+            {"id": bootstrap.SHARED + "/providers/Microsoft.KeyVault/vaults/synthetic-vault",
+             "properties": {
+                 "tenantId": bootstrap.TENANT,
+                 "publicNetworkAccess": "Disabled", "enableRbacAuthorization": True,
+                 "vaultUri": "https://synthetic-vault.vault.azure.net/",
+             }},
+            {"appId": bootstrap.CLIENT, "signInAudience": "AzureADMyOrg",
+             "web": {"redirectUris": [], "implicitGrantSettings": {
+                 "enableIdTokenIssuance": False, "enableAccessTokenIssuance": False,
+             }}},
+        ]
+
+    def test_validate_is_offline_and_emits_exact_inputs(self):
+        with patch.object(bootstrap, "az_json") as azure:
+            contract = self.load()
+            values = bootstrap.control_inputs(contract)
+        azure.assert_not_called()
+        self.assertEqual(len([key for key in values if key.endswith("_image")]), 7)
+        self.assertTrue(values["enable_sso"])
+        self.assertEqual(values["auth_allowed_email_domains"], "liberatetheinnerchild.net")
+        self.assertEqual(values["existing_sso_client_id"], bootstrap.CLIENT)
+        self.assertEqual(values["existing_sso_secret_id"],
+                         "https://synthetic-vault.vault.azure.net/secrets/sso-client-secret")
+
+    def test_rejects_bad_artifact_and_policy_inputs(self):
+        original = copy.deepcopy(self.contract)
+        for field, value in [
+            ("allowed_email_domains", ["example.com"]),
+            ("allowed_email_domains", ["*.liberatetheinnerchild.net"]),
+            ("allowed_email_domains", ["evilliberatetheinnerchild.net"]),
+            ("allowed_email_domains", []),
+            ("allowed_email_domains", [True]),
+            ("allowed_email_domains", ["foreign.example"]),
+            ("operator_upn", "synthetic@foreign.example"),
+            ("functions_sha256", "0" * 64),
+            ("functions_zip", "missing.zip"),
+            ("images", {"backend": "synthetic.azurecr.io/backend:latest"}),
+            ("vault_name", "https://foreign.example"),
+        ]:
+            with self.subTest(field=field, value=value):
+                self.contract = {**original, field: value}
+                with self.assertRaises((ValueError, OSError)):
+                    self.load()
+        for reference in ["synthetic.azurecr.io/backend:latest",
+                          f"foreign.azurecr.io/backend@sha256:{'a' * 64}"]:
+            self.contract = copy.deepcopy(original)
+            self.contract["images"]["backend"] = reference
+            with self.assertRaises(ValueError):
+                self.load()
+
+    def test_zip_content_and_symlink_are_rejected(self):
+        package = self.root / "functions.zip"
+        package.write_bytes(b"not a zip")
+        self.contract["functions_sha256"] = hashlib.sha256(package.read_bytes()).hexdigest()
+        with self.assertRaises(bootstrap.BootstrapError):
+            self.load()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("nested/host.json", "{}")
+        self.contract["functions_sha256"] = hashlib.sha256(package.read_bytes()).hexdigest()
+        with self.assertRaises(bootstrap.BootstrapError):
+            self.load()
+        alias = self.root / "alias.zip"
+        alias.symlink_to(package)
+        self.contract["functions_zip"] = str(alias)
+        with self.assertRaises(ValueError):
+            self.load()
+
+    def test_preview_only_reads_and_uses_actual_environment_domain(self):
+        contract = self.load()
+        with patch.object(bootstrap, "az_json", side_effect=self.responses()) as azure:
+            plan = bootstrap.preview(contract)
+        self.assertEqual(plan["callbacks"], [
+            f"https://llmrelease-{name}.synthetic.italynorth.azurecontainerapps.io/.auth/login/aad/callback"
+            for name in ("frontend", "backend")
+        ])
+        for call in azure.call_args_list[1:]:
+            self.assertEqual(call.args[:3], ("rest", "--method", "GET"))
+        digest = bootstrap.approval_hash(plan)
+        changed = copy.deepcopy(plan)
+        changed["current_id_token_issuance"] = True
+        self.assertNotEqual(digest, bootstrap.approval_hash(changed))
+
+    def test_preview_blocks_wrong_scope_or_reused_application(self):
+        mutations = [
+            (0, "tenantId", "foreign"),
+            (1, "id", bootstrap.ENVIRONMENT.replace("llmrelease", "production")),
+            (1, "properties", {"provisioningState": "Creating"}),
+            (2, "properties", {"loginServer": "foreign.azurecr.io"}),
+            (3, "properties", {**self.responses()[3]["properties"], "publicNetworkAccess": "Enabled"}),
+            (4, "signInAudience", "AzureADMultipleOrgs"),
+            (4, "web", {"redirectUris": ["https://production.example/callback"]}),
+        ]
+        contract = self.load()
+        for index, key, value in mutations:
+            with self.subTest(index=index, key=key):
+                responses = self.responses()
+                responses[index][key] = value
+                with patch.object(bootstrap, "az_json", side_effect=responses):
+                    with self.assertRaises(bootstrap.BootstrapError):
+                        bootstrap.preview(contract)
+
+    def test_initial_secret_preview_does_not_need_environment(self):
+        responses = self.responses()
+        del responses[1]
+        with patch.object(bootstrap, "az_json", side_effect=responses) as azure:
+            plan = bootstrap.preview(self.load(), callbacks=False)
+        self.assertEqual(plan["phase"], "initial-secret")
+        self.assertEqual(plan["callbacks"], [])
+        self.assertIsNone(plan["environment_id"])
+        self.assertFalse(any("managedEnvironments" in str(call) for call in azure.call_args_list))
+
+    def test_actual_operator_domain_is_explicit_and_accepted(self):
+        self.contract["allowed_email_domains"] = ["mngenvmcap621318.onmicrosoft.com"]
+        self.contract["operator_upn"] = "admin@MngEnvMCAP621318.onmicrosoft.com"
+        self.assertEqual(bootstrap.control_inputs(self.load())["auth_allowed_email_domains"],
+                         "mngenvmcap621318.onmicrosoft.com")
+
+    def test_callback_patch_is_exact_and_preserves_access_token_setting(self):
+        plan = {"callbacks": ["https://synthetic/callback"],
+                "current_access_token_issuance": False}
+        with patch.object(bootstrap, "azure_token", return_value="not-real") as token, \
+             patch.object(bootstrap, "request_json") as request:
+            bootstrap.mutate("set-callbacks", self.load(), plan, None)
+        token.assert_called_once_with("https://graph.microsoft.com")
+        self.assertEqual(request.call_args.args[:3],
+                         ("graph.microsoft.com", bootstrap.APP_PATH, "PATCH"))
+        self.assertEqual(request.call_args.args[4], {"web": {
+            "redirectUris": plan["callbacks"],
+            "implicitGrantSettings": {"enableIdTokenIssuance": True,
+                                     "enableAccessTokenIssuance": False},
+        }})
+
+    def test_secret_only_moves_from_fd_to_exact_https_payload(self):
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, read_fd)
+        os.write(write_fd, b"synthetic-credential\n")
+        os.close(write_fd)
+        with patch.object(bootstrap, "azure_token", return_value="not-real") as token, \
+             patch.object(bootstrap, "request_json") as request:
+            bootstrap.mutate("store-secret", self.load(), {}, read_fd)
+        token.assert_called_once_with("https://vault.azure.net")
+        self.assertEqual(request.call_args.args[:3], (
+            "synthetic-vault.vault.azure.net", "/secrets/sso-client-secret?api-version=7.4", "PUT",
+        ))
+        self.assertEqual(request.call_args.args[4]["value"], "synthetic-credential")
+        with self.assertRaises(bootstrap.BootstrapError):
+            bootstrap.mutate("store-secret", self.load(), {}, None)
+
+    def test_http_failure_never_reads_or_prints_secret_response(self):
+        connection = Mock()
+        connection.getresponse.return_value.status = 403
+        with patch.object(bootstrap.http.client, "HTTPSConnection", return_value=connection):
+            with self.assertRaisesRegex(bootstrap.BootstrapError, "HTTP 403"):
+                bootstrap.request_json("synthetic-vault.vault.azure.net", "/secrets/name", "PUT",
+                                       "synthetic-token", {"value": "synthetic-secret"})
+        connection.getresponse.return_value.read.assert_not_called()
+        connection.close.assert_called_once()
+
+    def test_cli_failure_suppresses_diagnostics_and_binds_subscription(self):
+        result = subprocess.CompletedProcess([], 1, b"", b"SENSITIVE diagnostic")
+        with patch.object(bootstrap.subprocess, "run", return_value=result) as run:
+            with self.assertRaises(bootstrap.BootstrapError) as error:
+                bootstrap.az_json("account", "show")
+        self.assertNotIn("SENSITIVE", str(error.exception))
+        self.assertIn(bootstrap.SUBSCRIPTION, run.call_args.args[0])
+
+    def test_https_request_carries_bearer_token_and_exact_body(self):
+        connection = Mock()
+        connection.getresponse.return_value.status = 204
+        with patch.object(bootstrap.http.client, "HTTPSConnection", return_value=connection):
+            bootstrap.request_json("graph.microsoft.com", bootstrap.APP_PATH, "PATCH",
+                                   "synthetic-token", {"web": {"redirectUris": []}})
+        request = connection.request.call_args
+        self.assertEqual(request.args, ("PATCH", bootstrap.APP_PATH))
+        self.assertEqual(request.kwargs["headers"]["Authorization"],
+                         " ".join(("Bearer", "synthetic-token")))
+        self.assertEqual(json.loads(request.kwargs["body"]), {"web": {"redirectUris": []}})
+        connection.getresponse.return_value.read.assert_not_called()
+
+    def test_missing_or_stale_approval_does_not_mutate(self):
+        self.load()
+        for approval in ([], ["--approve-preview-sha256", "0" * 64]):
+            with patch.object(sys, "argv", [
+                "app_bootstrap.py", "set-callbacks", "--inputs", str(self.inputs), *approval,
+            ]), patch.object(bootstrap, "preview", return_value={"synthetic": True}), \
+                 patch.object(bootstrap, "mutate") as mutate:
+                with self.assertRaisesRegex(SystemExit, "approval"):
+                    bootstrap.main()
+                mutate.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()
