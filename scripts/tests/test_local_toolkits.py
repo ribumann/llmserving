@@ -12,6 +12,28 @@ spec.loader.exec_module(validation)
 
 
 class ToolkitGuardTests(TestCase):
+    def test_multiple_filter_logs_do_not_multiply_the_actual_document(self):
+        samples = [
+            {"doc_id": 0, "resps": [["synthetic answer"]]},
+            {"doc_id": 0, "resps": [["synthetic answer"]]},
+        ]
+        self.assertEqual(
+            validation.verify_benchmark_sample_logs(samples), "synthetic answer"
+        )
+
+    def test_missing_extra_or_inconsistent_sample_responses_fail(self):
+        for samples in (
+            [],
+            [{"doc_id": 0, "resps": [[""]]}],
+            [{"doc_id": 0, "resps": [["one"]]}, {"doc_id": 1, "resps": [["one"]]}],
+            [
+                {"doc_id": 0, "resps": [["one"]]},
+                {"doc_id": 0, "resps": [["different"]]},
+            ],
+        ):
+            with self.subTest(samples=samples), self.assertRaises(ValueError):
+                validation.verify_benchmark_sample_logs(samples)
+
     def test_only_explicit_owned_endpoints_are_accepted(self):
         for host in ("localhost", "127.0.0.1", "llmserving-ci-toolkit-ollama"):
             with self.subTest(host=host), patch.dict(

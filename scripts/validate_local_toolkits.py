@@ -49,6 +49,20 @@ def verify_llmperf_provenance() -> dict[str, Any]:
     return metadata
 
 
+def verify_benchmark_sample_logs(samples: list[dict[str, Any]]) -> str:
+    if not samples or len({sample["doc_id"] for sample in samples}) != 1:
+        raise ValueError("Benchmark must evaluate exactly one distinct document.")
+    generated = [sample["resps"][0][0] for sample in samples]
+    if (
+        not all(isinstance(text, str) and text.strip() for text in generated)
+        or len(set(generated)) != 1
+    ):
+        raise ValueError(
+            "Benchmark filter logs must preserve the same real nonempty response."
+        )
+    return generated[0]
+
+
 def run_benchmark(base_url: str) -> dict[str, Any]:
     from lm_eval import simple_evaluate
     from src.domain.benchmark_definition import BenchmarkDefinition
@@ -87,15 +101,15 @@ def run_benchmark(base_url: str) -> dict[str, Any]:
     )
     assert raw["n-samples"]["gsm8k"]["effective"] == 1
     samples = raw["samples"]["gsm8k"]
-    assert len(samples) == 1
-    generated = samples[0]["resps"][0][0]
-    assert isinstance(generated, str) and generated.strip()
+    # Multiple scoring filters can log the same single inference more than once.
+    generated = verify_benchmark_sample_logs(samples)
     assert math.isfinite(result["score"]) and 0 <= result["score"] <= 100
     assert result["passFail"] in {"pass", "fail"}
     return {
         "packageVersion": version("lm_eval"),
         "taskVersion": raw["versions"]["gsm8k"],
         "effectiveSamples": 1,
+        "sampleLogRecords": len(samples),
         "generatedCharacters": len(generated),
         "report": result,
     }
