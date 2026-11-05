@@ -2,6 +2,7 @@ import copy
 import hashlib
 import http.server
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -486,6 +487,26 @@ class BootstrapTests(unittest.TestCase):
                 bootstrap.az_json("account", "show")
         self.assertNotIn("SENSITIVE", str(error.exception))
         self.assertIn(bootstrap.SUBSCRIPTION, run.call_args.args[0])
+
+    def test_graph_and_vault_tokens_use_only_fixed_subscription_without_printing(self):
+        for resource in ("https://graph.microsoft.com", "https://vault.azure.net"):
+            with self.subTest(resource=resource), patch.object(
+                bootstrap.subprocess, "run",
+                return_value=subprocess.CompletedProcess(
+                    [], 0, b'{"accessToken":"synthetic-private-token"}', b"",
+                ),
+            ) as run, patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+                 patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                self.assertEqual(bootstrap.azure_token(resource), "synthetic-private-token")
+                arguments = run.call_args.args[0]
+                self.assertEqual(arguments[1:5], ["account", "get-access-token", "--resource", resource])
+                self.assertEqual(arguments.count("--subscription"), 1)
+                self.assertEqual(arguments[arguments.index("--subscription") + 1], bootstrap.SUBSCRIPTION)
+                self.assertNotIn("--tenant", arguments)
+                self.assertNotIn("synthetic-private-token", arguments)
+                self.assertTrue(run.call_args.kwargs["capture_output"])
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue(), "")
 
     def test_windows_azure_cli_resolution_uses_path_and_suppresses_diagnostics(self):
         with patch.object(bootstrap.os, "name", "nt"), patch.object(
