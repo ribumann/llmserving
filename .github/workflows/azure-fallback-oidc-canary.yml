@@ -1,0 +1,82 @@
+name: Azure fallback OIDC canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      outcome:
+        description: Deliberate failure, or wait for an external cancellation
+        required: true
+        type: choice
+        options: [failure, cancellation]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-fallback-oidc-canary-resource
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    if: github.ref == 'refs/heads/main' && github.repository == 'ribumann/llmserving'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: azure-e2e-fallback
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_CANARY_RESOURCE_GROUP: ${{ secrets.AZURE_CANARY_RESOURCE_GROUP }}
+      AZURE_CANARY_REGION: ${{ secrets.AZURE_CANARY_REGION }}
+      AZURE_CORE_OUTPUT: none
+    steps:
+      - name: Validate and mask protected configuration
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          keys = ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID",
+                  "AZURE_CANARY_RESOURCE_GROUP", "AZURE_CANARY_REGION")
+          missing = [key for key in keys if not os.environ.get(key)]
+          for key in keys:
+              value = os.environ.get(key, "")
+              if value:
+                  value = value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                  print(f"::add-mask::{value}")
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          owner_id = os.environ.get("GITHUB_REPOSITORY_OWNER_ID", "")
+          repo_id = os.environ.get("GITHUB_REPOSITORY_ID", "")
+          if "/" in repo and owner_id and repo_id:
+              owner, name = repo.split("/", 1)
+              print(f"::add-mask::repo:{owner}@{owner_id}/{name}@{repo_id}:environment:azure-e2e-fallback")
+          if missing:
+              raise SystemExit(f"Missing protected canary configuration: {', '.join(missing)}")
+          PY
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate fixed fallback target before login
+        run: python scripts/azure_canary.py validate-config --target fallback
+      - name: Azure OIDC login
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Create and verify fixed owned fallback canary
+        run: python scripts/azure_canary.py create --target fallback
+      - name: Deliberately fail for independent cleanup verification
+        if: inputs.outcome == 'failure'
+        run: |
+          echo "::error::Intentional failure after canary creation; independent cleanup must run."
+          exit 1
+      - name: Wait for external cancellation
+        if: inputs.outcome == 'cancellation'
+        run: |
+          echo "Canary verified. Cancel this workflow externally to test independent cleanup."
+          sleep 900
+          echo "::error::External cancellation was not observed within the bounded window."
+          exit 1
