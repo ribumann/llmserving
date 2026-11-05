@@ -104,6 +104,10 @@ operator action is phase 1, then preview and the approved `create-secret` comman
 Use the operator's own existing Azure CLI login, not a transferred credential
 cache. The script performs fixed-resource GETs during preview. Azure/Graph
 errors fail closed without copying raw diagnostics into logs.
+Graph reads and writes use the operator-confirmed application object ID
+`7bde2219-78f9-4d81-9707-38646a3775bb`; preview verifies that its returned `id`
+and `appId` match that object and the fixed client ID. The plain object-ID URL
+avoids the alternate-key selector's command-shell metacharacters on Windows.
 
 ```sh
 python scripts/app_bootstrap.py preview-secret --inputs /protected/app-inputs.json

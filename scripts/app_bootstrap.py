@@ -21,13 +21,14 @@ from release_bundle import IMAGES, file_hash
 SUBSCRIPTION = "86677b6e-28fc-48e4-8988-5ab9e568eece"
 TENANT = "ecd6dfda-d2ce-47a8-9901-e35f31fe18dd"
 CLIENT = "962740a1-be3e-454f-87c3-537ed1f02b78"
+APP_OBJECT_ID = "7bde2219-78f9-4d81-9707-38646a3775bb"
 ROOT = f"/subscriptions/{SUBSCRIPTION}/resourceGroups/"
 SHARED = ROOT + "rg-llmserving-e2e-shared"
 ENVIRONMENT = (
     ROOT + "rg-llmserving-e2e-control"
     "/providers/Microsoft.App/managedEnvironments/llmrelease-cae"
 )
-APP_PATH = f"/v1.0/applications(appId='{CLIENT}')"
+APP_PATH = f"/v1.0/applications/{APP_OBJECT_ID}"
 SECRET_NAME = "sso-client-secret"
 GRAPH_HOST = "graph.microsoft.com"
 VAULT_HOST_PATTERN = re.compile(r"[a-z][a-z0-9-]{1,22}[a-z0-9]\.vault\.azure\.net")
@@ -199,10 +200,11 @@ def preview(contract: dict, *, callbacks: bool = True) -> dict:
     )
     app = az_json(
         "rest", "--method", "GET", "--url",
-        f"https://graph.microsoft.com{APP_PATH}?$select=appId,signInAudience,web,passwordCredentials",
+        f"https://graph.microsoft.com{APP_PATH}",
     )
     require(
-        type(app) is dict and app.get("appId") == CLIENT
+        type(app) is dict and app.get("id") == APP_OBJECT_ID
+        and app.get("appId") == CLIENT
         and app.get("signInAudience") == "AzureADMyOrg",
         "The explicitly approved isolated application must be single-tenant.",
     )
@@ -226,6 +228,7 @@ def preview(contract: dict, *, callbacks: bool = True) -> dict:
     )
     return {
         "subscription_id": SUBSCRIPTION, "tenant_id": TENANT, "client_id": CLIENT,
+        "application_object_id": APP_OBJECT_ID,
         "phase": "callbacks" if callbacks else "initial-secret",
         "environment_id": ENVIRONMENT if callbacks else None, "vault_id": vault_id,
         "callbacks": redirects,

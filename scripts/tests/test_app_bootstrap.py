@@ -117,7 +117,8 @@ class BootstrapTests(unittest.TestCase):
                  "publicNetworkAccess": "Disabled", "enableRbacAuthorization": True,
                  "vaultUri": "https://synthetic-vault.vault.azure.net/",
              }},
-            {"appId": bootstrap.CLIENT, "signInAudience": "AzureADMyOrg", "passwordCredentials": [],
+            {"id": bootstrap.APP_OBJECT_ID, "appId": bootstrap.CLIENT,
+             "signInAudience": "AzureADMyOrg", "passwordCredentials": [],
              "web": {"redirectUris": [], "implicitGrantSettings": {
                  "enableIdTokenIssuance": False, "enableAccessTokenIssuance": False,
              }}},
@@ -190,6 +191,11 @@ class BootstrapTests(unittest.TestCase):
         ])
         for call in azure.call_args_list[1:]:
             self.assertEqual(call.args[:3], ("rest", "--method", "GET"))
+        self.assertEqual(azure.call_args_list[-1].args, (
+            "rest", "--method", "GET", "--url",
+            f"https://graph.microsoft.com/v1.0/applications/{bootstrap.APP_OBJECT_ID}",
+        ))
+        self.assertEqual(plan["application_object_id"], bootstrap.APP_OBJECT_ID)
         digest = bootstrap.approval_hash(plan)
         changed = copy.deepcopy(plan)
         changed["current_id_token_issuance"] = True
@@ -202,6 +208,8 @@ class BootstrapTests(unittest.TestCase):
             (1, "properties", {"provisioningState": "Creating"}),
             (2, "properties", {"loginServer": "foreign.azurecr.io"}),
             (3, "properties", {**self.responses()[3]["properties"], "publicNetworkAccess": "Enabled"}),
+            (4, "id", "00000000-0000-0000-0000-000000000000"),
+            (4, "appId", "00000000-0000-0000-0000-000000000000"),
             (4, "signInAudience", "AzureADMultipleOrgs"),
             (4, "web", {"redirectUris": ["https://production.example/callback"]}),
         ]
