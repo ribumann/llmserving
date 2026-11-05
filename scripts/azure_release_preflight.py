@@ -119,6 +119,21 @@ def summarize_sku(records: object) -> dict:
     }
 
 
+def quota_count(value: object) -> int:
+    if type(value) is int and value >= 0:
+        return value
+    if (
+        isinstance(value, str)
+        and value.isascii()
+        and value.isdecimal()
+        and len(value) <= 20
+    ):
+        return int(value)
+    raise PreflightError(
+        "Quota count must be a nonnegative integer or ASCII decimal string."
+    )
+
+
 def inspect() -> dict:
     validate_config()
     account = read_azure("account", "show")
@@ -188,16 +203,11 @@ def inspect() -> dict:
         and isinstance(item.get("name"), dict)
         and str(item["name"].get("value", "")).lower() in names
     ]
-    if (
-        len(quota) != len(names)
-        or {item["name"].lower() for item in quota} != names
-        or any(
-            type(item[field]) is not int or item[field] < 0
-            for item in quota
-            for field in ("current", "limit")
-        )
-    ):
+    if len(quota) != len(names) or {item["name"].lower() for item in quota} != names:
         raise PreflightError("Required quota rows are missing, ambiguous or malformed.")
+    for item in quota:
+        for field in ("current", "limit"):
+            item[field] = quota_count(item[field])
     return {
         "sourceSha": os.environ.get("GITHUB_SHA"),
         "scope": "Read-only fallback inventory/SKU/quota, not deployment readiness",
