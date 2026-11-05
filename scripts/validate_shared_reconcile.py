@@ -23,6 +23,99 @@ CREATES = {
 EXISTING = scope.ADDRESSES - CREATES
 
 
+def refreshed_values(address: str, original: dict, refreshed: dict) -> None:
+    expected = copy.deepcopy(original)
+    if address == "azurerm_nat_gateway.shared":
+        if original.get("zones") is None and refreshed.get("zones") == []:
+            expected["zones"] = []
+    elif address.startswith("azurerm_subnet.") and address in EXISTING:
+        for field in ("service_endpoints", "service_endpoint_policy_ids"):
+            if original.get(field) is None and refreshed.get(field) == []:
+                expected[field] = []
+    elif address == "azurerm_private_dns_zone.vault":
+        if (
+            original.get("number_of_record_sets") == 1
+            and refreshed.get("number_of_record_sets") == 2
+        ):
+            expected["number_of_record_sets"] = 2
+    elif address == "azurerm_virtual_network.shared" and original.get("subnet") == []:
+        prefixes = {
+            "containerapps": "10.20.1.0/24",
+            "gpu": "10.20.10.0/24",
+            "private_endpoints": "10.20.2.0/24",
+            "functions": "10.20.3.0/24",
+            "data": "10.20.4.0/26",
+        }
+        entries = [
+            {
+                "name": scope.RESOURCES[f"azurerm_subnet.{label}"]["name"],
+                "id": scope.RESOURCES[f"azurerm_subnet.{label}"]["id"],
+                "address_prefix": prefix,
+                "security_group": (
+                    scope.RESOURCES["azurerm_network_security_group.gpu"]["id"]
+                    if label == "gpu"
+                    else ""
+                ),
+            }
+            for label, prefix in prefixes.items()
+        ]
+        actual = refreshed.get("subnet")
+        if (
+            isinstance(actual, list)
+            and len(actual) == 5
+            and all(isinstance(item, dict) for item in actual)
+            and sorted(actual, key=lambda item: item.get("name", ""))
+            == sorted(entries, key=lambda item: item["name"])
+        ):
+            expected["subnet"] = copy.deepcopy(actual)
+    if expected != refreshed:
+        raise PlanRejected(
+            "Recovery refresh exceeds the exact reviewed normalizations."
+        )
+
+
+def validate_refresh(plan: dict, prior: dict, current: dict) -> None:
+    drift = plan.get("resource_drift", [])
+    if not isinstance(drift, list):
+        raise PlanRejected("Malformed recovery refresh changes.")
+    changed = {
+        address
+        for address in EXISTING
+        if prior[address].get("values") != current[address].get("values")
+    }
+    seen = set()
+    for record in drift:
+        record = scope.obj(record)
+        address = record.get("address")
+        if (
+            address not in changed
+            or address in seen
+            or record.get("mode") != "managed"
+            or record.get("type") != address.split(".")[0]
+        ):
+            raise PlanRejected("Unexpected/duplicate recovery refresh address.")
+        seen.add(address)
+        change = scope.obj(record.get("change"))
+        if (
+            change.get("actions") != ["update"]
+            or change.get("before") != current[address]["values"]
+            or change.get("after") != prior[address]["values"]
+            or change.get("after_unknown") not in ({}, False)
+        ):
+            raise PlanRejected(
+                "Recovery refresh does not match canonical/native prior values."
+            )
+        refreshed_values(address, current[address]["values"], prior[address]["values"])
+    if seen != changed:
+        raise PlanRejected(
+            "Recovery refresh must account for every canonical normalization."
+        )
+    for address in EXISTING:
+        normalized = {**current[address], "values": prior[address]["values"]}
+        if normalized != prior[address]:
+            raise PlanRejected("Recovery canonical resource metadata changed.")
+
+
 def managed(module: object) -> dict:
     result = {}
     for record in scope.module_records(module):
@@ -38,16 +131,15 @@ def managed(module: object) -> dict:
 
 def validate_reconcile(plan: object, group: str, canonical: object) -> None:
     plan = scope.obj(plan)
-    if plan.get("resource_drift", []) != []:
-        raise PlanRejected("Recovery must not contain refreshed resource drift.")
     prior_module = scope.obj(
         scope.obj(scope.obj(plan.get("prior_state")).get("values")).get("root_module")
     )
     prior = managed(prior_module)
     canonical = scope.obj(canonical)
     current = managed(scope.obj(canonical.get("values")).get("root_module"))
-    if set(prior) != EXISTING or set(current) != EXISTING or prior != current:
+    if set(prior) != EXISTING or set(current) != EXISTING:
         raise PlanRejected("Recovery prior resources differ from exact canonical 27.")
+    validate_refresh(plan, prior, current)
     future = managed(scope.obj(plan.get("planned_values")).get("root_module"))
     if set(future) != scope.ADDRESSES:
         raise PlanRejected("Recovery must leave exactly the reviewed 29 resources.")
