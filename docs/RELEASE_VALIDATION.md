@@ -69,6 +69,13 @@ reported completion tokens over measured wall time. GPU utilization is
 explicitly unavailable, not zero. No compatible lm-eval benchmark subset was
 run in this flow.
 
+The vLLM adapter's optional exporter sample accepts finite physical GPU
+utilization metrics, not KV-cache occupancy (`vllm:gpu_cache_usage_perc` or
+`vllm:kv_cache_usage_perc`). Cache-only, missing or nonfinite samples leave GPU
+utilization unavailable; cache samples cannot shadow a physical utilization
+metric. Mocked exporter regressions validate selection and JSON-safe reporting,
+not actual GPU telemetry or Azure hardware acceptance.
+
 ## Genuine CPU toolkit smoke
 
 The separate packaged-runner gate above uses the same model manifest in an

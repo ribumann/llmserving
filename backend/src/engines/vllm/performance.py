@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from math import isfinite
 from statistics import mean
 from typing import Any
 
@@ -68,7 +69,6 @@ class VllmPerformanceRunner:
                 "gpu_utilization",
                 "nv_gpu_utilization",
                 "vllm:gpu_utilization_perc",
-                "vllm:gpu_cache_usage_perc",
             }:
                 continue
             values_by_metric.setdefault(metric_name, []).append(metric_value)
@@ -94,5 +94,7 @@ def _parse_prometheus_sample(line: str) -> tuple[str | None, float | None]:
     try:
         value = float(value_text.strip())
     except ValueError:
+        return None, None
+    if not isfinite(value):
         return None, None
     return metric_name, value
