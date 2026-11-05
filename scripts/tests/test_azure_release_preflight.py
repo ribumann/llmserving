@@ -517,7 +517,7 @@ class ReadOnlyPreflightTests(unittest.TestCase):
             with self.subTest(date=date), self.assertRaises(preflight.PreflightError):
                 preflight.app_summary(changed)
 
-    def bootstrap(self, fail_scopes=()):
+    def bootstrap(self, fail_scopes=(), *, provider_overrides=None):
         def azure(*arguments):
             if arguments[:2] == ("account", "show"):
                 return self.azure(*arguments)
@@ -525,7 +525,10 @@ class ReadOnlyPreflightTests(unittest.TestCase):
                 namespace = arguments[arguments.index("--namespace") + 1]
                 if namespace in fail_scopes:
                     raise preflight.PreflightError("Sanitized read failure.")
-                return {"namespace": namespace, "registrationState": "Registered"}
+                return (provider_overrides or {}).get(
+                    namespace,
+                    {"namespace": namespace, "registrationState": "Registered"},
+                )
             self.assertEqual(arguments[:4], ("rest", "--method", "GET", "--url"))
             url = arguments[-1]
             alias = next(
@@ -593,6 +596,60 @@ class ReadOnlyPreflightTests(unittest.TestCase):
             preflight.main()
         self.assertIn("unread/unverified", str(error.exception))
         self.assertFalse(json.loads(output.call_args.args[0])["allReadsSucceeded"])
+
+    def test_actual_lowercase_insights_namespace_is_the_exact_registered_provider(self):
+        actual = {"namespace": "microsoft.insights", "registrationState": "Registered"}
+        report = self.bootstrap(provider_overrides={"Microsoft.Insights": actual})
+        self.assertTrue(report["allReadsSucceeded"])
+        self.assertEqual(report["providers"]["Microsoft.Insights"], "Registered")
+        self.assertFalse(report["deploymentReady"])
+        report = self.bootstrap(
+            ("existingTestApp",), provider_overrides={"Microsoft.Insights": actual}
+        )
+        self.assertFalse(report["allReadsSucceeded"])
+        self.assertEqual(
+            {item["scope"] for item in report["readErrors"]}, {"existingTestApp"}
+        )
+        self.assertEqual(report["providers"]["Microsoft.Insights"], "Registered")
+
+    def test_provider_case_normalization_preserves_exact_target_and_state_guards(self):
+        invalid = [
+            {"namespace": value, "registrationState": "Registered"}
+            for value in (
+                None,
+                False,
+                1,
+                [],
+                "",
+                " Microsoft.Insights",
+                "Microsoft.Insights.extra",
+                "Microsoft.App",
+            )
+        ] + [
+            {"namespace": "microsoft.insights", "registrationState": value}
+            for value in (None, True, 1, "registered", "invalid")
+        ]
+        for value in invalid:
+            with self.subTest(value=value):
+                report = self.bootstrap(
+                    provider_overrides={"Microsoft.Insights": value}
+                )
+                self.assertFalse(report["allReadsSucceeded"])
+                self.assertNotIn("Microsoft.Insights", report["providers"])
+                self.assertEqual(
+                    {item["scope"] for item in report["readErrors"]},
+                    {"Microsoft.Insights"},
+                )
+        report = self.bootstrap(
+            provider_overrides={
+                "Microsoft.KeyVault": {
+                    "namespace": "Microsoft.\u212aeyVault",
+                    "registrationState": "Registered",
+                }
+            }
+        )
+        self.assertFalse(report["allReadsSucceeded"])
+        self.assertNotIn("Microsoft.KeyVault", report["providers"])
 
     def test_rest_rejects_mutation_arbitrary_urls_and_additional_arguments(self):
         forbidden = (

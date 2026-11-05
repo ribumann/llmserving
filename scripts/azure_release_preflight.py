@@ -306,7 +306,9 @@ def inspect_bootstrap() -> dict:
             )
             if (
                 not isinstance(provider, dict)
-                or provider.get("namespace") != namespace
+                or not isinstance(provider.get("namespace"), str)
+                or not provider["namespace"].isascii()
+                or provider["namespace"].casefold() != namespace.casefold()
                 or provider.get("registrationState")
                 not in {
                     "Registered",
