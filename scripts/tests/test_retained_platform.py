@@ -10,6 +10,79 @@ import azure_shared_lifecycle as shared
 
 
 class RetainedPlatformTests(unittest.TestCase):
+    def test_exact_five_external_nsgs_preserved_get_only(self):
+        for identifier, subnet in platform.EXTERNAL_NSGS.items():
+            metadata = {
+                "id": identifier,
+                "name": identifier.rsplit("/", 1)[1],
+                "type": "Microsoft.Network/networkSecurityGroups",
+                "location": platform.REGION,
+                "tags": platform.TAGS,
+                "properties": {
+                    "provisioningState": "Succeeded",
+                    "securityRules": [],
+                    "defaultSecurityRules": [
+                        {"name": name} for name in platform.DEFAULT_NSG_RULE_NAMES
+                    ],
+                    "subnets": (
+                        [{"id": subnet}] if "-containerapps-" in identifier else None
+                    ),
+                },
+            }
+            with patch.object(platform, "az", return_value=metadata) as read:
+                self.assertTrue(
+                    platform.preserve_external_nsg({"id": identifier.upper()})
+                )
+                read.assert_called_once_with(
+                    "rest",
+                    "--method",
+                    "GET",
+                    "--url",
+                    f"https://management.azure.com{identifier}?api-version=2023-09-01",
+                )
+            for mutation in (
+                "tags",
+                "type",
+                "location",
+                "rules",
+                "subnet",
+                "extra",
+                "nic",
+                "pending",
+            ):
+                import copy
+
+                changed = copy.deepcopy(metadata)
+                if mutation in ("tags", "type", "location"):
+                    changed[mutation] = {} if mutation == "tags" else "foreign"
+                elif mutation == "rules":
+                    changed["properties"]["securityRules"] = [{"name": "unexpected"}]
+                elif mutation == "subnet":
+                    changed["properties"]["subnets"] = [{"id": "/foreign"}]
+                elif mutation == "extra":
+                    changed["properties"]["subnets"] = [{"id": subnet}, {"id": subnet}]
+                elif mutation == "nic":
+                    changed["properties"]["networkInterfaces"] = [{"id": "/foreign"}]
+                else:
+                    changed["properties"]["provisioningState"] = "Updating"
+                with (
+                    self.subTest(mutation=mutation),
+                    patch.object(platform, "az", return_value=changed),
+                    self.assertRaises(platform.ReleaseImportError),
+                ):
+                    platform.preserve_external_nsg({"id": identifier})
+            self.assertNotIn(
+                identifier, [item["id"] for item in operator.scope.RESOURCES.values()]
+            )
+            self.assertNotIn(
+                identifier, [item["id"] for item in shared.scope.RESOURCES.values()]
+            )
+        with patch.object(platform, "az") as read:
+            self.assertFalse(
+                platform.preserve_external_nsg({"id": identifier + "-foreign"})
+            )
+            read.assert_not_called()
+
     def metadata(self):
         topic = {
             "id": platform.TOPIC,
@@ -59,16 +132,18 @@ class RetainedPlatformTests(unittest.TestCase):
         for field in ("id", "name", "type", "location"):
             topic, subscriptions = self.metadata()
             topic[field] = "foreign"
-            with patch.object(
-                platform, "az", side_effect=[topic, subscriptions]
-            ), self.assertRaises(platform.ReleaseImportError):
+            with (
+                patch.object(platform, "az", side_effect=[topic, subscriptions]),
+                self.assertRaises(platform.ReleaseImportError),
+            ):
                 platform.preserve_storage_topic({"id": platform.TOPIC})
         for field in ("source", "topicType", "provisioningState"):
             topic, subscriptions = self.metadata()
             topic["properties"][field] = "foreign"
-            with patch.object(
-                platform, "az", side_effect=[topic, subscriptions]
-            ), self.assertRaises(platform.ReleaseImportError):
+            with (
+                patch.object(platform, "az", side_effect=[topic, subscriptions]),
+                self.assertRaises(platform.ReleaseImportError),
+            ):
                 platform.preserve_storage_topic({"id": platform.TOPIC})
         for kind in ("missing", "extra", "next", "name", "id", "endpoint", "failed"):
             topic, subscriptions = self.metadata()
@@ -86,9 +161,10 @@ class RetainedPlatformTests(unittest.TestCase):
                 ] = "foreign"
             else:
                 subscriptions["value"][0]["properties"]["provisioningState"] = "Failed"
-            with patch.object(
-                platform, "az", side_effect=[topic, subscriptions]
-            ), self.assertRaises(platform.ReleaseImportError):
+            with (
+                patch.object(platform, "az", side_effect=[topic, subscriptions]),
+                self.assertRaises(platform.ReleaseImportError),
+            ):
                 platform.preserve_storage_topic({"id": platform.TOPIC})
 
     def test_operator_inventory_excludes_verified_topic_from_deletion(self):
@@ -97,10 +173,10 @@ class RetainedPlatformTests(unittest.TestCase):
             "root_certificate_sha256": "a" * 64,
         }
         vnet = {"tags": operator.scope.shared.TAGS, "properties": {"subnets": []}}
-        with patch.object(
-            operator, "az", return_value=[{"id": platform.TOPIC}]
-        ), patch.object(shared, "arm", return_value=vnet), patch.object(
-            platform, "az", side_effect=self.metadata()
+        with (
+            patch.object(operator, "az", return_value=[{"id": platform.TOPIC}]),
+            patch.object(shared, "arm", return_value=vnet),
+            patch.object(platform, "az", side_effect=self.metadata()),
         ):
             self.assertEqual(operator.inventory(selected), {})
 
