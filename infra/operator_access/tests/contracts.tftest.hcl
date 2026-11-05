@@ -37,7 +37,7 @@ run "private_operator_scope" {
     error_message = "Gateway must remain the bounded single route-based VpnGw1."
   }
   assert {
-    condition     = azurerm_virtual_network_gateway.operator.vpn_client_configuration[0].vpn_auth_types == tolist(["Certificate"]) && azurerm_virtual_network_gateway.operator.vpn_client_configuration[0].vpn_client_protocols == tolist(["OpenVPN"])
+    condition     = toset(azurerm_virtual_network_gateway.operator.vpn_client_configuration[0].vpn_auth_types) == toset(["Certificate"]) && toset(azurerm_virtual_network_gateway.operator.vpn_client_configuration[0].vpn_client_protocols) == toset(["OpenVPN"])
     error_message = "Only certificate/OpenVPN authentication is permitted."
   }
   assert {
