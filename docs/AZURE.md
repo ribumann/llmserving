@@ -149,6 +149,43 @@ Verify the exact infrastructure group, platform creation/deletion behavior and
 independent cleanup authorization before live deployment. Do not assume it can
 reuse a pre-existing persistent group or add groups/roles automatically.
 
+### Fixed shared-stack native plan scope
+
+The generic retained-group guard is ownership-only. For the isolated fallback
+campaign, `scripts/validate_shared_plan.py` additionally requires the fixed
+subscription, Italy North, `release` stage, `llmrelease` prefix, campaign tags,
+and no public-vault exception. Initial plans must contain exactly the 29
+reviewed shared creates from fresh non-group-owning state. Owned destroy plans
+may contain a subset after partial provisioning, but only pure deletes covering
+every prior managed resource and leaving no managed resources.
+
+The guard checks fixed primary names/IDs/tags and selected security fields,
+association targets/IDs and native configuration references for unknown new
+association IDs, including the vault endpoint's exact nested vault/DNS targets.
+Managed resources and context data must bind to the single fixed AzureRM
+provider configuration, which must use the fixed subscription variable.
+It rejects resource groups, state storage, roles, unexpected
+addresses/types, updates/replacements, child modules and foreign data context.
+It is **not** a complete Azure policy/security validator, a remote-state setup,
+or independent cleanup implementation.
+
+Run from the initialized pristine shared module using a saved native plan and
+a **new** private log path:
+
+```sh
+python /approved/source/scripts/validate_shared_plan.py \
+  --operation create --plan /protected/shared.tfplan \
+  --private-log /protected/shared-scope-check.log
+```
+
+Use `--operation destroy` only for an explicitly prepared saved destroy plan.
+The helper copies the plan privately, suppresses Terraform diagnostics into a
+mode-0600 log, and **never applies** it. Do not upload native plans, JSON, logs
+or state. The original module's local-state defaults are unchanged. Passing
+does not authorize state data-plane grants/use/migration, establish remote
+locking/recovery, prove live destroy behavior, or permit billable provisioning
+before the independent persistence/cleanup gates are complete.
+
 ## Prerequisites before any billable resource
 
 | Gate | Required evidence |
