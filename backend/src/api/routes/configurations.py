@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
@@ -8,8 +8,11 @@ from sqlalchemy.orm import Session
 from src.api.errors import ApiError, with_request_id
 from src.api.routes.environments import _user
 from src.domain.catalog import ModelCatalogEntry
+from src.domain.common import generate_uuid
+from src.domain.deployment_revision import DeploymentRevision
 from src.domain.enums import ProviderType
 from src.domain.environment import DemoEnvironment
+from src.domain.environment_lock import EnvironmentLockedError, EnvironmentLockService
 from src.domain.inference_configuration import InferenceConfiguration
 from src.domain.inference_engine import InferenceEngine
 from src.domain.model_configuration import ModelConfiguration
@@ -102,11 +105,6 @@ def create_model_configuration(
             details={"catalogEntryId": payload.catalogEntryId},
         )
 
-    next_id = session.scalar(
-        select(func.count())
-        .select_from(ModelConfiguration)
-        .where(ModelConfiguration.environmentId == environment_id)
-    )
     next_version = session.scalar(
         select(func.max(ModelConfiguration.version)).where(
             ModelConfiguration.environmentId == environment_id,
@@ -115,7 +113,7 @@ def create_model_configuration(
     )
     user = _user(request)
     configuration = ModelConfiguration(
-        modelConfigId=f"{environment_id}-model-{int(next_id or 0) + 1}",
+        modelConfigId=generate_uuid(),
         environmentId=environment_id,
         catalogEntryId=payload.catalogEntryId,
         resolvedCheckpointRef=payload.resolvedCheckpointRef,
@@ -167,11 +165,6 @@ def create_inference_configuration(
         )
     _validate_engine_provider_compatibility(environment, payload.engineId)
 
-    next_id = session.scalar(
-        select(func.count())
-        .select_from(InferenceConfiguration)
-        .where(InferenceConfiguration.environmentId == environment_id)
-    )
     next_version = session.scalar(
         select(func.max(InferenceConfiguration.version)).where(
             InferenceConfiguration.environmentId == environment_id,
@@ -180,7 +173,7 @@ def create_inference_configuration(
     )
     user = _user(request)
     configuration = InferenceConfiguration(
-        inferenceConfigId=f"{environment_id}-inference-{int(next_id or 0) + 1}",
+        inferenceConfigId=generate_uuid(),
         environmentId=environment_id,
         engineId=payload.engineId,
         servingSettings=dict(payload.servingSettings),
@@ -211,4 +204,99 @@ def list_inference_configurations(
     return with_request_id(
         {"items": [_serialize_inference_configuration(item) for item in configurations]},
         getattr(request.state, "request_id", None),
+    )
+
+
+def _delete_owned_configuration(
+    *,
+    environment_id: str,
+    configuration_id: str,
+    model: type[ModelConfiguration] | type[InferenceConfiguration],
+    request: Request,
+    session: Session,
+) -> Response:
+    _require_environment(session, environment_id)
+    operation_id = f"delete-configuration-{generate_uuid()}"
+    locks = EnvironmentLockService()
+    try:
+        locks.acquire(session, environment_id=environment_id, operation_id=operation_id)
+    except EnvironmentLockedError as exc:
+        raise ApiError(
+            status_code=409,
+            code="environment_busy",
+            message="Configuration cleanup requires an idle environment.",
+            details={"environmentId": environment_id, "operationId": exc.active_operation_id},
+        ) from exc
+
+    configuration = session.get(model, configuration_id)
+    if configuration is None or configuration.environmentId != environment_id:
+        raise ApiError(
+            status_code=404,
+            code="configuration_not_found",
+            message="The configuration was not found in this environment.",
+            details={"environmentId": environment_id, "configurationId": configuration_id},
+        )
+    if configuration.createdBy != _user(request).email:
+        raise ApiError(
+            status_code=403,
+            code="configuration_not_owned",
+            message="Only the operator who created this configuration can delete it.",
+            details={"configurationId": configuration_id},
+        )
+    reference = (
+        DeploymentRevision.modelConfigId
+        if model is ModelConfiguration
+        else DeploymentRevision.inferenceConfigId
+    )
+    revision_id = session.scalar(
+        select(DeploymentRevision.deploymentRevisionId)
+        .where(reference == configuration_id)
+        .limit(1)
+    )
+    if revision_id is not None:
+        raise ApiError(
+            status_code=409,
+            code="configuration_in_use",
+            message="Configurations referenced by any deployment revision must be retained.",
+            details={"configurationId": configuration_id, "deploymentRevisionId": revision_id},
+        )
+    session.delete(configuration)
+    locks.release(session, environment_id=environment_id, operation_id=operation_id)
+    session.commit()
+    return Response(status_code=204)
+
+
+@router.delete(
+    "/environments/{environment_id}/model-configurations/{configuration_id}", status_code=204
+)
+def delete_model_configuration(
+    environment_id: str,
+    configuration_id: str,
+    request: Request,
+    session: Session = Depends(get_db_session),
+) -> Response:
+    return _delete_owned_configuration(
+        environment_id=environment_id,
+        configuration_id=configuration_id,
+        model=ModelConfiguration,
+        request=request,
+        session=session,
+    )
+
+
+@router.delete(
+    "/environments/{environment_id}/inference-configurations/{configuration_id}", status_code=204
+)
+def delete_inference_configuration(
+    environment_id: str,
+    configuration_id: str,
+    request: Request,
+    session: Session = Depends(get_db_session),
+) -> Response:
+    return _delete_owned_configuration(
+        environment_id=environment_id,
+        configuration_id=configuration_id,
+        model=InferenceConfiguration,
+        request=request,
+        session=session,
     )

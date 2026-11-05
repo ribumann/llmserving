@@ -140,6 +140,8 @@ class API:
         require(response.code == expected,
                 f"{method} {path}: expected HTTP {expected}, got {response.code}: {text}")
         require(len(text) <= 2_000_000, "API response exceeded evidence size limit")
+        if response.code == 204:
+            return None
         return parse_json(text)
 
 
@@ -198,23 +200,27 @@ class Acceptance:
     def configurations(self):
         if self.c.get("allowConfigWrites") is not True:
             raise Blocked("Explicit allowConfigWrites=true and a dedicated environment required")
+        scratch = self.e["resources"].setdefault("scratch", {})
+        self.create_configurations(scratch)
+        self.verify_configurations(scratch)
+        return {"modelConfigId": scratch["model"]["modelConfigId"],
+                "inferenceConfigId": scratch["inference"]["inferenceConfigId"]}
+
+    def create_configurations(self, resources):
         model = self.api.call("POST", self.root + "/model-configurations", {
             "catalogEntryId": self.c["catalogEntryId"],
             "resolvedCheckpointRef": self.c["checkpointRef"],
             "modelSettings": self.c.get("modelSettings", {}),
         }, expected=201)
-        self.e["resources"]["model"] = model
+        resources["model"] = model
         self.persist()
         inference = self.api.call("POST", self.root + "/inference-configurations", {
             "engineId": self.c["engineId"],
             "servingSettings": self.c.get("servingSettings", {}),
             "generationSettings": self.c.get("generationSettings", {}),
         }, expected=201)
-        self.e["resources"]["inference"] = inference
+        resources["inference"] = inference
         self.persist()
-        self.verify_configurations(self.e["resources"])
-        return {"modelConfigId": model["modelConfigId"],
-                "inferenceConfigId": inference["inferenceConfigId"]}
 
     def verify_configurations(self, resources):
         for kind, field in (("model", "modelConfigId"), ("inference", "inferenceConfigId")):
@@ -224,23 +230,44 @@ class Acceptance:
                     f"Persisted {field} did not roundtrip exactly")
 
     def cleanup(self):
-        raise Blocked(
-            "Current API has no configuration DELETE. Created IDs are in resources; "
-            "authorized operator DB cleanup of this dedicated test environment is required. "
-            "No environment teardown or Azure resource deletion was attempted."
-        )
+        return self.cleanup_configurations(self.e["resources"].get("scratch", {}))
+
+    def cleanup_configurations(self, resources):
+        deleted, errors = [], []
+        for kind, field in (("inference", "inferenceConfigId"), ("model", "modelConfigId")):
+            if kind not in resources:
+                continue
+            configuration_id = resources[kind][field]
+            path = self.root + f"/{kind}-configurations"
+            try:
+                self.api.call("DELETE", path + "/" + quote(configuration_id, safe=""), expected=204)
+                rows = self.api.call("GET", path)["items"]
+                require(all(row[field] != configuration_id for row in rows),
+                        f"Deleted {field} remains in configuration history")
+                deleted.append(configuration_id)
+                resources.setdefault("deletedIds", []).append(configuration_id)
+                self.persist()
+            except (AssertionError, KeyError, TypeError, ValueError, RuntimeError, OSError, URLError) as error:
+                errors.append(f"{kind} {configuration_id}: {type(error).__name__}: {error}")
+        require(not errors, "Owned configuration cleanup failed: " + "; ".join(errors))
+        return {"deletedIds": deleted, "verifiedAbsent": True, "azureResourcesDeleted": False}
 
     def deploy(self):
         if self.c.get("allowDeploy") is not True:
             raise Blocked("allowDeploy=true required; deployment changes the selected environment")
         resources = self.e["resources"]
-        if "inference" not in resources:
-            raise Blocked("Requires successful configuration roundtrip in this invocation")
-        started = self.api.call("POST", self.root + "/deployments", {
-            "modelConfigId": resources["model"]["modelConfigId"],
-            "inferenceConfigId": resources["inference"]["inferenceConfigId"],
-        }, expected=202)
-        resources["deployment"] = started
+        try:
+            self.create_configurations(resources)
+            self.verify_configurations(resources)
+            started = self.api.call("POST", self.root + "/deployments", {
+                "modelConfigId": resources["model"]["modelConfigId"],
+                "inferenceConfigId": resources["inference"]["inferenceConfigId"],
+            }, expected=202)
+            resources["deployment"] = started
+        finally:
+            if "deployment" not in resources:
+                self.check("undeployed-configuration-cleanup",
+                           lambda: self.cleanup_configurations(resources))
         self.persist()
         path = self.root + "/deployments/" + quote(started["deploymentRevisionId"], safe="")
         revision = self.poll(path, "lifecycleState", "ready", {"deployment_failed", "superseded"})
@@ -392,11 +419,13 @@ def execute(config, api, evidence, persist, stage, prior=None):
         return
     if stage == "gpu" and not harness.check("gpu-policy-inputs", lambda: validate_gpu(config)):
         return
-    configs_ok = harness.check("configuration-db-roundtrip", harness.configurations)
-    harness.check("configuration-cleanup", harness.cleanup)
+    try:
+        configs_ok = harness.check("configuration-db-roundtrip", harness.configurations)
+    finally:
+        cleanup_ok = harness.check("configuration-cleanup", harness.cleanup)
     if stage == "control":
         return
-    if not configs_ok or not harness.check("model-deploy-ready", harness.deploy):
+    if not configs_ok or not cleanup_ok or not harness.check("model-deploy-ready", harness.deploy):
         harness.check("gpu-checks", lambda: (_ for _ in ()).throw(
             Blocked("Deployment prerequisite unavailable; CPU evidence remains independent")))
         return

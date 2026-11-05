@@ -105,6 +105,23 @@ one. Container Apps and rollout checks use readiness; Docker's liveness check
 remains `/healthz`. Existing custom `AUTH_BYPASS_PATHS` must include `/readyz`
 before using it as an unauthenticated platform probe.
 
+## Configuration cleanup
+
+`DELETE /environments/{environmentId}/model-configurations/{configurationId}`
+and the equivalent `inference-configurations/{configurationId}` remove only an
+unreferenced configuration created by the authenticated operator. Success is 204;
+missing/wrong-environment IDs return 404, a different creator 403, and a busy
+environment or any deployment revision reference 409. Active, failed and historical
+revision references are all protected; no cascade or Azure resource deletion occurs.
+Deletion and deployment coordinate through the existing environment single-writer
+lock, with deployment rereading configurations after acquiring it.
+
+Existing configuration IDs remain valid. Newly created model/inference configurations
+use UUIDs instead of row counts, so deleting scratch records cannot cause later ID
+reuse or collisions. The main-cloud acceptance harness deletes its exact scratch IDs
+in a finally cleanup, verifies absence, and retains separate intended deployment
+configurations. See [the executable contract](../e2e/live/cloud/README.md).
+
 ## Explicit local versus cloud authentication
 
 The safe default is `AUTH_MODE=entra-jwt`. Configure `AZURE_TENANT_ID` and

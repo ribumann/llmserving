@@ -23,8 +23,8 @@ the configuration, shell history, source, PR, or evidence. The harness does not
 accept demo headers, acquire credentials, provision resources, modify DNS, or
 run Azure commands. Redirects are rejected rather than forwarding bearer tokens.
 
-Set `allowConfigWrites=true` only after authorizing append-only configuration
-writes. Set `allowDeploy=true` only after authorizing model deployment into that
+Set `allowConfigWrites=true` only after authorizing scratch configuration
+writes and exact-ID cleanup. Set `allowDeploy=true` only after authorizing model deployment into that
 environment; this replaces its active deployment. No existing environment is
 created, torn down or deleted. Gated model credentials are deliberately outside
 this slice.
@@ -69,9 +69,11 @@ python3 e2e/live/cloud/acceptance.py \
 
 `control` checks anonymous health, DB readiness, rejection of anonymous protected
 requests, actual operator authentication, Azure environment/catalog identity,
-then writes and exactly rereads model/inference configurations. It does not need
-a GPU or performance thresholds. `gpu` repeats those checks, validates all
-thresholds **before writes**, deploys a real model revision, polls readiness,
+then writes and exactly rereads scratch model/inference configurations, deletes
+only those exact owned IDs in a `finally` cleanup, and verifies they are absent.
+It does not need a GPU or performance thresholds. `gpu` repeats those checks, validates all
+thresholds **before writes**, creates separate intended deployment configurations
+only after scratch cleanup passes, deploys a real model revision, polls readiness,
 submits a real prompt, runs golden and sequential single/concurrent workloads,
 then rereads stored run history, run detail and exact reports. Every operation
 has request/poll deadlines. A timed-out run receives a cancellation request; that
@@ -108,13 +110,26 @@ errors, reload retaining deployment but clearing ephemeral prompt history.
 Authenticated tracing/video/screenshots are disabled to avoid credential capture.
 Browser success is its own evidence, not a claim that the entire deployment passed.
 
-## Cleanup and restart: current API gaps, never silently green
+## Owned scratch cleanup and explicit restart evidence
 
-Configuration history is append-only: **no DELETE endpoint exists**. Therefore the
-cleanup check is explicitly **blocked**, even when write/read passed. Created IDs
-are recorded immediately; an authorized operator must arrange scoped DB cleanup
-of these test records. Do not run generic environment teardown as a substitute:
-it can delete Azure resources and does not prove configuration cleanup.
+The API supports `DELETE /environments/{environmentId}/model-configurations/{id}`
+and the equivalent `inference-configurations/{id}`. Only the authenticated
+creator can delete an unreferenced configuration in that exact environment.
+Missing/wrong-scope IDs return 404, another creator 403, and a busy environment
+or **any** deployment revision reference 409. No cascades, configuration-history
+deletion, generic DB deletion, environment teardown or Azure deletion is used.
+The existing environment single-writer lock coordinates cleanup with deployment.
+Existing configuration IDs remain valid; new IDs are UUIDs to prevent deletion
+from causing the former count-based allocator to reuse/collide with existing IDs.
+
+Scratch records are recorded immediately and cleaned even after partial writes
+or failed roundtrips. Cleanup attempts every created scratch ID and verifies it
+is absent from the real list API; unavailable/failed cleanup is a required failed
+check, never success. A GPU invocation proceeds only after scratch cleanup passes.
+Separate configurations referenced by the intended main deployment are retained
+as legitimate app configuration/history, not disposable scratch. If creation
+fails before a deployment is accepted, their exact-ID cleanup is attempted too;
+an uncertain/failed deployment already referencing them safely rejects removal.
 
 No application restart API exists. After an independently authorized application
 restart, retain the actual restart operation evidence and rerun:
@@ -129,8 +144,8 @@ python3 e2e/live/cloud/acceptance.py \
 This verifies exact persisted configurations, runs, history and reports through
 fresh HTTP reads. **It does not itself prove a restart occurred.** Associate the
 operator's actual restart evidence with this result. A browser reload is also
-not an application restart. `fullAcceptance` deliberately remains `false`: current
-cleanup/restart gaps, separate browser evidence, independently verified deployment
+not an application restart. `fullAcceptance` deliberately remains `false`: restart
+evidence, separate browser evidence, independently verified deployment
 provenance and safety attestation must be resolved/reviewed before declaring main
 accepted. GPU failure never erases successful control-plane evidence.
 
