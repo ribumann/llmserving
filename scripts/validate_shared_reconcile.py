@@ -112,6 +112,44 @@ def validate_refresh(plan: dict, prior: dict, current: dict) -> None:
         )
     for address in EXISTING:
         normalized = {**current[address], "values": prior[address]["values"]}
+        sensitivity = copy.deepcopy(current[address].get("sensitive_values", {}))
+        refreshed = prior[address].get("sensitive_values", {})
+        if not isinstance(sensitivity, dict) or not isinstance(refreshed, dict):
+            raise PlanRejected("Recovery sensitivity metadata is malformed.")
+        fields = (
+            ("zones",)
+            if address == "azurerm_nat_gateway.shared"
+            else (
+                ("service_endpoints", "service_endpoint_policy_ids")
+                if address.startswith("azurerm_subnet.")
+                else ()
+            )
+        )
+        for field in fields:
+            if (
+                field not in sensitivity
+                and refreshed.get(field) == []
+                and current[address]["values"].get(field) is None
+                and prior[address]["values"].get(field) == []
+            ):
+                sensitivity[field] = []
+        if (
+            address == "azurerm_virtual_network.shared"
+            and sensitivity.get("subnet") == []
+            and refreshed.get("subnet") == [{}, {}, {}, {}, {}]
+            and current[address]["values"].get("subnet") == []
+            and len(prior[address]["values"].get("subnet", [])) == 5
+        ):
+            sensitivity["subnet"] = [{}, {}, {}, {}, {}]
+        if sensitivity != refreshed:
+            raise PlanRejected(
+                "Recovery sensitivity metadata changed beyond exact empty shapes."
+            )
+        if (
+            "sensitive_values" in current[address]
+            or "sensitive_values" in prior[address]
+        ):
+            normalized["sensitive_values"] = sensitivity
         if normalized != prior[address]:
             raise PlanRejected("Recovery canonical resource metadata changed.")
 

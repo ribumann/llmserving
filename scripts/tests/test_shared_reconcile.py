@@ -74,6 +74,8 @@ class SharedReconcileTests(unittest.TestCase):
         future = guard.managed(plan["planned_values"]["root_module"])
         current[address]["values"]["zones"] = None
         prior[address]["values"]["zones"] = []
+        current[address]["sensitive_values"] = {}
+        prior[address]["sensitive_values"] = {"zones": []}
         future[address]["values"]["zones"] = []
         change = next(
             item for item in plan["resource_changes"] if item["address"] == address
@@ -94,6 +96,17 @@ class SharedReconcileTests(unittest.TestCase):
             }
         ]
         guard.validate_reconcile(plan, guard.scope.GROUP, canonical)
+        for sensitivity in (
+            {"zones": True},
+            {"zones": [True]},
+            {"zones": [], "foreign": False},
+        ):
+            altered = copy.deepcopy(plan)
+            guard.managed(altered["prior_state"]["values"]["root_module"])[address][
+                "sensitive_values"
+            ] = sensitivity
+            with self.assertRaises(guard.PlanRejected):
+                guard.validate_reconcile(altered, guard.scope.GROUP, canonical)
         for kind in ("missing", "duplicate", "mismatch"):
             altered = copy.deepcopy(plan)
             if kind == "missing":
