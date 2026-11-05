@@ -113,13 +113,19 @@ resource "azurerm_postgresql_flexible_server_database" "app" {
 locals {
   database_url = "postgresql+psycopg://${var.database_admin_user}:${local.db_admin_password}@${azurerm_postgresql_flexible_server.control.fqdn}:5432/${var.database_name}?sslmode=require"
 
-  # The Key Vault uses public_network_access_enabled = false. Terraform
-  # running from outside the VNet can therefore never read or write KV secrets directly -- the
-  # `azurerm_key_vault_secret` resource's own pre-create existence check would fail with a 403
-  # every time. The `database-url` secret is instead written once, out-of-band, by a temporary
-  # in-VNet Container Apps Job (see runbook), and referenced here as a plain computed URI so no
-  # Terraform-managed resource ever needs a data-plane call to the vault.
-  database_url_secret_id = "${trimsuffix(local.shared.key_vault_uri, "/")}/secrets/database-url"
+  # Private execution can seed the URL within the full apply's graph. The default retains
+  # external seeding for executors that cannot reach the private vault data plane.
+  database_url_secret_id = var.manage_database_url_secret ? azurerm_key_vault_secret.database_url[0].versionless_id : "${trimsuffix(local.shared.key_vault_uri, "/")}/secrets/database-url"
+}
+
+resource "azurerm_key_vault_secret" "database_url" {
+  count = var.manage_database_url_secret ? 1 : 0
+
+  name         = "database-url"
+  value        = local.database_url
+  key_vault_id = local.shared.key_vault_id
+
+  depends_on = [azurerm_postgresql_flexible_server_database.app]
 }
 
 # --- Storage accounts (Functions task-hub state, Terraform remote state, exports/artifacts) ---
@@ -154,6 +160,18 @@ resource "azapi_resource" "functions_storage" {
   })
 
   response_export_values = ["*"]
+}
+
+resource "azapi_resource" "functions_packages" {
+  count = var.functions_package_sha256 == null ? 0 : 1
+
+  type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01"
+  name      = "functions-packages"
+  parent_id = "${azapi_resource.functions_storage.id}/blobServices/default"
+
+  body = jsonencode({
+    properties = { publicAccess = "None" }
+  })
 }
 
 resource "azapi_resource" "tfstate_storage" {
@@ -1114,7 +1132,7 @@ resource "azurerm_linux_function_app" "orchestrator" {
     }
   }
 
-  app_settings = {
+  app_settings = merge({
     FUNCTIONS_WORKER_RUNTIME = "python"
 
     AZURE_SUBSCRIPTION_ID = var.subscription_id
@@ -1133,7 +1151,10 @@ resource "azurerm_linux_function_app" "orchestrator" {
     JOB_NAME_PERFORMANCE_WORKER   = azurerm_container_app_job.jobs["performance_worker"].name
     JOB_NAME_EXPORT_WORKER        = azurerm_container_app_job.jobs["export_worker"].name
     CONTAINER_APPS_RESOURCE_GROUP = local.resource_group_name
-  }
+    }, var.functions_package_sha256 == null ? {} : {
+    WEBSITE_RUN_FROM_PACKAGE                     = local.functions_package_blob_url
+    WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID = "SystemAssigned"
+  })
 }
 
 # Grants the Functions app's identity permission to start (and read status of) each Container
@@ -1203,10 +1224,11 @@ locals {
 # `<name>.azurewebsites.net`, and ARM resource IDs are computable from subscription/resource
 # group/name), so this avoids the cycle while resolving to the same values.
 locals {
-  functions_app_name    = "${var.name_prefix}-functions-${local.unique_suffix}"
-  functions_fqdn        = "${local.functions_app_name}.azurewebsites.net"
-  functions_resource_id = "${local.control_scope_id}/providers/Microsoft.Web/sites/${local.functions_app_name}"
-  job_scope_ids         = { for key, name in local.job_names : key => "${local.control_scope_id}/providers/Microsoft.App/jobs/${name}" }
+  functions_app_name         = "${var.name_prefix}-functions-${local.unique_suffix}"
+  functions_fqdn             = "${local.functions_app_name}.azurewebsites.net"
+  functions_resource_id      = "${local.control_scope_id}/providers/Microsoft.Web/sites/${local.functions_app_name}"
+  functions_package_blob_url = var.functions_package_sha256 == null ? null : "https://${azapi_resource.functions_storage.name}.blob.core.windows.net/${azapi_resource.functions_packages[0].name}/functions-${var.functions_package_sha256}.zip"
+  job_scope_ids              = { for key, name in local.job_names : key => "${local.control_scope_id}/providers/Microsoft.App/jobs/${name}" }
 }
 
 # --- Entra ID SSO for the Container Apps' built-in auth (FR-075) ---

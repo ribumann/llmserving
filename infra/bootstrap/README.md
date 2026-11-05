@@ -140,6 +140,15 @@ Before any independently authorized bootstrap apply, use
 the **initialized, independently reviewed bootstrap module directory**, with
 the same approved provider authentication environment. This is separate from
 the AzureRM retained-group guard: that guard does not validate AzAPI parents.
+Generate the saved plan and run the guard/apply from the **same canonical
+initialized directory using its existing default local state**. A plan-time
+absolute `-state` override is not a guarantee that applying from a different
+checkout/directory will select that state. Copying the binary plan preserves
+its bytes, not the execution directory's local-backend state selection.
+An isolated checkout can therefore fail with a state-lineage mismatch even
+when the plan itself passed validation. Do not force state, import, remove
+records or retry the mismatched plan: return to the canonical directory,
+preserve state/backup, and generate/review a new full saved plan there.
 Keep the native plan, state, expected-target JSON and log private. Create the
 target JSON independently from approved inputs, not by extracting whatever
 the plan happens to select. It must contain exactly `subscription_id`,
@@ -199,7 +208,10 @@ data access. Absence of the intended settings is the failure baseline to fix,
 not evidence of a separate disposable resource.
 
 From the reviewed corrected module, generate a **new full native saved plan**
-using the preserved partial state and independently approved target variables.
+using the preserved partial state in that same canonical directory's default
+local backend and independently approved target variables. Run the guard and
+any authorized apply from that directory too; do not generate with an absolute
+`-state` override in an isolated checkout and assume apply will retain it.
 The only acceptable recovery shape is the exact owned account **no-op**,
 `azapi_update_resource.blobs` **create** (configures the automatically existing
 service), and `azapi_resource.tfstate` **create**. Review the real plan and

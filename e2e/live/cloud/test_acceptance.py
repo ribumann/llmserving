@@ -38,7 +38,10 @@ class APIStub:
 
     def call(self, method, path, body=None, **kwargs):
         self.calls.append((method, path, body, kwargs))
-        return copy.deepcopy(self.replies[(method, path)])
+        reply = self.replies[(method, path)]
+        if isinstance(reply, Exception):
+            raise reply
+        return copy.deepcopy(reply)
 
 
 def harness(api=None):
@@ -110,10 +113,51 @@ class AcceptanceContracts(unittest.TestCase):
         self.assertEqual(subject.e["checks"][0]["status"], "blocked")
         self.assertEqual(subject.api.calls, [])
 
-    def test_cleanup_is_blocked_not_fake_success(self):
-        subject = harness()
+    def test_unsupported_cleanup_is_failed_not_fake_success(self):
+        subject = harness(APIStub({
+            ("DELETE", "/environments/acceptance/model-configurations/m"):
+                AssertionError("HTTP 405: cleanup endpoint unavailable"),
+        }))
+        subject.e["resources"]["scratch"] = {"model": {"modelConfigId": "m"}}
         self.assertFalse(subject.check("cleanup", subject.cleanup))
-        self.assertEqual(subject.e["checks"][0]["status"], "blocked")
+        self.assertEqual(subject.e["checks"][0]["status"], "failed")
+        self.assertIn("405", subject.e["checks"][0]["error"])
+
+    def test_finally_cleans_partial_probe_after_inference_create_failure(self):
+        subject = harness(APIStub({
+            ("POST", "/environments/acceptance/model-configurations"): {"modelConfigId": "m"},
+            ("POST", "/environments/acceptance/inference-configurations"):
+                AssertionError("actual inference write error"),
+            ("DELETE", "/environments/acceptance/model-configurations/m"): None,
+            ("GET", "/environments/acceptance/model-configurations"): {"items": []},
+        }))
+        with patch.object(live.Acceptance, "health", return_value={}):
+            with patch.object(live.Acceptance, "environment", return_value={}):
+                live.execute(subject.c, subject.api, subject.e, lambda: None, "control")
+        checks = {check["name"]: check for check in subject.e["checks"]}
+        self.assertEqual(checks["configuration-db-roundtrip"]["status"], "failed")
+        self.assertEqual(checks["configuration-cleanup"]["status"], "passed")
+        self.assertEqual(subject.e["resources"]["scratch"]["deletedIds"], ["m"])
+
+    def test_cleanup_attempts_both_exact_owned_ids_and_verifies_absence(self):
+        subject = harness(APIStub({
+            ("DELETE", "/environments/acceptance/inference-configurations/i"):
+                AssertionError("HTTP 409: in use"),
+            ("DELETE", "/environments/acceptance/model-configurations/m"): None,
+            ("GET", "/environments/acceptance/model-configurations"): {"items": []},
+        }))
+        subject.e["resources"]["scratch"] = {
+            "model": {"modelConfigId": "m"}, "inference": {"inferenceConfigId": "i"},
+        }
+        self.assertFalse(subject.check("cleanup", subject.cleanup))
+        self.assertEqual(subject.e["resources"]["scratch"]["deletedIds"], ["m"])
+        self.assertIn("409", subject.e["checks"][0]["error"])
+
+    def test_delete_204_empty_body_is_valid(self):
+        api = live.API(config(), "operator-token", [])
+        response = HTTPError(config()["apiUrl"], 204, "No Content", {}, io.BytesIO(b""))
+        with patch.object(api.opener, "open", return_value=response):
+            self.assertIsNone(api.call("DELETE", "/owned-exact-id", expected=204))
 
     def test_successful_config_db_roundtrip_uses_real_api_wire_shapes(self):
         model = {
@@ -135,7 +179,7 @@ class AcceptanceContracts(unittest.TestCase):
             "modelConfigId": "m", "inferenceConfigId": "i",
         })
         self.assertEqual(api.calls[0][2]["resolvedCheckpointRef"], "a" * 40)
-        self.assertEqual(subject.e["resources"]["model"], model)
+        self.assertEqual(subject.e["resources"]["scratch"]["model"], model)
         self.assertEqual(len(api.calls), 4)
 
     def test_missing_api_catalog_row_records_failure(self):

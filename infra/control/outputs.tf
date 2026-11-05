@@ -32,6 +32,15 @@ output "functions_app_hostname" {
   value = azurerm_linux_function_app.orchestrator.default_hostname
 }
 
+output "functions_storage_account_name" {
+  value = azapi_resource.functions_storage.name
+}
+
+output "functions_package_blob_url" {
+  description = "Private digest-named package URL, without SAS; null in legacy deployment mode."
+  value       = local.functions_package_blob_url
+}
+
 output "postgres_fqdn" {
   value = azurerm_postgresql_flexible_server.control.fqdn
 }
