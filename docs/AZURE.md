@@ -128,6 +128,11 @@ requires exact SKU-family and total regional vCPU headroom; Spot uses regional
 capability blocks Spot; missing/invalid capability remains explicitly unknown.
 Neither path ignores subscription/zone restrictions or confirms physical capacity.
 There is no automatic Spot-to-Regular fallback.
+Creation rejects a known-negative selected Azure SKU/quota assessment with
+`409 azure_preflight_unavailable` before key generation, persistence or dispatch,
+including an explicit region override. Preview remains diagnostic. Unknown
+non-authorization metadata retains its documented advisory semantics; it is not
+confirmation of availability or permission to spend.
 
 The existing small default is **16-vCPU** `Standard_NC16as_T4_v3`, not the
 4-vCPU `Standard_NC4as_T4_v3`. A bounded smaller test needs an explicit

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from src.api.app import create_app
 from src.api.routes import environments
+from src.domain.enums import ProviderType
 from src.domain.profile import CloudDeploymentProfile
 from src.persistence.db import get_db_session
 from src.providers.azure.preflight import (
@@ -215,6 +216,105 @@ def test_invalid_priority_blocks_requests_before_reads_or_persistence(route, pri
     assert response.json()["error"]["code"] == "invalid_vm_priority"
     preflight.evaluate_region.assert_not_called()
     for method in ("get", "add", "flush", "commit"):
+        getattr(route_session, method).assert_not_called()
+    provider.start_provisioning.assert_not_called()
+    keygen.assert_not_called()
+
+
+@pytest.mark.parametrize("priority", ["Spot", "Regular"])
+@pytest.mark.parametrize("reason", ["sku", "quota"])
+@pytest.mark.parametrize("explicit_region", [False, True])
+def test_known_negative_preflight_blocks_creation_before_side_effects(
+    priority, reason, explicit_region, monkeypatch
+):
+    family = "standardNcasv3_T4Family"
+    usage_reader = Mock(
+        return_value=[
+            SimpleNamespace(
+                name=SimpleNamespace(value=name),
+                current_value=0,
+                limit=3 if reason == "quota" and name != "cores" else 108,
+            )
+            for name in (family, "lowPriorityCores", "cores")
+        ]
+    )
+    sku_reader = Mock(
+        return_value=[
+            SimpleNamespace(
+                name="Standard_NC4as_T4_v3",
+                locations=["italynorth"],
+                restrictions=(
+                    [SimpleNamespace(reason_code="NotAvailableForSubscription")]
+                    if reason == "sku" and priority == "Regular"
+                    else []
+                ),
+                capabilities=[
+                    SimpleNamespace(name="vCPUs", value="4"),
+                    SimpleNamespace(
+                        name="LowPriorityCapable",
+                        value="False" if reason == "sku" and priority == "Spot" else "True",
+                    ),
+                ],
+                family=family,
+            )
+        ]
+    )
+    preview = AzurePreviewService(
+        preflight=AzureCapacityPreflight(
+            subscription_id="test",
+            compute_client=SimpleNamespace(
+                usage=SimpleNamespace(list=usage_reader),
+                resource_skus=SimpleNamespace(list=sku_reader),
+            ),
+        )
+    )
+    profile = CloudDeploymentProfile(
+        profileId="azure",
+        provider=ProviderType.AZURE,
+        configurableInputs={},
+        eligibleRegions=["italynorth"],
+    )
+
+    class BlockedProvider:
+        start_provisioning = Mock()
+
+        def preview_with_details(self, *, profileId, regionOverride=None, configurableInputs=None):
+            return preview.preview_environment(
+                profile=profile,
+                region_override=regionOverride,
+                configurable_inputs=configurableInputs,
+            )
+
+    provider = BlockedProvider()
+    route_session = Mock(spec=Session)
+    route_session.get.return_value = profile
+    keygen = Mock()
+    monkeypatch.setattr(environments, "_generate_admin_ssh_keypair", keygen)
+    app = create_app()
+    app.state.provider_adapter = provider
+    app.state.session_factory = lambda: NoopPersistenceSession()
+    app.state.telemetry = None
+    app.dependency_overrides[get_db_session] = lambda: route_session
+
+    payload = {
+        "profileId": "azure",
+        "configurableInputs": {
+            "vmPriority": priority,
+            "vmSizeOverride": "Standard_NC4as_T4_v3",
+        },
+    }
+    if explicit_region:
+        payload["region"] = "italynorth"
+    response = TestClient(app).post(
+        "/environments",
+        headers={"X-Demo-User": "presenter@example.com"},
+        json=payload,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "azure_preflight_unavailable"
+    route_session.get.assert_called_once_with(CloudDeploymentProfile, "azure")
+    for method in ("add", "flush", "commit"):
         getattr(route_session, method).assert_not_called()
     provider.start_provisioning.assert_not_called()
     keygen.assert_not_called()

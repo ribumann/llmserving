@@ -316,6 +316,22 @@ def create_environment(
         )
 
     selected_region = payload.region or evaluation.recommendation.recommendedRegion
+    selected_check = next(
+        (check for check in evaluation.checks if check.region == selected_region), None
+    )
+    if (
+        profile.provider == ProviderType.AZURE
+        and selected_check is not None
+        and selected_check.available is False
+    ):
+        raise ApiError(
+            status_code=409,
+            code="azure_preflight_unavailable",
+            message=(
+                "The requested Azure SKU or vCPU quota is unavailable. Revalidate before creating."
+            ),
+            details={"region": selected_region, "vmSize": selected_check.vmSize},
+        )
     operation_id = getattr(request.state, "operation_id", None) or uuid4().hex
     user = _user(request)
     environment_id = uuid4().hex[:12]
