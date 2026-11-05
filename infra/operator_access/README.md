@@ -177,3 +177,13 @@ inventory with no gateway, and retains verified before/after checkpoints even
 on failure. Initial execution without this flag still rejects any existing
 state/resources. No automatic retry follows another failure. After successful
 completion, a refreshed full Terraform plan must be NOOP before VPN acceptance.
+
+The actual resolver inbound endpoint exposes a platform service-association
+link and load-balancer IP-configuration backlink on the DNS subnet. Cleanup
+recognizes only the exact observed IDs after an owned inbound-endpoint GET
+verifies its campaign tags, region, successful provisioning, fixed resource
+GUID, sole static `10.20.31.4` address and exact subnet. This is preserve-only
+recognition of platform metadata: never GET, adopt or delete the referenced
+platform load balancer or its subscription. The owned inbound endpoint is
+deleted first; if its backlinks remain or ownership cannot be verified,
+cleanup stops rather than cascading into the subnet/platform dependency.

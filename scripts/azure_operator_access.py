@@ -23,6 +23,75 @@ ORDER = [
     "azurerm_subnet.gateway",
     "azurerm_public_ip.gateway",
 ]
+DNS_RESOURCE_GUID = "107f8f10-ce45-4963-9ec1-21583c343330"
+DNS_PLATFORM_IPCONFIG = (
+    "/subscriptions/9c188967-bc2c-4050-ad92-dd4cad989545"
+    "/resourceGroups/rg-prod-italynorth-main-endpoints"
+    "/providers/Microsoft.Network/loadBalancers"
+    "/lbi-prod-italynorth-main-ept-107f8f10ce4549639ec121583c343330"
+    "/frontendIPConfigurations/frontend-ipconfig"
+)
+
+
+def resolver_platform_attachments(details: dict, expected_tags: dict) -> bool:
+    """Recognize only this observed owned endpoint's platform backlinks; GET owned ID only."""
+    subnet = scope.RESOURCES["azurerm_subnet.dns"]["id"]
+    endpoint = scope.RESOURCES[
+        "azurerm_private_dns_resolver_inbound_endpoint.operator"
+    ]["id"]
+    links = details.get("serviceAssociationLinks", [])
+    configurations = details.get("ipConfigurations", [])
+    if not links and not configurations:
+        return False
+    if (
+        not isinstance(links, list)
+        or len(links) != 1
+        or not isinstance(links[0], dict)
+        or not scope.shared.equal(
+            links[0].get("id"), f"{subnet}/serviceAssociationLinks/dnsResolverLink"
+        )
+        or not isinstance(configurations, list)
+        or len(configurations) != 1
+        or not isinstance(configurations[0], dict)
+        or not scope.shared.equal(configurations[0].get("id"), DNS_PLATFORM_IPCONFIG)
+    ):
+        raise lifecycle.SharedError("DNS platform attachment identity differs.")
+    properties = links[0].get("properties")
+    if (
+        not isinstance(properties, dict)
+        or properties.get("linkedResourceType") != "Microsoft.Network/dnsResolvers"
+        or properties.get("link") != f"/InboundEndpoint/{DNS_RESOURCE_GUID}"
+        or properties.get("provisioningState") != "Succeeded"
+        or properties.get("allowDelete") is not False
+    ):
+        raise lifecycle.SharedError("DNS platform association metadata differs.")
+    owned = lifecycle.arm(endpoint, "2022-07-01")
+    properties = owned.get("properties")
+    if (
+        not scope.shared.equal(owned.get("id"), endpoint)
+        or owned.get("tags") != expected_tags
+        or owned.get("location") != scope.shared.REGION
+        or not isinstance(properties, dict)
+        or properties.get("resourceGuid") != DNS_RESOURCE_GUID
+        or properties.get("provisioningState") != "Succeeded"
+    ):
+        raise lifecycle.SharedError("Owned inbound endpoint platform identity differs.")
+    configurations = properties.get("ipConfigurations")
+    if not isinstance(configurations, list) or len(configurations) != 1:
+        raise lifecycle.SharedError("Owned inbound endpoint IP configuration differs.")
+    configuration = configurations[0]
+    if not isinstance(configuration, dict):
+        raise lifecycle.SharedError("Malformed owned inbound IP configuration.")
+    properties = configuration.get("properties")
+    if (
+        not isinstance(properties, dict)
+        or properties.get("privateIpAddress") != "10.20.31.4"
+        or properties.get("privateIpAllocationMethod") != "Static"
+        or not isinstance(properties.get("subnet"), dict)
+        or not scope.shared.equal(properties["subnet"].get("id"), subnet)
+    ):
+        raise lifecycle.SharedError("Owned inbound endpoint subnet/address differs.")
+    return True
 
 
 def target() -> dict:
@@ -145,6 +214,11 @@ def inventory(selected: dict) -> dict:
                 ]["id"].casefold()
             }
         )
+        platform = (
+            resolver_platform_attachments(details, expected_tags)
+            if address == "azurerm_subnet.dns"
+            else False
+        )
         for field in (
             "ipConfigurations",
             "privateEndpoints",
@@ -156,6 +230,8 @@ def inventory(selected: dict) -> dict:
                 raise lifecycle.SharedError(
                     "Operator subnet attachment metadata is malformed."
                 )
+            if platform and field in {"ipConfigurations", "serviceAssociationLinks"}:
+                continue
             for child in children:
                 if not isinstance(child, dict) or not isinstance(child.get("id"), str):
                     raise lifecycle.SharedError("Unknown operator subnet attachment.")
