@@ -214,6 +214,16 @@ def validate_reconcile(plan: object, group: str, canonical: object) -> None:
     # Reuse both unchanged strict guards to validate every native value/reference.
     initial = copy.deepcopy(plan)
     initial.pop("prior_state")
+    # Refreshed plans can keep a verified data context only in prior_state.
+    # Preserve it in the validation projection instead of losing that evidence.
+    projected = initial["planned_values"]["root_module"]["resources"]
+    projected_addresses = {record.get("address") for record in projected}
+    for record in prior_module["resources"]:
+        if record.get("mode") == "data":
+            scope.validate_data(record)
+            if record["address"] not in projected_addresses:
+                projected.append(copy.deepcopy(record))
+                projected_addresses.add(record["address"])
     for record in initial["resource_changes"]:
         if record.get("mode") == "managed":
             record["change"]["actions"] = ["create"]

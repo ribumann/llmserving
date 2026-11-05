@@ -144,6 +144,32 @@ class SharedReconcileTests(unittest.TestCase):
                 plan, guard.scope.GROUP, operation="create"
             )
 
+    def test_native_prior_only_data_context_preserved_in_projection(self):
+        plan, canonical = self.recovery()
+        plan["planned_values"]["root_module"]["resources"] = [
+            record
+            for record in plan["planned_values"]["root_module"]["resources"]
+            if record["mode"] == "managed"
+        ]
+        plan["resource_changes"] = [
+            record for record in plan["resource_changes"] if record["mode"] == "managed"
+        ]
+        guard.validate_reconcile(plan, guard.scope.GROUP, canonical)
+        for context, field in (
+            ("data.azurerm_client_config.current", "subscription_id"),
+            ("data.azurerm_resource_group.shared[0]", "id"),
+        ):
+            altered = copy.deepcopy(plan)
+            next(
+                record
+                for record in altered["prior_state"]["values"]["root_module"][
+                    "resources"
+                ]
+                if record["address"] == context
+            )["values"][field] = "foreign"
+            with self.assertRaises(guard.PlanRejected):
+                guard.validate_reconcile(altered, guard.scope.GROUP, canonical)
+
     def test_rejects_each_nonnoop_and_changed_existing_values(self):
         for address in guard.EXISTING:
             for action in (["update"], ["delete"], ["delete", "create"]):
