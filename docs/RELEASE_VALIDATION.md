@@ -146,6 +146,16 @@ definition. Deferred API tests cover this selection boundary with mocked
 execution, not genuine tool performance, process-restart recovery or durable
 worker/report parity. Durable routing remains unchanged.
 
+Cancellation requests are persisted and checked by the API worker independently
+of its process-local event. A request handled by another API replica cannot mark
+an untracked queued/running worker cancelled or release its lock before
+acknowledgement. Only a tracked executor future cancelled before starting can
+be finalized directly. Responses report the current status (possibly still
+`queued`/`running`); the existing run pages continue polling nonterminal statuses.
+A worker wait timeout is logged as pending acknowledgement; other worker errors
+propagate. This is cooperative cancellation at existing execution boundaries,
+not forced interruption of an in-flight evaluator or orphaned-run recovery.
+
 ### Versioned workflow monitor
 
 New Functions instances use `generic_orchestrator_v2`; the original named

@@ -437,7 +437,7 @@ export interface RunCancellationRequest {
 
 export interface CancelQualityRunResponse extends RequestIdEnvelope {
   runId: string;
-  status: 'cancelled';
+  status: OperationStatus;
   cancellationRequests: RunCancellationRequest[];
 }
 

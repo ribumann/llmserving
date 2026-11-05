@@ -10,15 +10,29 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from src.api.app import create_app
 from src.config import Settings
-from src.domain.enums import DemoEnvironmentState, ProviderType, WorkflowStatus, WorkflowType
+from src.domain.deployment_revision import DeploymentRevision
+from src.domain.enums import (
+    DemoEnvironmentState,
+    DeploymentRevisionState,
+    ExperimentRunStatus,
+    ExperimentRunType,
+    ProviderType,
+    RetentionClass,
+    WorkflowStatus,
+    WorkflowType,
+)
 from src.domain.environment import DemoEnvironment
 from src.domain.environment_lock import EnvironmentLockedError, EnvironmentLockService
+from src.domain.experiment_run import ExperimentRun
+from src.domain.inference_configuration import InferenceConfiguration
+from src.domain.model_configuration import ModelConfiguration
 from src.domain.orchestration_workflow import OrchestrationWorkflow
 from src.domain.orchestration_workflow_service import (
     OrchestrationWorkflowService,
     WorkflowNotRunningError,
 )
 from src.domain.profile import CloudDeploymentProfile
+from src.evaluation.run_quality import QualityRunContext, QualityRunOrchestrator
 from src.persistence.db import create_engine_from_settings
 from src.providers.local.adapter import LocalProviderAdapter
 
@@ -310,3 +324,110 @@ def test_local_runtime_recovery_rechecks_state_and_lock_owner(
         assert saved.lifecycleState == expected
         assert saved.activeOperationId == owner
         assert saved.providerState["fresh"] is True
+
+
+@pytest.mark.parametrize("status", [ExperimentRunStatus.QUEUED, ExperimentRunStatus.RUNNING])
+def test_persisted_cancellation_waits_for_worker_in_another_session(environment, status) -> None:
+    session_factory, environment_id = environment
+    model_id = f"{environment_id}-model"
+    inference_id = f"{environment_id}-inference"
+    revision_id = f"{environment_id}-revision"
+    run_id = f"{environment_id}-run"
+    actor = "postgres-test@example.com"
+    with session_factory() as session:
+        session.add(
+            ModelConfiguration(
+                modelConfigId=model_id,
+                environmentId=environment_id,
+                catalogEntryId="qwen2.5-0.5b-instruct",
+                resolvedCheckpointRef="qwen2.5:0.5b-instruct",
+                modelSettings={},
+                version=1,
+                createdBy=actor,
+            )
+        )
+        session.add(
+            InferenceConfiguration(
+                inferenceConfigId=inference_id,
+                environmentId=environment_id,
+                engineId="ollama",
+                servingSettings={},
+                generationSettings={},
+                version=1,
+                createdBy=actor,
+            )
+        )
+        session.flush()
+        session.add(
+            DeploymentRevision(
+                deploymentRevisionId=revision_id,
+                environmentId=environment_id,
+                modelConfigId=model_id,
+                inferenceConfigId=inference_id,
+                engineId="ollama",
+                lifecycleState=DeploymentRevisionState.READY,
+                activePeriod={},
+                health={},
+                createdBy=actor,
+            )
+        )
+        session.flush()
+        session.add(
+            ExperimentRun(
+                runId=run_id,
+                deploymentRevisionId=revision_id,
+                runType=ExperimentRunType.QUALITY_GOLDEN,
+                testDefinitionRef="golden-default",
+                status=status,
+                environmentContextSnapshot={},
+                diagnostics=[],
+                cancellationRequests=[],
+                retentionClass=RetentionClass.PERSISTED,
+            )
+        )
+        session.get(DemoEnvironment, environment_id).activeOperationId = run_id
+        session.commit()
+    try:
+        requester = QualityRunOrchestrator(session_factory=session_factory, provider=object())
+        worker = QualityRunOrchestrator(session_factory=session_factory, provider=object())
+        first = requester.cancel(run_id=run_id, requested_by=actor)
+        second = requester.cancel(run_id=run_id, requested_by=actor)
+        assert first.status == second.status == status
+        assert first.cancellationRequests == second.cancellationRequests
+        assert len(second.cancellationRequests) == 1
+        with session_factory() as session:
+            assert session.get(DemoEnvironment, environment_id).activeOperationId == run_id
+        assert worker._should_cancel(run_id)
+        worker._finish_cancelled(
+            QualityRunContext(
+                environmentId=environment_id,
+                deploymentRevisionId=revision_id,
+                engineId="ollama",
+                runId=run_id,
+                operationId=run_id,
+                actorEmail=actor,
+                runType=ExperimentRunType.QUALITY_GOLDEN,
+                testDefinitionRef="golden-default",
+                inferenceApiUrl="http://unused",
+            )
+        )
+        with session_factory() as session:
+            assert session.get(ExperimentRun, run_id).status == ExperimentRunStatus.CANCELLED
+            assert session.get(DemoEnvironment, environment_id).activeOperationId is None
+    finally:
+        with session_factory() as session:
+            session.execute(delete(ExperimentRun).where(ExperimentRun.runId == run_id))
+            session.execute(
+                delete(DeploymentRevision).where(
+                    DeploymentRevision.deploymentRevisionId == revision_id
+                )
+            )
+            session.execute(
+                delete(InferenceConfiguration).where(
+                    InferenceConfiguration.inferenceConfigId == inference_id
+                )
+            )
+            session.execute(
+                delete(ModelConfiguration).where(ModelConfiguration.modelConfigId == model_id)
+            )
+            session.commit()

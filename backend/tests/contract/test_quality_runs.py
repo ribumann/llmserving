@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
@@ -36,7 +37,8 @@ class DeferredExecutor:
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
-        return None
+        self.future = Future()
+        return self.future
 
 
 def _benchmark_runner(score: float = 0.82) -> LmEvalRunner:
@@ -277,6 +279,9 @@ def test_cancel_route_is_idempotent_and_report_waits_for_terminal_state() -> Non
     assert cancel.status_code == 200
     assert cancel.json()["status"] == "cancelled"
     assert len(cancel.json()["cancellationRequests"]) == 1
+    assert deferred.future.cancelled()
+    assert not client.app.state.quality_run_orchestrator._futures
+    assert not client.app.state.quality_run_orchestrator._cancel_events
 
     cancel_again = client.post(f"/environments/env-demo/runs/{run_id}/cancel", headers=headers)
     assert cancel_again.status_code == 200
