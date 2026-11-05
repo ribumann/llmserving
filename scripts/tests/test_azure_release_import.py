@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -504,11 +505,33 @@ class ReleaseImportTests(unittest.TestCase):
         source = (
             ROOT / ".github/workflows/azure-fallback-release-import.yml"
         ).read_text()
+        self.assertEqual(consumer.CANDIDATE_RUN, "42081580674")
+        self.assertEqual(consumer.CANDIDATE_ATTEMPT, "1")
+        self.assertEqual(
+            consumer.CANDIDATE_SHA, "8348c1b2af70b2607158811fc61c3d4ef6f53c29"
+        )
+        implementation = ast.parse(
+            (ROOT / "scripts/azure_release_import.py").read_text()
+        )
+        manifest_pin = next(
+            node.value
+            for node in implementation.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == "CANDIDATE_MANIFEST_SHA256"
+                for target in node.targets
+            )
+        )
+        self.assertEqual(
+            ast.literal_eval(manifest_pin),
+            "b3011dc15db6823c87cde660bd2f3dc1690ac710a008f3c4f72f393d1973b0ef",
+        )
         self.assertIn("default: false", source)
         self.assertIn("environment: azure-e2e-fallback", source)
         self.assertIn("persist-credentials: false", source)
         self.assertIn("cancel-in-progress: false", source)
-        self.assertIn("run-id: 42031238122", source)
+        self.assertIn(f"run-id: {consumer.CANDIDATE_RUN}", source)
         self.assertIn("name: release-manifest-1", source)
         self.assertIn("pattern: release-image-*-1", source)
         self.assertIn(f"name: functions-{consumer.CANDIDATE_SHA}", source)

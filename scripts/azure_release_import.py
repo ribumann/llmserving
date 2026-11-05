@@ -17,11 +17,11 @@ from azure_canary import FALLBACK_TARGET
 from azure_disk_probe import mask_subject
 
 WORKFLOW = ".github/workflows/azure-fallback-release-import.yml"
-CANDIDATE_RUN = "42031238122"
+CANDIDATE_RUN = "42081580674"
 CANDIDATE_ATTEMPT = "1"
-CANDIDATE_SHA = "1f9f15f2c7046c81f9b988170d77ea3750a3ac65"
+CANDIDATE_SHA = "8348c1b2af70b2607158811fc61c3d4ef6f53c29"
 CANDIDATE_MANIFEST_SHA256 = (
-    "2392632e34ff4622fdb4ab311637e9e70767cccb2b2ae91f1632b3451c2a3c7a"
+    "b3011dc15db6823c87cde660bd2f3dc1690ac710a008f3c4f72f393d1973b0ef"
 )
 GROUP = "rg-llmserving-e2e-shared"
 REGISTRY = "llmreleaseacr0ea5e6"

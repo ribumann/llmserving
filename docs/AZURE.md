@@ -627,12 +627,30 @@ Terraform state or database contents are bundled.
 ### Consume the retained candidate without rebuilding
 
 `azure-fallback-release-import.yml` is a protected `main`-only manual consumer
-of Runtime CI run `42031238122`, attempt `1`, source
-`1f9f15f2c7046c81f9b988170d77ea3750a3ac65`. The expected identity is fixed
-in reviewed source, never chosen by the downloaded manifest. It verifies the
-successful producer attempt through GitHub and the fixed reviewed manifest
-SHA-256 `2392632e34ff4622fdb4ab311637e9e70767cccb2b2ae91f1632b3451c2a3c7a`,
-hashes all eight actual downloads,
+of successful Runtime CI run `42081580674`, attempt `1`, source
+`8348c1b2af70b2607158811fc61c3d4ef6f53c29`. This exact main-head producer
+passed all required runtime, package, image-build and cloud-safety checks. Its
+downloaded Functions ZIP SHA-256 is
+`846332920f503eefee29d17dd22a3a317fe0a61f72e772266a3800563f431387`;
+the fixed reviewed manifest SHA-256 is
+`b3011dc15db6823c87cde660bd2f3dc1690ac710a008f3c4f72f393d1973b0ef`.
+All eight component records match the same run/source/attempt and complete
+manifest. The seven passed Docker config IDs (not registry pull digests) are:
+
+| Component | Tested Docker config ID |
+|---|---|
+| `backend` | `sha256:348c02f8f66340ea545e8eeff6978fc5c57086181877bc0b46444e4fb9277a4a` |
+| `frontend` | `sha256:9d500c03c3b6515e57215355cee001a060b16d93ab59c56c98b084fdad6a99b2` |
+| `terraform_runner` | `sha256:6aa8c4e5505bd6377cbb3a68e41b748580bee9f89c1caea7861035415a1cef92` |
+| `model_deployment` | `sha256:025f82fbbdda854db3dfd04b47221b8bebbbaed36d0a53605565283fc69ba4a3` |
+| `evaluation_worker` | `sha256:3bcfe1831503fc163bb7f219e1941b310ce4f382128b8b795eef64db1d3c468f` |
+| `performance_worker` | `sha256:b3f28e7b13f1dc68e40ab9552cbb0f7279e01864091bfe5a7e0ea6d0e1e2e252` |
+| `export_worker` | `sha256:14d1e9d56b4ae735b7b2f0916028077915e7ba8c487b18767e7febbfd26f836d` |
+
+These are retained checked artifacts, not rebuilt or live-deployed artifacts.
+The expected identity is fixed in reviewed source, never chosen by the
+downloaded manifest. The consumer verifies the exact successful producer
+attempt through GitHub, hashes the manifest and all eight actual downloads,
 then Docker-loads the seven checked images and compares Linux/amd64 config IDs.
 It does not run their application entrypoints or claim new runtime acceptance.
 
