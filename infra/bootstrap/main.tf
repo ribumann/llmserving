@@ -57,7 +57,9 @@ resource "azapi_resource" "state" {
   }
 }
 
-resource "azapi_resource" "blobs" {
+# Azure creates default with the account. Configure it without trying to create
+# or independently delete the service; its lifecycle belongs to the owned account.
+resource "azapi_update_resource" "blobs" {
   type                   = "Microsoft.Storage/storageAccounts/blobServices@2023-05-01"
   name                   = "default"
   parent_id              = azapi_resource.state.id
@@ -79,7 +81,7 @@ resource "azapi_resource" "blobs" {
 resource "azapi_resource" "tfstate" {
   type                   = "Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01"
   name                   = local.container_name
-  parent_id              = azapi_resource.blobs.id
+  parent_id              = azapi_update_resource.blobs.id
   response_export_values = []
 
   body = {

@@ -1,4 +1,4 @@
-"""Fail-closed initial-bootstrap gate for a reviewed native Terraform saved plan."""
+"""Fail-closed initial/account-only recovery gate for reviewed bootstrap saved plans."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class PlanRejected(ValueError):
 PROVIDER = "registry.terraform.io/azure/azapi"
 TYPES = {
     "azapi_resource.state": "Microsoft.Storage/storageAccounts@2023-05-01",
-    "azapi_resource.blobs": "Microsoft.Storage/storageAccounts/blobServices@2023-05-01",
+    "azapi_update_resource.blobs": "Microsoft.Storage/storageAccounts/blobServices@2023-05-01",
     "azapi_resource.tfstate": "Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01",
 }
 DATA = {
@@ -47,7 +47,7 @@ ACCOUNT_BODY = {
 }
 BODIES = {
     "azapi_resource.state": ACCOUNT_BODY,
-    "azapi_resource.blobs": {
+    "azapi_update_resource.blobs": {
         "properties": {
             "isVersioningEnabled": True,
             "deleteRetentionPolicy": {"enabled": True, "days": 7},
@@ -116,7 +116,7 @@ def _records(module: object) -> dict:
             type(address) is str and address not in result, "Invalid resource address."
         )
         if address in TYPES:
-            mode, kind = "managed", "azapi_resource"
+            mode, kind = "managed", address.split(".")[0]
         else:
             _require(address in DATA, "Resource outside the bootstrap allowlist.")
             mode, kind = "data", DATA[address]
@@ -144,7 +144,9 @@ def _references(expression: object, target: str) -> None:
     )
 
 
-def validate_plan(plan: object, expected: dict) -> None:
+def validate_plan(
+    plan: object, expected: dict, *, recover_account_only: bool = False
+) -> None:
     """Validate reviewed bootstrap source only, not arbitrary Terraform expressions."""
     expected = _object(expected)
     required = {
@@ -201,17 +203,17 @@ def validate_plan(plan: object, expected: dict) -> None:
     account_id = f"{group_id}/providers/Microsoft.Storage/storageAccounts/{account}"
     parents = {
         "azapi_resource.state": group_id,
-        "azapi_resource.blobs": account_id,
+        "azapi_update_resource.blobs": account_id,
         "azapi_resource.tfstate": f"{account_id}/blobServices/default",
     }
     references = {
         "azapi_resource.state": "data.azapi_resource.shared.id",
-        "azapi_resource.blobs": "azapi_resource.state.id",
-        "azapi_resource.tfstate": "azapi_resource.blobs.id",
+        "azapi_update_resource.blobs": "azapi_resource.state.id",
+        "azapi_resource.tfstate": "azapi_update_resource.blobs.id",
     }
     names = {
         "azapi_resource.state": account,
-        "azapi_resource.blobs": "default",
+        "azapi_update_resource.blobs": "default",
         "azapi_resource.tfstate": "tfstate",
     }
     plan = _object(plan)
@@ -315,13 +317,22 @@ def validate_plan(plan: object, expected: dict) -> None:
 
     prior = plan.get("prior_state")
     resolved_data = {}
+    prior_managed = {}
     if prior is not None:
         records = _records(_object(_object(prior).get("values")).get("root_module"))
+        prior_managed = {key: value for key, value in records.items() if key in TYPES}
         _require(
-            not (set(records) & set(TYPES)),
-            "Prior managed state is not fresh bootstrap.",
+            set(prior_managed)
+            == ({"azapi_resource.state"} if recover_account_only else set()),
+            "Recovery requires exactly the owned account; initial mode requires no managed state.",
         )
-        resolved_data.update(records)
+        resolved_data.update(
+            {key: value for key, value in records.items() if key in DATA}
+        )
+    _require(
+        not recover_account_only or prior_managed,
+        "Account recovery requires preserved partial state.",
+    )
     planned = _records(_object(plan.get("planned_values")).get("root_module"))
     _require(
         set(TYPES) <= set(planned),
@@ -379,14 +390,34 @@ def validate_plan(plan: object, expected: dict) -> None:
             )
             _require(not _unknown(change.get("after_unknown")), "Unknown data lookup.")
             continue
-        _require(
-            change.get("actions") == ["create"]
-            and change.get("before", "missing") is None,
-            "Only fresh creates are allowed.",
-        )
+        recovering_account = recover_account_only and address == "azapi_resource.state"
+        if recovering_account:
+            _require(
+                change.get("actions") == ["no-op"],
+                "The preserved account must be unchanged in recovery.",
+            )
+            before = _object(change.get("before"))
+            _require(
+                _equal(before, change.get("after"))
+                and _equal(before, prior_managed[address].get("values"))
+                and before.get("id") == account_id
+                and prior_managed[address].get("provider_name") == PROVIDER,
+                "Recovery account must match preserved state and exact owned ID.",
+            )
+        else:
+            _require(
+                change.get("actions") == ["create"]
+                and change.get("before", "missing") is None,
+                "Only missing service configuration/container creates are allowed.",
+            )
         after = _object(change.get("after"))
         unknown = _object(change.get("after_unknown"))
         _unknown(unknown)
+        if recovering_account:
+            _require(
+                not _unknown(unknown),
+                "Recovery account must be fully known and unchanged.",
+            )
         allowed_fields = {
             "body",
             "name",
@@ -415,6 +446,7 @@ def validate_plan(plan: object, expected: dict) -> None:
             "schema_validation_enabled",
             "replace_triggers_external_values",
             "replace_triggers_refs",
+            "resource_id",
         }
         _require(
             set(after) <= allowed_fields and set(unknown) <= allowed_fields,
@@ -449,7 +481,11 @@ def validate_plan(plan: object, expected: dict) -> None:
             "delete_query_parameters",
             "read_query_parameters",
         ):
-            empty = [] if field == "identity" else None
+            empty = (
+                []
+                if field == "identity" and address != "azapi_update_resource.blobs"
+                else None
+            )
             _require(
                 _equal(after.get(field), empty),
                 "Unexpected identity, hidden body or request override.",
@@ -484,6 +520,17 @@ def validate_plan(plan: object, expected: dict) -> None:
                 parent_unknown is False and after.get("parent_id") == parents[address],
                 "Foreign or malformed ARM parent.",
             )
+        if "resource_id" in after and after["resource_id"] is not None:
+            _require(
+                address == "azapi_update_resource.blobs"
+                and after["resource_id"] == f"{account_id}/blobServices/default",
+                "Foreign update-resource target.",
+            )
+        _require(
+            not _unknown(unknown.get("resource_id", False))
+            or address == "azapi_update_resource.blobs",
+            "Unexpected unknown resource ID.",
+        )
         values = _object(planned[address].get("values"))
         for field in (
             "body",
@@ -520,7 +567,13 @@ def _json(text: str) -> object:
 
 
 def run_saved_plan(
-    plan_path: Path, expected: dict, log_path: Path, *, terraform: str, apply: bool
+    plan_path: Path,
+    expected: dict,
+    log_path: Path,
+    *,
+    terraform: str,
+    apply: bool,
+    recover_account_only: bool = False,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="bootstrap-plan-") as directory:
         saved = Path(directory) / "approved.tfplan"
@@ -545,7 +598,9 @@ def run_saved_plan(
             _require(
                 shown.returncode == 0, "Terraform show failed; inspect the private log."
             )
-            validate_plan(_json(shown.stdout), expected)
+            validate_plan(
+                _json(shown.stdout), expected, recover_account_only=recover_account_only
+            )
             if apply:
                 result = subprocess.run(
                     [terraform, "apply", "-input=false", "-no-color", str(saved)],
@@ -572,6 +627,11 @@ def main() -> int:
     parser.add_argument("--private-log", type=Path, required=True)
     parser.add_argument("--terraform-bin", default="terraform")
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument(
+        "--recover-account-only",
+        action="store_true",
+        help="Explicit recovery of preserved account-only partial state: require exact account no-op and only missing service/container creates.",
+    )
     args = parser.parse_args()
     try:
         run_saved_plan(
@@ -580,6 +640,7 @@ def main() -> int:
             args.private_log,
             terraform=args.terraform_bin,
             apply=args.apply,
+            recover_account_only=args.recover_account_only,
         )
     except PlanRejected as error:
         print(str(error), file=sys.stderr)

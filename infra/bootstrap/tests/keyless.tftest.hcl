@@ -42,11 +42,11 @@ run "keyless_security_and_ownership" {
     error_message = "Use explicit deployment location and preserve all operator tags, without mutating group metadata."
   }
   assert {
-    condition     = azapi_resource.state.type == "Microsoft.Storage/storageAccounts@2023-05-01" && azapi_resource.blobs.type == "Microsoft.Storage/storageAccounts/blobServices@2023-05-01" && azapi_resource.tfstate.type == "Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01"
+    condition     = azapi_resource.state.type == "Microsoft.Storage/storageAccounts@2023-05-01" && azapi_update_resource.blobs.type == "Microsoft.Storage/storageAccounts/blobServices@2023-05-01" && azapi_resource.tfstate.type == "Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01"
     error_message = "Use pinned ARM storage APIs, including management-plane container creation."
   }
   assert {
-    condition     = azapi_resource.state.name == "llmstate08ab7e" && azapi_resource.blobs.name == "default" && output.state_storage_account_name == azapi_resource.state.name && output.state_container_name == "tfstate"
+    condition     = azapi_resource.state.name == "llmstate08ab7e" && azapi_update_resource.blobs.name == "default" && output.state_storage_account_name == azapi_resource.state.name && output.state_container_name == "tfstate"
     error_message = "Names and outputs must match shared's actual subscription-stage suffix and the tfstate container."
   }
   assert {
@@ -70,7 +70,7 @@ run "keyless_security_and_ownership" {
     error_message = "State blobs must use Microsoft-managed encryption."
   }
   assert {
-    condition     = azapi_resource.blobs.body.properties.isVersioningEnabled && azapi_resource.blobs.body.properties.deleteRetentionPolicy.enabled && azapi_resource.blobs.body.properties.deleteRetentionPolicy.days == 7 && azapi_resource.blobs.body.properties.containerDeleteRetentionPolicy.enabled && azapi_resource.blobs.body.properties.containerDeleteRetentionPolicy.days == 7
+    condition     = azapi_update_resource.blobs.body.properties.isVersioningEnabled && azapi_update_resource.blobs.body.properties.deleteRetentionPolicy.enabled && azapi_update_resource.blobs.body.properties.deleteRetentionPolicy.days == 7 && azapi_update_resource.blobs.body.properties.containerDeleteRetentionPolicy.enabled && azapi_update_resource.blobs.body.properties.containerDeleteRetentionPolicy.days == 7
     error_message = "Require blob versioning and seven-day blob/container recovery."
   }
   assert {
@@ -90,7 +90,7 @@ run "keyless_security_and_ownership" {
     error_message = "Backend configs must be exactly the nonsecret OAuth/OIDC fields with three distinct state keys."
   }
   assert {
-    condition     = length(azapi_resource.state.response_export_values) == 0 && length(azapi_resource.blobs.response_export_values) == 0 && length(azapi_resource.tfstate.response_export_values) == 0
+    condition     = length(azapi_resource.state.response_export_values) == 0 && length(azapi_update_resource.blobs.response_export_values) == 0 && length(azapi_resource.tfstate.response_export_values) == 0
     error_message = "Do not export management responses or key material."
   }
 }
@@ -178,13 +178,13 @@ run "source_ownership_and_destroy_guards" {
       for filename in fileset(path.module, "*.tf") : file("${path.module}/${filename}")
       ]))) == toset([
       "resource \"azapi_resource\" \"state\"",
-      "resource \"azapi_resource\" \"blobs\"",
+      "resource \"azapi_update_resource\" \"blobs\"",
       "resource \"azapi_resource\" \"tfstate\"",
     ])
     error_message = "Bootstrap may manage only the account, blob service and container, never a group, registry, role or identity."
   }
   assert {
-    condition     = can(regex("parent_id\\s*=\\s*azapi_resource.state.id", file("${path.module}/main.tf"))) && can(regex("parent_id\\s*=\\s*azapi_resource.blobs.id", file("${path.module}/main.tf"))) && can(regex("value\\s*=\\s*azapi_resource.state.id", file("${path.module}/outputs.tf")))
+    condition     = can(regex("parent_id\\s*=\\s*azapi_resource.state.id", file("${path.module}/main.tf"))) && can(regex("parent_id\\s*=\\s*azapi_update_resource.blobs.id", file("${path.module}/main.tf"))) && can(regex("value\\s*=\\s*azapi_resource.state.id", file("${path.module}/outputs.tf")))
     error_message = "Computed child parent IDs and the output must reference the owned resources, not foreign IDs."
   }
   assert {

@@ -99,16 +99,18 @@ def plan():
     ]
     changes, configured = [], []
     for index, name in enumerate(("state", "blobs", "tfstate")):
-        address = f"azapi_resource.{name}"
+        kind = "azapi_update_resource" if name == "blobs" else "azapi_resource"
+        address = f"{kind}.{name}"
         values = {
             "type": types[index],
             "name": ("llmstate08ab7e", "default", "tfstate")[index],
             "body": bodies[index],
             "parent_id": GROUP if index == 0 else None,
             "response_export_values": [],
-            "identity": [],
             "sensitive_body": None,
         }
+        if index != 1:
+            values["identity"] = []
         unknown = {"id": True, "output": True, "body": {"properties": {}}}
         if index == 0:
             values.update(location="polandcentral", tags=target()["tags"])
@@ -127,7 +129,7 @@ def plan():
         item = {
             "address": address,
             "mode": "managed",
-            "type": "azapi_resource",
+            "type": kind,
             "name": name,
             "provider_name": PROVIDER,
         }
@@ -146,7 +148,7 @@ def plan():
         ref = (
             "data.azapi_resource.shared",
             "azapi_resource.state",
-            "azapi_resource.blobs",
+            "azapi_update_resource.blobs",
         )[index]
         configured.append(
             {
@@ -197,6 +199,28 @@ def plan():
     }
 
 
+def account_recovery_plan():
+    data = plan()
+    account = data["resource_changes"][0]
+    account["change"]["actions"] = ["no-op"]
+    account["change"]["after"]["id"] = ACCOUNT
+    account["change"]["before"] = copy.deepcopy(account["change"]["after"])
+    account["change"]["after_unknown"] = {}
+    prior = {
+        key: copy.deepcopy(value) for key, value in account.items() if key != "change"
+    }
+    prior["values"] = copy.deepcopy(account["change"]["before"])
+    data["prior_state"]["values"]["root_module"]["resources"].append(prior)
+    planned = data["planned_values"]["root_module"]["resources"]
+    planned[0]["values"] = copy.deepcopy(account["change"]["after"])
+    # The account now exists, so the service's parent is no longer unknown.
+    data["resource_changes"][1]["change"]["after"]["parent_id"] = ACCOUNT
+    data["resource_changes"][1]["change"]["after_unknown"].pop("parent_id")
+    data["resource_changes"][1]["change"]["after_unknown"]["resource_id"] = True
+    planned[1]["values"]["parent_id"] = ACCOUNT
+    return data
+
+
 class BootstrapPlanTests(unittest.TestCase):
     def reject(self, data, expected=None):
         with self.assertRaises(guard.PlanRejected):
@@ -204,6 +228,119 @@ class BootstrapPlanTests(unittest.TestCase):
 
     def test_native_unknown_child_parents_and_empty_unknown_objects(self):
         guard.validate_plan(plan(), target())
+
+    def test_explicit_preserved_account_recovery(self):
+        data = account_recovery_plan()
+        guard.validate_plan(data, target(), recover_account_only=True)
+        # Recovery is never inferred from partial state or allowed in initial mode.
+        self.reject(data)
+        with self.assertRaises(guard.PlanRejected):
+            guard.validate_plan(plan(), target(), recover_account_only=True)
+
+    def test_recovery_rejects_foreign_changed_unknown_or_missing_account(self):
+        for section in ("before", "after"):
+            for field, value in (
+                ("id", "foreign"),
+                ("parent_id", "foreign"),
+                ("tags", {}),
+                ("location", "eastus"),
+            ):
+                data = account_recovery_plan()
+                data["resource_changes"][0]["change"][section][field] = value
+                with self.assertRaises(guard.PlanRejected):
+                    guard.validate_plan(data, target(), recover_account_only=True)
+        for actions in (["create"], ["update"], ["delete"], ["delete", "create"]):
+            data = account_recovery_plan()
+            data["resource_changes"][0]["change"]["actions"] = actions
+            with self.assertRaises(guard.PlanRejected):
+                guard.validate_plan(data, target(), recover_account_only=True)
+        for unknown in ({"id": True}, {"tags": True}, {"body": True}):
+            data = account_recovery_plan()
+            data["resource_changes"][0]["change"]["after_unknown"] = unknown
+            with self.assertRaises(guard.PlanRejected):
+                guard.validate_plan(data, target(), recover_account_only=True)
+        data = account_recovery_plan()
+        data["prior_state"]["values"]["root_module"]["resources"].pop()
+        with self.assertRaises(guard.PlanRejected):
+            guard.validate_plan(data, target(), recover_account_only=True)
+
+    def test_recovery_rejects_any_other_prior_managed_record_and_import(self):
+        for index in (1, 2):
+            data = account_recovery_plan()
+            prior = copy.deepcopy(
+                data["planned_values"]["root_module"]["resources"][index]
+            )
+            data["prior_state"]["values"]["root_module"]["resources"].append(prior)
+            with self.assertRaises(guard.PlanRejected):
+                guard.validate_plan(data, target(), recover_account_only=True)
+        data = account_recovery_plan()
+        data["resource_changes"][1]["change"]["importing"] = {
+            "id": f"{ACCOUNT}/blobServices/default"
+        }
+        with self.assertRaises(guard.PlanRejected):
+            guard.validate_plan(data, target(), recover_account_only=True)
+
+    def test_recovery_never_allows_account_security_drift_even_consistently(self):
+        data = account_recovery_plan()
+        data["resource_changes"][0]["change"]["after"]["body"]["properties"][
+            "allowSharedKeyAccess"
+        ] = True
+        account = data["resource_changes"][0]["change"]
+        account["before"] = copy.deepcopy(account["after"])
+        data["prior_state"]["values"]["root_module"]["resources"][-1]["values"] = (
+            copy.deepcopy(account["after"])
+        )
+        data["planned_values"]["root_module"]["resources"][0]["values"] = copy.deepcopy(
+            account["after"]
+        )
+        with self.assertRaises(guard.PlanRejected):
+            guard.validate_plan(data, target(), recover_account_only=True)
+
+    def test_update_target_cannot_override_owned_service(self):
+        for parent_unknown in (True, False):
+            data = plan()
+            service = data["resource_changes"][1]["change"]
+            service["after"]["resource_id"] = "foreign"
+            service["after_unknown"]["parent_id"] = parent_unknown
+            if not parent_unknown:
+                service["after"]["parent_id"] = ACCOUNT
+            self.reject(data)
+        data = plan()
+        data["resource_changes"][1]["address"] = "azapi_resource.blobs"
+        data["resource_changes"][1]["type"] = "azapi_resource"
+        self.reject(data)
+
+    def test_saved_plan_recovery_flag_is_explicit_and_propagated(self):
+        for enabled in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                native = Path(directory) / "native"
+                native.write_bytes(b"partial-state recovery plan")
+                with patch.object(
+                    guard.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(
+                        [], 0, json.dumps(account_recovery_plan())
+                    ),
+                ) as runner:
+                    if enabled:
+                        guard.run_saved_plan(
+                            native,
+                            target(),
+                            Path(directory) / "log",
+                            terraform="terraform",
+                            apply=False,
+                            recover_account_only=True,
+                        )
+                    else:
+                        with self.assertRaises(guard.PlanRejected):
+                            guard.run_saved_plan(
+                                native,
+                                target(),
+                                Path(directory) / "log",
+                                terraform="terraform",
+                                apply=False,
+                            )
+                self.assertEqual(runner.call_count, 1)
 
     def test_native_argumentless_client_data_omits_expressions(self):
         data = plan()

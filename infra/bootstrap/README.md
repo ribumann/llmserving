@@ -1,7 +1,7 @@
 # Keyless state storage bootstrap (source only)
 
-This independent module proposes **three ARM resources**: a StorageV2
-Standard_LRS account, its default blob service configuration, and a private
+This independent module manages a StorageV2 Standard_LRS account, an
+`azapi_update_resource` for its default blob service configuration, and a private
 `tfstate` container in a **required existing resource group**. The group is
 read as data, never created, tagged, imported or deleted. Use **fresh local
 bootstrap state only**, separate from shared/control/demo state. Do not adopt
@@ -13,7 +13,15 @@ required namespaces must already be registered. The module creates no ACR,
 identity, role assignment, application, password, consent or directory group.
 In particular, the existing shared layer remains the sole owner of its ACR.
 No storage keys are listed, read, exported or stored: account, blob service
-and container provisioning all use management-plane requests.
+configuration and container provisioning all use management-plane requests.
+
+Azure automatically creates `blobServices/default` with the account.
+Attempting to create it as an `azapi_resource` fails with
+`ResourceAlreadyExists` after account creation. The update resource configures
+only versioning/recovery on that automatically owned service, rather than
+trying to create or import it. It is bound to the account resource's ID.
+The container depends on the configuration update, so it is created only after
+the requested protection settings are acknowledged.
 
 ## Protection and authorization boundary
 
@@ -25,14 +33,17 @@ immutable backups. The container has `publicAccess=None`. The public TLS
 endpoint is intentional: no private-network prerequisite, key/SAS fallback
 or anonymous access is introduced.
 
-All three resources have `prevent_destroy`; replacement/destruction is blocked
+All three Terraform records have `prevent_destroy`; replacement/destruction is blocked
 while these declarations remain in configuration. This is a Terraform guard,
 not an Azure resource lock or protection against removing configuration,
 external deletion, a privileged writer or deletion of the retained group.
-Versioning/soft delete do not recover a deleted storage account. Preserve
+Removing an `azapi_update_resource` would not delete the service or revert its
+properties; the physical service's lifecycle belongs to the managed account,
+not an independently orphanable resource. The account remains owned and
+protected by this module. Versioning/soft delete do not recover a deleted storage account. Preserve
 private state/backups and independently review exact live plans.
 
-**Current campaign data-plane access is NOT authorized.** Management-plane
+**Data-plane access requires independent authorization.** Management-plane
 Owner is not OAuth blob data access. Granting or using **Storage Blob Data
 Contributor at the exact new account** requires explicit user approval before
 any grant, blob access or migration. This module never creates that assignment
@@ -147,7 +158,11 @@ inside a temporary mode-0700 directory (log path is operator-selected).
 The guard strips inherited `TF_CLI_ARGS*`/`TF_LOG*`; Terraform errors/output
 remain in the private log, never a public payload dump.
 
-The initial gate requires exactly the three reviewed AzAPI managed addresses,
+The initial gate requires exactly the three reviewed managed addresses:
+`azapi_resource.state`, `azapi_update_resource.blobs` and `azapi_resource.tfstate`.
+The service's Terraform `create` action means creating an update record and
+configuring the automatically existing service, not an ARM service create.
+The default initial gate requires
 create-only changes with no prior managed resources/import/move/update/delete,
 the exact pinned APIs/provider, explicit target inputs, known account parent,
 exact security/recovery bodies, names and tags, and resolved tenant/group data
@@ -156,7 +171,7 @@ foreign or ambiguous parents fail closed.
 
 Fresh child IDs are normally unknown. In that case the guard requires exactly
 the reviewed configuration dependency on `azapi_resource.state.id` for the
-blob service and `azapi_resource.blobs.id` for the container, while binding the
+blob service and `azapi_update_resource.blobs.id` for the container, while binding the
 known account parent to the exact approved group. Empty nested unknown-metadata
 objects do not mean the security properties are unknown. Terraform JSON
 references **do not encode full expression semantics**: a malicious expression
@@ -164,8 +179,48 @@ can mention the right resource while computing a foreign ID. Consequently
 this is an execution gate for the **reviewed module**, not a sandbox or
 approval for arbitrary Terraform code/provider binaries/environment.
 Do not substitute unreviewed module code, use targeting, edit plan JSON, or
-retry against an existing account/state. State refresh/update/recovery needs
-a separate reviewed gate; this script intentionally refuses it.
+retry against an existing account/state without the explicit narrowly scoped
+recovery gate below. General state refresh/update/recovery remains rejected.
+
+### Account-only partial-apply recovery
+
+If the former service-create bug left **only this module's account** in
+preserved local state, do not delete/recreate the account, remove state records,
+import the default service, use `-target`, or retry the old saved plan. Preserve
+state/backup and independently verify the exact account ARM ID, subscription,
+group, location and all ownership tags against approved inputs, plus account
+security settings and the default service's exact
+`<owned-account-id>/blobServices/default` ID/type. Inspect the service's live
+versioning and blob/container recovery baseline using ARM GET, not keys or blob
+data access. Absence of the intended settings is the failure baseline to fix,
+not evidence of a separate disposable resource.
+
+From the reviewed corrected module, generate a **new full native saved plan**
+using the preserved partial state and independently approved target variables.
+The only acceptable recovery shape is the exact owned account **no-op**,
+`azapi_update_resource.blobs` **create** (configures the automatically existing
+service), and `azapi_resource.tfstate` **create**. Review the real plan and
+independently verified live baseline before checking it:
+
+```bash
+python ../../scripts/validate_bootstrap_plan.py \
+  --plan /approved/private/bootstrap-recovery.tfplan \
+  --expected-target /approved/private/bootstrap-target.json \
+  --private-log /approved/private/new-bootstrap-recovery-check.log \
+  --recover-account-only
+```
+
+This explicit flag requires exactly one prior managed record: the original
+`azapi_resource.state`, with exact known owned ID and unchanged prior/before/after
+values. Its security body/tags/location must still match approval; any account
+update/replacement, import, other prior managed record, unknown account value,
+foreign scope or extra action fails closed. It does not import/adopt a different
+account or allow a recovery after the service/container has entered state.
+The gate validates plan/state, not live ARM ownership or service baseline;
+independent GET verification remains mandatory. Only after independent review,
+passing checks and explicit apply authorization may the operator use the same
+guard with `--recover-account-only --apply` and a new private log. No state
+migration, role grant or blob access is implicit in this operation.
 
 Credential-free unit tests mirror native first-plan shapes and reject malformed
 targets/payloads, foreign parent chains, roles/extra resources, prior state,
