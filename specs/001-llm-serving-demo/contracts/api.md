@@ -32,7 +32,12 @@ audit (FR-004) and enforces the single-writer lock on the target `Demo Environme
 - `POST /environments/preview` -> region/quota/capacity recommendation preview given a
   `profileId` (FR-038, FR-039); does not acquire the write lock
 - `POST /environments` -> provision a `Demo Environment` for a profile + region (may override the
-  recommended region; revalidates quota/capacity/compatibility, FR-040)
+  recommended region; revalidates quota/capacity/compatibility, FR-040). Azure inputs
+  `vmSizeOverride` and `vmPriority` (`Spot` default or explicit `Regular`) select the exact
+  quota/compatibility assessment and saved Terraform configuration. Invalid priority returns
+  `422 invalid_vm_priority`; a known-negative selected Azure SKU/quota assessment returns
+  `409 azure_preflight_unavailable` before key generation, persistence or dispatch, including
+  region overrides. Unknown non-authorization metadata remains advisory, not proven availability.
 - `GET /environments` -> list existing `Demo Environment` records (id, name, lifecycle state,
   region), backing the environment picker used across Deploy/Exercise/Quality/Performance (User
   Story 8) instead of requiring a typed environment ID

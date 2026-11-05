@@ -118,6 +118,31 @@ Non-authorization transport/service failures and missing metadata retain the
 existing explicit **unknown** advisory behavior. That fallback is not confirmed
 quota, allocation, authorization or permission to spend on GPUs.
 
+### Exact SKU and allocation priority
+
+`configurableInputs.vmPriority` accepts only `Spot` or `Regular`; an omitted input
+preserves the existing Spot default. Profile defaults and request overrides are
+resolved identically for preview and the saved Terraform `vm_priority`. Regular
+requires exact SKU-family and total regional vCPU headroom; Spot uses regional
+`lowPriorityCores` and requires the SKU's `LowPriorityCapable` metadata. A false
+capability blocks Spot; missing/invalid capability remains explicitly unknown.
+Neither path ignores subscription/zone restrictions or confirms physical capacity.
+There is no automatic Spot-to-Regular fallback.
+Creation rejects a known-negative selected Azure SKU/quota assessment with
+`409 azure_preflight_unavailable` before key generation, persistence or dispatch,
+including an explicit region override. Preview remains diagnostic. Unknown
+non-authorization metadata retains its documented advisory semantics; it is not
+confirmation of availability or permission to spend.
+
+The existing small default is **16-vCPU** `Standard_NC16as_T4_v3`, not the
+4-vCPU `Standard_NC4as_T4_v3`. A bounded smaller test needs an explicit
+`vmSizeOverride` checked against its actual capabilities. Released family quota
+does not establish SKU access or Spot compatibility. Spot's bid ceiling can reach
+the on-demand rate, and eviction/deallocation retains disks and other billable
+resources; neither is cleanup. Regular incurs regular rates. Changing an existing
+VM's priority can replace it: use only an approved exact plan, never mutate saved
+state or infer deployment permission from this parameterization.
+
 ## Minimal external SSO bootstrap
 
 The application can accept an externally approved app without granting Graph

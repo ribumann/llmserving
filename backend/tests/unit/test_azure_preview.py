@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from unittest.mock import Mock
 
 import pytest
 from src.domain.enums import ModelSizeClass, ProviderType
@@ -15,7 +16,7 @@ from src.providers.azure.preview import AzurePreviewService
 
 
 class FakePreflight:
-    def evaluate_region(self, *, region: str, vm_size: str):
+    def evaluate_region(self, *, region: str, vm_size: str, priority: str = "Spot"):
         checked_at = datetime(2026, 8, 19, tzinfo=UTC)
         available = region == "southcentralus"
         return CapacityPreflightResult(
@@ -137,11 +138,11 @@ def test_authorization_denial_cannot_be_a_fallback_or_override(override) -> None
     attempted = []
 
     class DeniedPreflight(FakePreflight):
-        def evaluate_region(self, *, region: str, vm_size: str):
+        def evaluate_region(self, *, region: str, vm_size: str, priority: str = "Spot"):
             attempted.append(region)
             if region == "westus3":
                 raise AzurePreflightAuthorizationError(operation="sku")
-            return super().evaluate_region(region=region, vm_size=vm_size)
+            return super().evaluate_region(region=region, vm_size=vm_size, priority=priority)
 
     profile = CloudDeploymentProfile(
         profileId="azure",
@@ -154,3 +155,37 @@ def test_authorization_denial_cannot_be_a_fallback_or_override(override) -> None
         )
     # Even an earlier successful region cannot turn denied reads into a recommendation.
     assert attempted == (["westus3"] if override else ["southcentralus", "westus3"])
+
+
+@pytest.mark.parametrize(
+    "defaults,inputs,expected",
+    [
+        ({}, {}, "Spot"),
+        ({"vmPriority": "Regular"}, {}, "Regular"),
+        ({"vmPriority": "Spot"}, {"vmPriority": "Regular"}, "Regular"),
+        ({"vmPriority": "Regular"}, {"vmPriority": "Spot"}, "Spot"),
+    ],
+)
+def test_preview_checks_the_effective_requested_priority(defaults, inputs, expected) -> None:
+    preflight = Mock(wraps=FakePreflight())
+    profile = CloudDeploymentProfile(configurableInputs=defaults, eligibleRegions=["italynorth"])
+    AzurePreviewService(preflight=preflight).preview_environment(
+        profile=profile,
+        configurable_inputs={"vmSizeOverride": "Standard_NC4as_T4_v3", **inputs},
+    )
+
+    preflight.evaluate_region.assert_called_once_with(
+        region="italynorth", vm_size="Standard_NC4as_T4_v3", priority=expected
+    )
+
+
+@pytest.mark.parametrize("priority", [None, "", "spot", "Regular ", True, 1, [], {}])
+def test_invalid_priority_fails_before_azure_reads(priority) -> None:
+    preflight = Mock(wraps=FakePreflight())
+    profile = CloudDeploymentProfile(configurableInputs={}, eligibleRegions=["italynorth"])
+
+    with pytest.raises(ValueError, match="vmPriority"):
+        AzurePreviewService(preflight=preflight).preview_environment(
+            profile=profile, configurable_inputs={"vmPriority": priority}
+        )
+    preflight.evaluate_region.assert_not_called()

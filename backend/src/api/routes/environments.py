@@ -29,7 +29,12 @@ from src.domain.profile import CloudDeploymentProfile
 from src.persistence.db import get_db_session
 from src.providers.azure.adapter import AzureProviderAdapter
 from src.providers.azure.preflight import AzurePreflightAuthorizationError
-from src.providers.azure.preview import InvalidVmSizeError, resolve_vm_size
+from src.providers.azure.preview import (
+    InvalidVmPriorityError,
+    InvalidVmSizeError,
+    resolve_vm_priority,
+    resolve_vm_size,
+)
 
 router = APIRouter(tags=["environments"])
 
@@ -168,6 +173,7 @@ def _terraform_variables(
         "name_prefix": defaults.get("namePrefix", "llm"),
         "profile_size_class": defaults.get("profileSizeClass", "small"),
         "vm_size": resolve_vm_size(profile, inputs),
+        "vm_priority": resolve_vm_priority(profile, inputs),
         "admin_username": defaults.get("adminUsername", "azureuser"),
         "admin_ssh_public_key": admin_ssh_public_key,
         "vllm_image": defaults.get("vllmImage", getattr(settings_obj, "vllm_image", "")),
@@ -205,6 +211,10 @@ def preview_environment(
             code="azure_preflight_authorization_failed",
             message=str(exc),
             details={"operation": exc.operation},
+        ) from exc
+    except InvalidVmPriorityError as exc:
+        raise ApiError(
+            status_code=422, code="invalid_vm_priority", message=str(exc), details={}
         ) from exc
     except InvalidVmSizeError as exc:
         raise ApiError(
@@ -280,6 +290,10 @@ def create_environment(
             message=str(exc),
             details={"operation": exc.operation},
         ) from exc
+    except InvalidVmPriorityError as exc:
+        raise ApiError(
+            status_code=422, code="invalid_vm_priority", message=str(exc), details={}
+        ) from exc
     except InvalidVmSizeError as exc:
         raise ApiError(
             status_code=422, code="invalid_vm_size", message=str(exc), details={}
@@ -302,6 +316,22 @@ def create_environment(
         )
 
     selected_region = payload.region or evaluation.recommendation.recommendedRegion
+    selected_check = next(
+        (check for check in evaluation.checks if check.region == selected_region), None
+    )
+    if (
+        profile.provider == ProviderType.AZURE
+        and selected_check is not None
+        and selected_check.available is False
+    ):
+        raise ApiError(
+            status_code=409,
+            code="azure_preflight_unavailable",
+            message=(
+                "The requested Azure SKU or vCPU quota is unavailable. Revalidate before creating."
+            ),
+            details={"region": selected_region, "vmSize": selected_check.vmSize},
+        )
     operation_id = getattr(request.state, "operation_id", None) or uuid4().hex
     user = _user(request)
     environment_id = uuid4().hex[:12]

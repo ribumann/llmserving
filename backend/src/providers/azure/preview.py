@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from src.domain.profile import CloudDeploymentProfile
 from src.providers.azure.preflight import AzureCapacityPreflight, CapacityPreflightResult
@@ -40,6 +41,21 @@ class InvalidVmSizeError(ValueError):
     pass
 
 
+class InvalidVmPriorityError(ValueError):
+    pass
+
+
+def resolve_vm_priority(
+    profile: CloudDeploymentProfile, inputs: Mapping[str, object] | None = None
+) -> Literal["Spot", "Regular"]:
+    merged = dict(profile.configurableInputs or {})
+    merged.update(inputs or {})
+    priority = merged.get("vmPriority", "Spot")
+    if priority not in ("Spot", "Regular"):
+        raise InvalidVmPriorityError("vmPriority must be Spot or Regular.")
+    return "Regular" if priority == "Regular" else "Spot"
+
+
 def resolve_vm_size(
     profile: CloudDeploymentProfile, inputs: Mapping[str, object] | None = None
 ) -> str:
@@ -69,8 +85,10 @@ class AzurePreviewService:
     ) -> PreviewEvaluation:
         regions = self._ordered_regions(profile.eligibleRegions, region_override)
         vm_size = resolve_vm_size(profile, configurable_inputs)
+        priority = resolve_vm_priority(profile, configurable_inputs)
         checks = [
-            self._preflight.evaluate_region(region=region, vm_size=vm_size) for region in regions
+            self._preflight.evaluate_region(region=region, vm_size=vm_size, priority=priority)
+            for region in regions
         ]
 
         if region_override is not None:

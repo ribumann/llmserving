@@ -60,6 +60,17 @@ variable "vm_size" {
   default     = null
 }
 
+variable "vm_priority" {
+  description = "Explicit Spot or Regular allocation. Spot preserves the legacy default; Regular uses family and total regional quota, not low-priority quota."
+  type        = string
+  default     = "Spot"
+
+  validation {
+    condition     = var.vm_priority == null ? false : contains(["Spot", "Regular"], var.vm_priority)
+    error_message = "vm_priority must be Spot or Regular."
+  }
+}
+
 variable "admin_username" {
   description = "Local admin username for the GPU VM (SSH access only, no password auth). No inbound SSH path exists in this architecture (FR-079); retained for VM provisioning requirements and any future diagnostic path."
   type        = string
