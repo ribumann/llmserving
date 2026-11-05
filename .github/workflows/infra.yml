@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        module: [shared, control, demo]
+        module: [bootstrap, shared, control, demo]
     steps:
       - uses: actions/checkout@v4
         with:

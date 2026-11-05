@@ -5,6 +5,11 @@ This directory contains three independent Terraform modules that together implem
 [`specs/001-llm-serving-demo/plan.md`](../specs/001-llm-serving-demo/plan.md) (Target Platform
 section) and [`research.md`](../specs/001-llm-serving-demo/research.md) (Section 7):
 
+An optional, separate [`infra/bootstrap`](./bootstrap) module proposes keyless
+state storage in an existing shared group. It owns no group, ACR or grants
+and does not migrate any module's local state. Account-scoped OAuth blob
+access and any backend migration still require explicit approval.
+
 | Module | Resource group | Applied | Owns |
 |---|---|---|---|
 | [`infra/shared`](./shared) | `rg-llm-shared-{stage}` | Once per stage | VNet + 5 subnets, private DNS zones/links, NAT Gateway, NSG (GPU subnet), ACR, Key Vault, Log Analytics + Application Insights |
