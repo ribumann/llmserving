@@ -1,0 +1,4 @@
+*.evidence.json
+config.json
+storage-state.json
+browser-results/

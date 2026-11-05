@@ -22,6 +22,7 @@ if (process.env.AUTH_MODE !== 'local-demo' || process.env.APP_ENV !== 'test') {
 
 export default defineConfig({
   testDir: './live',
+  testMatch: 'exercise.spec.ts',
   fullyParallel: false,
   workers: 1,
   timeout: 120_000,
