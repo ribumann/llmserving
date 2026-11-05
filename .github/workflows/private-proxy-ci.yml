@@ -24,9 +24,24 @@ jobs:
           mkdir "$RUNNER_TEMP/proxy-source"
           git archive HEAD infra scripts tools/private_operator tools/private_proxy |
             tar -x -C "$RUNNER_TEMP/proxy-source"
+          docker build --target network --build-arg "SOURCE_REVISION=$(git rev-parse HEAD)" \
+            -f "$RUNNER_TEMP/proxy-source/tools/private_operator/Dockerfile" \
+            -t llmserving-private-proxy:network "$RUNNER_TEMP/proxy-source"
           docker build --build-arg "SOURCE_REVISION=$(git rev-parse HEAD)" \
             -f "$RUNNER_TEMP/proxy-source/tools/private_operator/Dockerfile" \
             -t llmserving-private-proxy:ci "$RUNNER_TEMP/proxy-source"
+      - name: Network-only target has real tools, config and no CLI or state
+        run: |
+          docker run --rm --network none --user 13:13 --cap-drop ALL --read-only \
+            --security-opt no-new-privileges --tmpfs /tmp --tmpfs /run \
+            llmserving-private-proxy:network sh -ec '
+              openvpn --version >/dev/null
+              squid -k parse -f /etc/llmserving/squid.conf
+              ! command -v az
+              ! command -v terraform
+              ! command -v gh
+              test ! -e /opt/llmserving/infra
+            '
       - name: Compile the actual AzureRM 3.117.1 Key Vault SDK fixture
         run: |
           mkdir "$RUNNER_TEMP/vault-fixture"
@@ -36,6 +51,15 @@ jobs:
           go get github.com/tombuildsstuff/kermit@v0.20240122.1123108
           go mod tidy
           CGO_ENABLED=0 go build -o "$RUNNER_TEMP/vault-client" .
+      - name: Actual network-only target CONNECT denial and unchanged TLS peer
+        run: |
+          docker run --rm --network none --read-only --user 13:13 --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --add-host llmreleasestate0ea5e6.blob.core.windows.net:127.0.0.1 \
+            --add-host llmrelease-kv-0ea5e6.vault.azure.net:127.0.0.1 \
+            --tmpfs /tmp --tmpfs /run \
+            --mount "type=bind,src=$PWD/tools/private_proxy/smoke.py,dst=/opt/smoke.py,readonly" \
+            --entrypoint python llmserving-private-proxy:network /opt/smoke.py --network-only
       - name: Actual proxy ACL, TLS, Terraform backend and Key Vault SDK (no Azure)
         run: |
           docker run --rm --network none --read-only --user 13:13 --cap-drop ALL \

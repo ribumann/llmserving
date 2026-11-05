@@ -1,7 +1,10 @@
 # Private CONNECT mode: host authentication, container networking only
 
-This mode uses the existing reviewed `tools/private_operator` image, adding
-**Squid** rather than a token broker. Windows retains canonical Terraform
+This mode uses the `network` build target of the existing reviewed
+`tools/private_operator/Dockerfile`, adding **Squid** rather than a token broker.
+It contains no Azure CLI, GitHub CLI, Terraform, native modules or pip install.
+The existing full operator target remains separate for CI SDK/backend tests.
+Windows retains canonical Terraform
 **1.16.6**, all native state/inputs/backups and its existing Azure CLI SSO.
 Only short-lived OpenVPN certificate/key/profile files enter the container,
 read-only. **No state, Azure/GitHub CLI cache, user home or Docker socket is
@@ -33,13 +36,23 @@ The same seven-resource `infra/operator_access` module still needs an exact
 private native plan and successfully armed independent cleanup **before apply**.
 Never duplicate its gateway or weaken storage/vault public-network policy.
 
-Build the operator image from an exact reviewed commit's tracked archive,
-including `infra scripts tools/private_operator tools/private_proxy`. For
-ARM64 Docker Desktop, build natively with `--platform linux/amd64` emulation
-because the existing Terraform binary is checksum-pinned for AMD64. Record the
-source revision and local image ID, and run the existing packaged tool/TUN
-tests on that engine. Mutable apt/transitive packages mean the resulting
+Build **only the network target**, not the default full operator image, from an
+exact reviewed commit's tracked archive. No PyPI access is needed for this
+target. The pinned base is AMD64: on ARM64 Docker Desktop use
+`--platform linux/amd64` emulation. Record the source revision and local image
+ID, and verify OpenVPN/Squid and isolated TUN on that engine. Mutable apt
+packages mean the resulting
 image ID, not merely the Dockerfile, identifies the accepted build.
+
+```bash
+mkdir proxy-source
+git archive REVIEWED_FULL_COMMIT_SHA tools/private_operator/Dockerfile tools/private_proxy |
+  tar -x -C proxy-source
+docker build --target network --platform linux/amd64 \
+  --build-arg SOURCE_REVISION=REVIEWED_FULL_COMMIT_SHA \
+  -f proxy-source/tools/private_operator/Dockerfile \
+  -t llmserving-private-proxy:reviewed proxy-source
+```
 
 Launch with a name unique to this attempt and the actual restricted certificate
 directory, using the accepted image ID. Docker's `--mount` fails if the source

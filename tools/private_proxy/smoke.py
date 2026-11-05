@@ -1,5 +1,6 @@
 """Exercise the actual Squid ACL and TLS tunnel using a synthetic TLS server."""
 
+import argparse
 import http.client
 import json
 import os
@@ -28,6 +29,9 @@ def request(authority: str, method: str = "CONNECT") -> int:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--network-only", action="store_true")
+    args = parser.parse_args()
     checks = TestCase()
     configuration = Path("/etc/llmserving/squid.conf").read_text()
     checks.assertIn("dns_nameservers 10.20.31.4", configuration)
@@ -164,6 +168,9 @@ def main() -> None:
                         response = http.client.HTTPResponse(tls)
                         response.begin()
                         checks.assertEqual(response.read(), b"tls-end-to-end")
+                if args.network_only:
+                    print("Network-only Squid ACL and unchanged TLS peer passed")
+                    return
                 environment = {
                     **os.environ,
                     "HTTPS_PROXY": "http://127.0.0.1:3128",
