@@ -298,13 +298,15 @@ def validate_plan(plan: object, expected: dict) -> None:
             ),
             "Provisioners and indexed resources are not bootstrap scope.",
         )
-        expr = _object(item.get("expressions"))
         if address in TYPES:
+            expr = _object(item.get("expressions"))
             _require(
                 expr.get("type") == {"constant_value": TYPES[address]},
                 "Unexpected configured ARM type.",
             )
             _references(expr.get("parent_id"), references[address])
+        elif "expressions" in item:
+            _object(item["expressions"])
 
     prior = plan.get("prior_state")
     if prior is not None:

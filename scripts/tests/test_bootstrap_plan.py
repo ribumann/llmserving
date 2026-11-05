@@ -205,6 +205,18 @@ class BootstrapPlanTests(unittest.TestCase):
     def test_native_unknown_child_parents_and_empty_unknown_objects(self):
         guard.validate_plan(plan(), target())
 
+    def test_native_argumentless_client_data_omits_expressions(self):
+        data = plan()
+        current = next(
+            item
+            for item in data["configuration"]["root_module"]["resources"]
+            if item["address"] == "data.azapi_client_config.current"
+        )
+        del current["expressions"]
+        guard.validate_plan(data, target())
+        current["expressions"] = None
+        self.reject(data)
+
     def test_known_exact_parent_chain_and_absent_prior(self):
         data = plan()
         del data["prior_state"]
