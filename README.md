@@ -1,4 +1,4 @@
-# Azure LLM Serving Demo
+# LLM Serving Demo
 
 Azure LLM Serving Demo is a control-plane application for operators and demo runners who need to stand up Azure-hosted LLM inference environments quickly, deploy a model into them, exercise prompts, and capture quality/performance evidence without hand-building infrastructure for every demo.
 
@@ -11,6 +11,18 @@ The current repository contains:
 
 Several later-stage UI areas are still scaffolded rather than fully productized (`Compare`, `Retune`, `Teardown`, and `Experiment History` pages), but provisioning, deployment, prompt exercise, and run/report flows are all represented in code today.
 
+**Status:** exploratory, not production-ready or a certified unattended Azure
+release. Read-only CI, scoped OIDC and independent canary cleanup have passed.
+Fresh CPU/Ollama API acceptance and its reviewed implementation are now merged;
+authenticated Azure browser acceptance and GPU deployment remain blocked.
+See [exact commits, runs, measurements and limitations](docs/RELEASE_VALIDATION.md).
+Canary cleanup does not establish cleanup of billable application resources.
+
+Azure and local Ollama have implemented adapters. AWS/GCP are experimental
+design targets, not working deployment options; unsupported providers fail
+explicitly. Durable quality/performance routing remains disabled until parity
+with the current in-process runners is established.
+
 ## Repository guide
 
 - [`backend/README.md`](backend/README.md) - backend-specific setup, local Ollama mode, and validation commands
@@ -21,6 +33,10 @@ Several later-stage UI areas are still scaffolded rather than fully productized 
 - [`docs/AZURE_CANARY.md`](docs/AZURE_CANARY.md) - protected OIDC and independent failure/cancellation cleanup gate; not application or billable-resource cleanup validation
 - [`docs/TESTING.md`](docs/TESTING.md) - complete CI commands, real PostgreSQL coverage, and explicit mocked/full-stack evidence boundaries
 - [`docs/PROVIDERS.md`](docs/PROVIDERS.md) - implemented Azure/local capabilities and explicit, non-blocking AWS/GCP limitations
+- [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) - signed cloud authentication and exact external SSO prerequisites
+- [`docs/AZURE.md`](docs/AZURE.md) - isolated bootstrap gates, deployment manifest and known reproducibility gaps
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) - readiness, power/quota/VRAM, costs, rollback and safe cleanup
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md) - contribution gates and security boundaries
 
 ## Prerequisites
 
@@ -97,16 +113,19 @@ The frontend reads:
 Create an untracked `frontend/.env.local` with `VITE_API_BASE_URL=http://127.0.0.1:18000`
 and, for local development only, `VITE_DEMO_USER=presenter@example.com`. The sample backend
 allows `example.com`; set `AUTH_ALLOWED_EMAIL_DOMAINS` explicitly for your deployment.
-Demo headers are not production authentication: use a trusted authenticating proxy
-that strips caller-supplied identity headers before exposing the API.
+Set `AUTH_MODE=local-demo` and `APP_ENV=development` on the local backend only.
+Demo headers cannot authenticate the cloud API: its default `entra-jwt` mode
+validates a signed user token. The reviewed production browser proxy is wired;
+actual platform/SSO acceptance is still required as described
+in the [authentication guide](docs/AUTHENTICATION.md).
 
 ## Getting started
 
-Before provisioning Azure resources, sign in with the Azure CLI:
-
-```powershell
-az login
-```
+Local development needs no Azure sign-in. Before any cloud mutation, satisfy
+the [Azure safety and authentication gates](docs/AZURE.md); do not bypass a
+tenant policy denial or reuse an original deployment's identities/state.
+Examples below use PowerShell. On POSIX, activate a virtual environment with
+`. .venv/bin/activate` and use `cp` instead of `Copy-Item`.
 
 ### 1) Backend
 
@@ -119,6 +138,8 @@ Copy-Item .env.example .env
 alembic upgrade head
 python -m src.persistence.seed_catalog
 python -m src.evaluation.seed_benchmarks
+python -m src.evaluation.seed_golden_datasets
+python -m src.performance.seed_workloads
 uvicorn src.api.app:app --reload --port 18000
 ```
 
@@ -131,13 +152,14 @@ pip install -e .[evaluation]
 Useful backend endpoints while developing:
 
 - `GET /healthz`
+- `GET /readyz` (bounded database readiness; not model or GPU readiness)
 - `GET /docs`
 
 ### 2) Frontend
 
 ```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -163,15 +185,11 @@ The Terraform layout is intentionally split into three independent modules:
 
 Bring-up order follows [`infra/README.md`](infra/README.md):
 
-```powershell
-cd infra\shared
-terraform init
-terraform apply -var "subscription_id=<your-subscription-guid>"
-
-cd ..\control
-terraform init
-terraform apply -var "subscription_id=<your-subscription-guid>"
-```
+**Do not treat module validation as a safe bootstrap command.** The current
+modules still use local cross-module state and create their resource groups;
+they are not yet a reproducible deployment into pre-existing protected test
+groups. Review a plan, protected state/locking, immutable artifacts, external
+SSO and independent billable-resource cleanup before applying anything.
 
 Notes:
 
@@ -189,7 +207,8 @@ On PRs and relevant pushes:
 - installs the backend with dev extras
 - runs `ruff check src tests`
 - runs `black --check src tests`
-- runs `pytest -q`
+- migrates/seeds a disposable PostgreSQL database and runs the full
+  `python -m pytest -q -o addopts=""` (default pytest selection excludes integration)
 
 Only on an explicitly enabled manual deployment dispatch from `main`:
 
@@ -199,6 +218,9 @@ Only on an explicitly enabled manual deployment dispatch from `main`:
 - points Container App `llm-backend` at that commit-labelled tag (tags remain mutable;
   digest pinning is still required for immutable release claims)
 - polls `https://<fqdn>/readyz`
+
+Git-SHA tags are traceable but still mutable registry tags. Digest pinning and
+artifact provenance are required before claiming immutable deployments.
 
 ### Frontend (`.github/workflows/frontend.yml`)
 
@@ -220,13 +242,24 @@ Only on an explicitly enabled manual deployment dispatch from `main`:
 
 ### Terraform validation (`.github/workflows/infra.yml`)
 
-This workflow does **static validation only**:
+This workflow performs static validation and credential-free mocked-provider
+plan contracts, never live cloud plan/apply:
 
 - `terraform fmt -check -recursive`
 - `terraform init -backend=false`
 - `terraform validate`
+- five native mocked-provider SSO-tenant plans against actual auth bodies/env fields
 
 It also asserts that no Hugging Face token-shaped variable appears in `infra/demo` or `infra/control`.
+
+### Runtime (`.github/workflows/runtime-ci.yml`)
+
+Runs every Functions/worker test, packages and imports the dependency-inclusive
+Functions ZIP, builds all seven images, and runs nine API-mocked Playwright
+scenarios. These browser tests do not establish full-stack or cloud acceptance.
+The merged real-model workflow/evidence is explicitly identified
+in [release validation](docs/RELEASE_VALIDATION.md), not represented as a
+Azure/browser/benchmark result.
 
 ## Licensing and external assets
 
@@ -264,12 +297,17 @@ flowchart LR
     Operator --> Frontend
     Frontend --> Backend
     Backend --> Postgres
-    Backend --> Functions
-    Functions --> Jobs
+    Backend -->|Infrastructure and model deployment| Functions
+    Functions -->|Infra and model jobs| Jobs
     Jobs --> Demo
     Backend --> Demo
     Jobs --> Azure
     Backend --> Azure
 ```
+
+Quality/performance runners currently execute in the backend process. Worker
+definitions exist, but their presence is not durable-run parity or restart
+certification. No original deployment, Terraform state or private dataset is
+included in this public MIT snapshot; retain the license and attribution.
 
 For deeper implementation detail, diagrams, and verified design-pattern notes, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

@@ -59,7 +59,7 @@ python -m src.performance.seed_workloads
 python -m pytest -q -o addopts=""
 ```
 
-Without `TEST_DATABASE_URL`, the three real database tests explicitly skip.
+Without `TEST_DATABASE_URL`, the seven real database tests explicitly skip.
 Hosted Backend CI always sets it. An invalid configured URL, failed connection,
 missing migration/seed, or unexpected SQLSTATE fails rather than falling back to
 SQLite or an in-memory session.

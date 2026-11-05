@@ -18,9 +18,10 @@ Bastion, `infra/database` = a standalone Postgres module, `infra/app-host` = a s
 App with subscription-scoped Contributor and a synchronous Terraform-in-request-thread deployment
 path) predates User Story 10's Baseline Azure Pilot Architecture requirements (FR-074–FR-090):
 exactly three resource groups with a fixed naming scheme, Entra ID SSO on the app itself, workflow
-orchestration handed off to Durable Functions instead of blocking the request thread, and
-execution of Terraform/deploy/eval/perf/export work in isolated Container Apps Jobs rather than
-in-process.
+orchestration handed off to Durable Functions instead of blocking the request thread.
+Terraform/model deployment use isolated jobs, but quality/performance still run in
+the API process; evaluation/performance/export worker definitions do not establish
+durable API routing or parity.
 
 Those are topology changes, not incremental config edits. The superseded modules are
 not included. This source snapshot contains no Terraform state and makes no claim
@@ -31,7 +32,13 @@ quota, policy, costs, and interruption behavior in your own subscription before 
 
 ## Bring-up order
 
-1. `infra/shared` — no inputs beyond `subscription_id`; safe to apply standalone.
+**Not a clean-bootstrap certification.** These modules create/manage resource groups,
+use local cross-module state and default placeholder images. Do not apply them
+against an original deployment or protected existing test groups. First satisfy
+[remote-state, immutable-artifact, SSO, ownership, cleanup and budget gates](../docs/AZURE.md).
+
+1. `infra/shared` — first dependency layer; creates billable resources. An independent
+   reviewed plan and cleanup are required, not just `subscription_id`.
 2. `infra/control` — reads `infra/shared`'s outputs via a local `terraform_remote_state` data
    source (`shared_state_path`, default `../shared/terraform.tfstate`). Container image variables
    (`backend_image`, `frontend_image`, the 5 Container Apps Job image variables) default to a

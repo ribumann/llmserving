@@ -13,7 +13,7 @@ configuration and report schemas are unchanged.
 | Prompts | vLLM OpenAI-compatible API | Ollama OpenAI-compatible API | Not implemented | Not implemented |
 | Golden/benchmark/performance execution | Existing backend in-process orchestrator | Existing backend in-process orchestrator | Not implemented | Not implemented |
 | Durable evaluation/performance parity | Not yet certified; worker implementations differ | Not implemented | Not implemented | Not implemented |
-| Fresh full authenticated cloud release acceptance | Blocked by external Graph/SSO bootstrap device policy | Separate real-model validation required | Unsupported | Unsupported |
+| Fresh full authenticated cloud release acceptance | Unverified; approved external SSO credential/callback/platform bootstrap still required | Real CPU API smoke merged; not browser/cloud acceptance | Unsupported | Unsupported |
 
 AWS/GCP are non-blocking experimental directions, not working adapters,
 deployment targets, or tested portability claims. No placeholder adapter or
