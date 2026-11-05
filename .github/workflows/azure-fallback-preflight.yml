@@ -1,7 +1,13 @@
 name: Azure fallback read-only preflight
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      inspect_bootstrap:
+        description: Also inspect exact caller permission rules and existing test app metadata (GET only)
+        type: boolean
+        default: false
+        required: true
 
 permissions:
   contents: read
@@ -55,3 +61,6 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - name: Inspect fixed groups and exact Italy North T4 SKU and quota
         run: python scripts/azure_release_preflight.py inspect
+      - name: Inspect fixed non-GPU bootstrap permissions and existing test app metadata without mutation
+        if: inputs.inspect_bootstrap
+        run: python scripts/azure_release_preflight.py inspect-bootstrap

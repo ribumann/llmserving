@@ -57,6 +57,28 @@ usage and limits were respectively 0/8, 0/108 and 0/100. The exact SKU retained
 its Zone restrictions; unzoned eligibility and allocation remain unverified.
 This observation is not a permanent quota, access or deployment guarantee.
 
+For the same protected-main inspection, optional `inspect_bootstrap=true` adds
+**fixed GET-only** reads of caller permission rules at the four retained groups
+and exact approved ACA infrastructure-group scope, plus metadata for the already
+identified fallback test app. It does not create another app or credential,
+request secret values, grant roles, register providers or change redirects.
+It also reads registration states for the exact namespaces used by this stack;
+a missing registration is a separate operator prerequisite, never auto-registered.
+The [documented Authorization API](https://github.com/Azure/azure-rest-api-specs/blob/main/specification/authorization/resource-manager/Microsoft.Authorization/Authorization/stable/2022-04-01/authorization-RoleDefinitionsCalls.json)
+is used for group permission rules, including management/data-action exclusions.
+Only scoped booleans/counts are reported, not raw role/app objects or credential
+metadata. App redirect/active-password counts are not consent or browser proof.
+
+An unread/denied/absent scope is explicitly listed as **unverified**, never
+converted to an empty allowlist or positive authorization. The operation prints
+the partial report and fails if any scope cannot be read. Successful rule reads
+still do not verify deny assignments, subscription-level group creation, ACA
+platform behavior, private-vault access, exact new callbacks or a completed
+bootstrap. The approved infrastructure-group name alone grants no permission.
+Stop before any required role expansion and request authorization for its exact
+scope; do not broaden parent/subscription rights to make inspection succeed.
+No live bootstrap inspection is claimed by this source change.
+
 For a **fresh demo state**, control inputs `demo_resource_group_name` and
 `demo_resource_tags` wire operator-owned group/ownership tags into the backend.
 The group name is omitted from the environment when unset, rather than silently
