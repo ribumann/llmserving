@@ -107,3 +107,21 @@ as blocked. Passing CI alone is not release acceptance.
 
 See [the canary runbook](AZURE_CANARY.md) for the independent failure/cancellation
 cleanup gate and its deliberately narrow scope.
+
+## Separate operator and deployment tenants
+
+Signed-token regressions exercise a valid external operator tenant, rejection
+of deployment-tenant operator tokens, unchanged domain/audience enforcement,
+and internal managed-identity tokens that must still use the deployment issuer.
+Keys are synthetic, but signature/issuer/audience/tenant checks are real.
+Unset operator tenant preserves existing behavior; invalid explicit tenant
+configuration fails rather than selecting a broader issuer.
+
+Infra CI also runs five native `terraform test` **mocked-provider plans** in
+`infra/control/tests/sso_tenant.tftest.hcl`. They inspect both actual Easy Auth
+JSON bodies and actual backend environment fields, verify external mode creates
+no application/password/SP, preserve managed defaults and reject an invalid
+tenant or an explicit tenant without external app inputs. Every Azure/directory
+provider is mocked and shared-state data is overridden; there is no live plan,
+app/secret/redirect mutation or cloud credential. These tests do not establish
+real Entra consent, platform injection or browser acceptance.

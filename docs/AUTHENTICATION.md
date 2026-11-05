@@ -17,6 +17,15 @@ cannot impersonate operators merely by supplying a username header. Internal
 workflow callbacks still use their separate audience-restricted managed-identity
 validator.
 
+Operator tenant and infrastructure tenant are independent when explicitly
+configured: `AUTH_TENANT_ID` selects the single trusted operator issuer/JWKS/
+token `tid`, while `AZURE_TENANT_ID` still selects the deployment and internal
+managed-identity callback tenant. If `AUTH_TENANT_ID` is unset, its original
+same-tenant behavior is preserved. Invalid explicit tenant values fail
+configuration, never fall back to another tenant or accept `common`/
+`organizations`. `AUTH_AUDIENCE` and allowed email domains remain mandatory
+policy inputs; changing tenants does not disable their validation.
+
 Signing-key discovery has a five-second network timeout; synchronous signature
 validation/discovery runs off the API event loop so it cannot block liveness
 probes. Operator key-discovery connection failures return the explicit
@@ -41,9 +50,10 @@ validation app outside Terraform and supply:
 
 | Input | Exact requirement |
 | --- | --- |
-| Tenant | The same tenant as the deployment subscription and backend token issuer |
+| Tenant | Deployment tenant by default; an explicitly approved different operator tenant uses `existing_sso_tenant_id` |
 | `existing_sso_client_id` | The new Entra application client UUID, not the existing application's identity |
 | `existing_sso_secret_id` | A versionless `https://<isolated-shared-vault>.vault.azure.net/secrets/<name>` credential reference, never its secret value |
+| `existing_sso_tenant_id` | Optional tenant UUID for the external application; changes both Easy Auth issuers and backend `AUTH_TENANT_ID`, never ARM subscription/tenant or internal callback issuer |
 | Redirects | `https://<new-frontend-fqdn>/.auth/login/aad/callback` and `https://<new-backend-fqdn>/.auth/login/aad/callback` |
 | Identity policy | Tenant-approved users/assignments/consent and explicit allowed email domains |
 
@@ -55,6 +65,17 @@ application managed identities' existing narrowly scoped Secrets User access
 applies. An operator must write/rotate it over approved private connectivity.
 Do not pass the credential value in GitHub variables, CLI arguments, tfvars,
 state uploads, logs, screenshots or chat.
+
+An explicit SSO tenant is only supported with the paired external app inputs.
+The original Terraform-managed app path stays in the deployment tenant; this
+option does not grant cross-tenant Graph rights, create objects in another
+directory, transplant OIDC or move the infrastructure subscription. An app
+created in another tenant is not functional SSO merely because its client ID
+is supplied: issuer, audience, final redirects, private credential access,
+assignments/consent, domains and actual platform token injection still need
+verification. Never replace `AZURE_TENANT_ID` globally to make browser sign-in
+work; that would redirect service callback validation away from its intended
+tenant.
 
 Disabling Easy Auth does not disable backend JWT validation and is not a
 bootstrap workaround. Cloud plan preconditions require an authentication
@@ -78,3 +99,9 @@ The current external-bootstrap code and local signed-token tests do not claim
 that this cloud browser flow has passed. No GPU expenditure should be incurred
 before real authentication, independent billable-resource cleanup and the
 aggregate budget/exposure gate are established.
+
+Final callback FQDNs and the isolated test vault are deployment outputs, not
+values to guess from a resource-name prefix. Both callbacks are exactly
+`https://<frontend-fqdn>/.auth/login/aad/callback` and
+`https://<backend-fqdn>/.auth/login/aad/callback`. No secret/redirect write or
+cloud deployment is performed by adding the separate tenant setting.
