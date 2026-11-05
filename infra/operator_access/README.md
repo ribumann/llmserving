@@ -1,7 +1,7 @@
 # Temporary private operator access (source under review)
 
 This independent local-state module proposes **seven Terraform resources**:
-GatewaySubnet, Standard static VPN public IP, VpnGw1 route-based gateway,
+GatewaySubnet, Standard static VPN public IP, VpnGw1AZ route-based gateway,
 resolver subnet, private DNS resolver, inbound endpoint, and the state blob
 private endpoint. The endpoint's embedded DNS zone group is an eighth ARM
 object, not an eighth Terraform state address. Its generated NIC is
@@ -52,7 +52,7 @@ all pass first. Verify provider availability, live resource names/ownership,
 network overlap, certificate validity and fixed cleanup deadline. Generate
 the native plan privately using the actual public certificate; never publish
 plan/state/inputs or provider diagnostics. Source/schema validation is not
-proof that VpnGw1 is allocatable in Italy North, a client connects, private
+proof that VpnGw1AZ is allocatable in Italy North, a client connects, private
 DNS works, or secret/state data-plane operations succeed.
 
 A genuine acceptance must connect the operator client, verify private
@@ -116,14 +116,19 @@ this is not policy exemption or public-IP tag removal.
 
 ## Cost and teardown budget
 
-**Live retail pricing could not be retrieved from this execution host**
-(`prices.azure.com` DNS resolution failed). Do not label an estimate a quote
-or fresh billing measurement. Before apply, retrieve actual Italy North
-Consumption USD rates for VpnGw1, Private DNS Resolver inbound endpoint,
-Standard IPv4 public IP and Private Link endpoint/data processing, plus
-applicable data transfer. DNS resolver and VPN provisioning can bill while
-idle; Microsoft/provider documentation warns gateway creation can take
-30–60 minutes.
+The actual 2026-11-05 ARM create rejected non-AZ `VpnGw1` with
+`NonAzSkusNotAllowedForVPNGateway`; this module now requests `VpnGw1AZ`,
+without changing the seven resource addresses or replacing the existing PIP.
+The coordinator's official Azure Retail Prices API read on that date returned
+Italy North Consumption USD `VpnGw1AZ` base **$0.21/hour** (effective
+2025-01-01), P2S connection meter $0.01/hour and S2S connection meter
+$0.015/hour. The base is $0.02/hour above the former VpnGw1 meter.
+These are retail meter observations, not a quote, hard cap or billing
+measurement; applicable connection quantities, resolver inbound endpoint,
+Standard IPv4 public IP, Private Link and transfer charges are additional.
+Successful allocation and compatibility with the actual retained Standard
+PIP still require genuine native plan/apply acceptance. DNS resolver and VPN
+provisioning can bill while idle; gateway creation can take 30–60 minutes.
 
 For review budgeting only, reserve **US$2/hour** for this access layer and
 **24 additional hours of teardown contingency** (US$56 for a four-hour
@@ -139,3 +144,36 @@ blob zone/link and all bootstrap storage/groups/grants. Do not delete the
 shared VNet until these additional children are verified absent. Disconnect
 the operator VPN and remove local client configuration only with appropriate
 local OS authorization.
+
+## Exact partial operator recovery
+
+The failed non-AZ create retained six resources in canonical serial8,
+lineage `5a630028-d04a-3e1c-af96-bbd58b8434fe`, SHA256
+`4496a600b605459310e5df169868204ec02894d661214b70ca421c2434054f76`.
+Only the absent gateway may be created as `VpnGw1AZ`; all six existing
+resources must remain exact known NOOPs. Only native null-to-empty refresh of
+PIP `zones` and the two subnets' `service_endpoints`/
+`service_endpoint_policy_ids`, plus their corresponding newly empty sensitivity
+arrays, is allowed. Each change must bind canonical before/native prior after
+values and exact drift evidence; all other values and metadata must match.
+This is not a
+general retry mechanism. The approved public root and `2026-11-05T21:55:55Z`
+deadline cannot change. Retain the verified failed-apply checkpoints.
+
+From the canonical restricted operator directory, generate a fresh full
+native plan after updating only the gateway SKU. First run the read-only gate:
+
+```text
+python <reviewed-source>/scripts/validate_operator_reconcile.py \
+  --plan <PRIVATE-RECOVERY-PLAN> --target <PUBLIC-ONLY-TARGET-JSON> \
+  --private-log <NEW-PRIVATE-CHECK-LOG>
+```
+
+Only after independent review, required exact-head checks, normal merge and
+fresh successful cleanup arming, run the existing `azure_operator_apply.py`
+command with the additional flag `--recover-serial8`. It rechecks the exact
+snapshot immediately before execution, requires the live owned six-resource
+inventory with no gateway, and retains verified before/after checkpoints even
+on failure. Initial execution without this flag still rejects any existing
+state/resources. No automatic retry follows another failure. After successful
+completion, a refreshed full Terraform plan must be NOOP before VPN acceptance.
