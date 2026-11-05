@@ -49,7 +49,7 @@ class CanaryTests(unittest.TestCase):
             "tags": target.group_tags,
         }
         self.tags = {
-            **target.group_tags,
+            **target.identity_tags,
             "purpose": canary.PURPOSE,
             "repository": "ribumann/llmserving",
             "runId": "123",
@@ -273,6 +273,27 @@ class CanaryTests(unittest.TestCase):
 
 class FallbackCanaryTests(CanaryTests):
     target_name = "fallback"
+
+    def test_release_campaign_does_not_replace_workflow_ownership(self):
+        self.assertEqual(self.group["tags"]["runId"], "public-release-20261105")
+        self.assertEqual(self.group["tags"]["expiresOn"], "2026-12-05")
+        self.assertEqual(self.tags["releaseRunId"], self.group["tags"]["runId"])
+        self.assertEqual(self.tags["runId"], "123")
+        self.assertEqual(self.tags["expiresOn"], self.group["tags"]["expiresOn"])
+        self.select_create_workflow()
+        self.identity = None
+        canary.create(self.context)
+        self.assertEqual(self.identity["tags"], self.tags)
+
+    def test_expiry_and_campaign_scope_mismatch_prevents_mutation(self):
+        for key in ("expiresOn", "runId"):
+            with self.subTest(key=key):
+                original = self.group["tags"][key]
+                self.group["tags"][key] = "other"
+                with self.assertRaises(canary.CanaryError):
+                    canary.cleanup(self.context, "123")
+                self.assert_no_mutations()
+                self.group["tags"][key] = original
 
     def test_exact_fallback_configuration_required_before_any_command(self):
         for key, value in [

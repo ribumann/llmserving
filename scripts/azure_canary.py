@@ -36,11 +36,23 @@ class Target:
         return {
             **GROUP_TAGS,
             **(
-                {"target": "personal-fallback-e2e"}
+                {
+                    "target": "personal-fallback-e2e",
+                    "expiresOn": "2026-12-05",
+                    "runId": "public-release-20261105",
+                }
                 if self.subscription is not None
                 else {}
             ),
         }
+
+    @property
+    def identity_tags(self) -> dict[str, str]:
+        tags = self.group_tags
+        campaign = tags.pop("runId", None)
+        if campaign is not None:
+            tags["releaseRunId"] = campaign
+        return tags
 
 
 PRIMARY_TARGET = Target(RESOURCE_GROUP, WORKFLOW_PATH)
@@ -205,7 +217,7 @@ class Context:
             )
         tags = identity.get("tags") or {}
         expected_tags = {
-            **self.target.group_tags,
+            **self.target.identity_tags,
             "purpose": PURPOSE,
             "repository": self.repository,
         }
@@ -243,7 +255,7 @@ def create(context: Context) -> None:
             "Fixed canary already exists; cleanup must finish before another run."
         )
     tags = {
-        **context.target.group_tags,
+        **context.target.identity_tags,
         "purpose": PURPOSE,
         "repository": context.repository,
         "runId": run_id,

@@ -36,7 +36,10 @@ IDs where configured, with the approved issuer/audience.
 The login identity requires Contributor only on that pre-existing canary group;
 the workflow does not grant itself permissions. Group tags must be exactly
 `project=llmserving-public-validation`, `managedBy=copilot-release` and
-`target=personal-fallback-e2e`.
+`target=personal-fallback-e2e`, plus the approved campaign
+`runId=public-release-20261105` and `expiresOn=2026-12-05`.
+The fixed canary copies campaign ownership as `releaseRunId`; its own `runId`
+remains the numeric owning GitHub workflow run. Group tags are never changed.
 Secret-backed identifiers are masked from the first runner environment header,
 then escaped/masked again before checkout and pinned Azure login. A no-cloud
 `validate-config --target fallback` step checks the fixed target before login.
