@@ -30,7 +30,7 @@ class ProbeError(RuntimeError):
 def validate_price(payload: object) -> float:
     if (
         not isinstance(payload, dict)
-        or payload.get("Currency") != "USD"
+        or payload.get("BillingCurrency") != "USD"
         or payload.get("NextPageLink")
         or not isinstance(payload.get("Items"), list)
     ):
@@ -84,7 +84,43 @@ def quote() -> float:
             data = response.read(1024 * 1024 + 1)
         if len(data) > 1024 * 1024:
             raise ProbeError("Public disk-price response exceeds the fixed size bound.")
-        price = validate_price(json.loads(data))
+        payload = json.loads(data)
+        try:
+            price = validate_price(payload)
+        except ProbeError:
+            if isinstance(payload, dict):
+                items = payload.get("Items")
+                print(
+                    json.dumps(
+                        {
+                            "publicPriceSchemaKeys": sorted(payload),
+                            "publicPriceRowCount": (
+                                len(items) if isinstance(items, list) else None
+                            ),
+                            "publicPriceRows": [
+                                {
+                                    key: item.get(key)
+                                    for key in (
+                                        "armRegionName",
+                                        "productName",
+                                        "skuName",
+                                        "type",
+                                        "currencyCode",
+                                        "unitOfMeasure",
+                                        "isPrimaryMeterRegion",
+                                        "effectiveStartDate",
+                                        "retailPrice",
+                                    )
+                                }
+                                for item in (
+                                    items[:8] if isinstance(items, list) else []
+                                )
+                                if isinstance(item, dict)
+                            ],
+                        }
+                    )
+                )
+            raise
     except (URLError, TimeoutError, OSError, ValueError):
         raise ProbeError(
             "Public disk-price query failed; no price fallback or creation."

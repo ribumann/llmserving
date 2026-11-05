@@ -18,7 +18,7 @@ import azure_disk_probe as probe
 class DiskProbeTests(unittest.TestCase):
     def price(self):
         return {
-            "Currency": "USD",
+            "BillingCurrency": "USD",
             "NextPageLink": None,
             "Items": [
                 {
@@ -48,7 +48,7 @@ class DiskProbeTests(unittest.TestCase):
             with self.subTest(price=price), self.assertRaises(probe.ProbeError):
                 probe.validate_price(value)
         for changed in (
-            {"Currency": "EUR"},
+            {"BillingCurrency": "EUR"},
             {"NextPageLink": "https://next.example"},
             {"Items": []},
             {"Items": self.price()["Items"] * 2},
