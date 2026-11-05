@@ -34,6 +34,14 @@ is not permission to spend. The script's read-only command allowlist and fixed
 target are covered by credential-free tests. This is a new inspection workflow,
 not evidence it has already run or that application deployment is ready.
 
+The first protected inspection reached SKU parsing after successful OIDC and
+group ownership/inventory reads, but rejected Azure's mixed-case `ItalyNorth`
+location identifier. Region identifier matching is now case-insensitive while
+SKU name/type remain exact and duplicate matches fail closed. The original
+metadata failure was not an SKU eligibility denial; zonal restriction contents
+are preserved unchanged. A successful rerun is still needed for a complete
+fresh quota/SKU report.
+
 For a **fresh demo state**, control inputs `demo_resource_group_name` and
 `demo_resource_tags` wire operator-owned group/ownership tags into the backend.
 The group name is omitted from the environment when unset, rather than silently

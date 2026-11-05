@@ -205,6 +205,38 @@ class ReadOnlyPreflightTests(unittest.TestCase):
             ):
                 preflight.summarize_sku(records)
 
+    def test_actual_azure_region_casing_preserves_exact_sku_and_zone_restrictions(self):
+        sku = self.sku()
+        sku["locations"] = ["ItalyNorth"]
+        sku["restrictions"][0]["restrictionInfo"]["locations"] = ["ItalyNorth"]
+        sku["restrictions"][0]["values"] = ["ItalyNorth"]
+        sku["locationInfo"][0]["location"] = "ItalyNorth"
+        report = preflight.summarize_sku([sku])
+        self.assertEqual(report["name"], preflight.SKU)
+        self.assertEqual(report["region"], "italynorth")
+        self.assertEqual(report["restrictions"], sku["restrictions"])
+        self.assertEqual(report["locationInfo"], sku["locationInfo"])
+        self.assertIn("unknown", report["unzonedEligibility"])
+
+    def test_case_matching_cannot_accept_similar_names_wrong_types_or_regions(self):
+        for field, value in (
+            ("name", preflight.SKU + "_other"),
+            ("resourceType", "disks"),
+            ("locations", ["ItalyNorthOther"]),
+            ("locations", "ItalyNorth"),
+            ("locations", None),
+        ):
+            sku = self.sku()
+            sku[field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(
+                preflight.PreflightError
+            ):
+                preflight.summarize_sku([sku])
+        sku = self.sku()
+        sku["locations"] = ["ItalyNorth"]
+        with self.assertRaises(preflight.PreflightError):
+            preflight.summarize_sku([sku, copy.deepcopy(sku)])
+
     def test_missing_duplicate_or_malformed_quota_cannot_be_a_success_report(self):
         complete = self.azure("vm", "list-usage")
         malformed = copy.deepcopy(complete)

@@ -87,7 +87,11 @@ def summarize_sku(records: object) -> dict:
         if isinstance(item, dict)
         and item.get("name") == SKU
         and item.get("resourceType") == "virtualMachines"
-        and REGION in item.get("locations", [])
+        and isinstance(item.get("locations"), list)
+        and any(
+            isinstance(location, str) and location.casefold() == REGION.casefold()
+            for location in item["locations"]
+        )
     ]
     if len(matches) != 1:
         raise PreflightError("Exact regional VM SKU metadata is absent or ambiguous.")
