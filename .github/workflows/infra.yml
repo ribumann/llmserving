@@ -68,7 +68,9 @@ jobs:
         working-directory: infra/${{ matrix.module }}
         run: terraform validate
 
-      - name: SSO tenant contract with mocked providers (no Azure credentials)
-        if: matrix.module == 'control'
-        working-directory: infra/control
-        run: terraform test -no-color -filter=tests/sso_tenant.tftest.hcl
+      - name: Native contracts with mocked providers (no Azure credentials)
+        working-directory: infra/${{ matrix.module }}
+        run: |
+          if [ -d tests ]; then
+            terraform test -no-color
+          fi

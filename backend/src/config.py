@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
@@ -25,6 +26,8 @@ class Settings(BaseSettings):
     azure_subscription_id: str | None = None
     azure_tenant_id: str | None = None
     azure_client_id: str | None = None
+    azure_demo_resource_group_name: str | None = None
+    azure_resource_tags: dict[str, str] = Field(default_factory=dict)
     # Expected `aud` claim for a managed-identity bearer token calling the internal
     # orchestration callback API (contracts/api.md), e.g. an Entra ID app registration's
     # Application ID URI or client ID. Internal endpoints fail closed (503) when unset,
@@ -102,6 +105,17 @@ class Settings(BaseSettings):
             return str(UUID(value))
         except ValueError as exc:
             raise ValueError("AUTH_TENANT_ID must be an explicit tenant UUID.") from exc
+
+    @field_validator("azure_demo_resource_group_name")
+    @classmethod
+    def _validate_demo_group(cls, value: str | None) -> str | None:
+        if value is not None and (
+            not re.fullmatch(r"[A-Za-z0-9._()-]{1,90}", value) or value.endswith(".")
+        ):
+            raise ValueError(
+                "AZURE_DEMO_RESOURCE_GROUP_NAME must be an explicit resource group name."
+            )
+        return value
 
     @field_validator(
         "auth_allowed_email_domains",

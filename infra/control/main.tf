@@ -536,6 +536,17 @@ resource "azurerm_container_app" "backend" {
         name  = "JOB_NAME_MODEL_DEPLOYMENT"
         value = local.job_names["model_deployment"]
       }
+      dynamic "env" {
+        for_each = var.demo_resource_group_name == null ? [] : [var.demo_resource_group_name]
+        content {
+          name  = "AZURE_DEMO_RESOURCE_GROUP_NAME"
+          value = env.value
+        }
+      }
+      env {
+        name  = "AZURE_RESOURCE_TAGS"
+        value = jsonencode(var.demo_resource_tags)
+      }
     }
   }
 

@@ -151,7 +151,17 @@ def _terraform_variables(
         # persisting it would only be a needless secret to manage.
         admin_ssh_public_key, _admin_ssh_private_key_pem = _generate_admin_ssh_keypair()
 
-    return {
+    tags = defaults.get("tags", {"owner": "azure-llm-serving-demo", "profileId": profile.profileId})
+    if not isinstance(tags, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in tags.items()
+    ):
+        raise ApiError(
+            status_code=422,
+            code="invalid_resource_tags",
+            message="Resource tags must map string names to string values.",
+            details={},
+        )
+    variables = {
         "subscription_id": getattr(settings_obj, "azure_subscription_id", "") or "",
         "environment_id": environment_id,
         "name_prefix": defaults.get("namePrefix", "llm"),
@@ -160,14 +170,16 @@ def _terraform_variables(
         "admin_username": defaults.get("adminUsername", "azureuser"),
         "admin_ssh_public_key": admin_ssh_public_key,
         "vllm_image": defaults.get("vllmImage", getattr(settings_obj, "vllm_image", "")),
-        "tags": defaults.get(
-            "tags",
-            {
-                "owner": "azure-llm-serving-demo",
-                "profileId": profile.profileId,
-            },
-        ),
+        "tags": {
+            **tags,
+            "managedBy": "terraform",
+            **getattr(settings_obj, "azure_resource_tags", {}),
+        },
     }
+    existing_group = getattr(settings_obj, "azure_demo_resource_group_name", None)
+    if existing_group is not None:
+        variables["existing_resource_group_name"] = existing_group
+    return variables
 
 
 @router.post("/environments/preview")

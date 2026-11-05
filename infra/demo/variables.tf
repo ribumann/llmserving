@@ -23,6 +23,20 @@ variable "environment_id" {
   }
 }
 
+variable "existing_resource_group_name" {
+  description = "Operator-owned, retained resource group. Use only with fresh environment state; null preserves the original managed-group deployment."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.existing_resource_group_name == null ? true : (
+      can(regex("^[A-Za-z0-9._()-]{1,90}$", var.existing_resource_group_name))
+      && !endswith(var.existing_resource_group_name, ".")
+    )
+    error_message = "existing_resource_group_name must be a nonempty Azure resource group name, not ending with a period."
+  }
+}
+
 variable "name_prefix" {
   description = "Short, DNS-safe prefix for all resources in this module."
   type        = string

@@ -1,5 +1,5 @@
 """Shared helpers for locating the per-environment demo GPU VM (infra/demo's
-`rg-llm-demo-{environmentId}` resource group).
+managed or explicitly retained resource group).
 
 The VM has no public IP (FR-079) - Container Apps Jobs are VNet-integrated into
 the same shared VNet (infra/control/main.tf's
@@ -14,14 +14,31 @@ never need `azure-mgmt-network`/`azure-mgmt-compute` actually installed.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
-def demo_resource_names(environment_id: str, name_prefix: str = "llm") -> tuple[str, str, str]:
+def demo_resource_names(
+    environment_id: str,
+    name_prefix: str = "llm",
+    *,
+    resource_group_name: str | None = None,
+) -> tuple[str, str, str]:
     """Returns (resource_group_name, vm_name, nic_name) matching infra/demo/main.tf's
     naming convention: `rg-llm-demo-{environmentId}`, `{namePrefix}-{environmentId}-vm`,
-    `{namePrefix}-{environmentId}-nic`."""
-    resource_group = f"rg-llm-demo-{environment_id}"
+    `{namePrefix}-{environmentId}-nic`. An explicit saved group changes only the group.
+    """
+    if resource_group_name is not None and (
+        not isinstance(resource_group_name, str)
+        or not re.fullmatch(r"[A-Za-z0-9._()-]{1,90}", resource_group_name)
+        or resource_group_name.endswith(".")
+    ):
+        raise ValueError("Invalid persisted demo resource group name.")
+    resource_group = (
+        resource_group_name
+        if resource_group_name is not None
+        else f"rg-llm-demo-{environment_id}"
+    )
     prefixed = f"{name_prefix}-{environment_id}"
     return resource_group, f"{prefixed}-vm", f"{prefixed}-nic"
 
@@ -49,11 +66,14 @@ def resolve_private_ip(
     environment_id: str,
     *,
     name_prefix: str = "llm",
+    resource_group_name: str | None = None,
     credential: Any | None = None,
     client: Any | None = None,
 ) -> str:
     """Looks up the demo VM's NIC and returns its private IPv4 address."""
-    resource_group, _vm_name, nic_name = demo_resource_names(environment_id, name_prefix)
+    resource_group, _vm_name, nic_name = demo_resource_names(
+        environment_id, name_prefix, resource_group_name=resource_group_name
+    )
     network_client = client or _default_network_client(subscription_id, credential)
     nic = network_client.network_interfaces.get(resource_group, nic_name)
     ip_configurations = nic.ip_configurations or []
@@ -74,6 +94,7 @@ def ensure_vm_running(
     environment_id: str,
     *,
     name_prefix: str = "llm",
+    resource_group_name: str | None = None,
     credential: Any | None = None,
     client: Any | None = None,
 ) -> str:
@@ -88,9 +109,13 @@ def ensure_vm_running(
     this before `run_command_on_vm` to restart an evicted VM rather than
     surface that as an opaque deploy failure.
     """
-    resource_group, vm_name, _nic_name = demo_resource_names(environment_id, name_prefix)
+    resource_group, vm_name, _nic_name = demo_resource_names(
+        environment_id, name_prefix, resource_group_name=resource_group_name
+    )
     compute_client = client or _default_compute_client(subscription_id, credential)
-    instance_view = compute_client.virtual_machines.instance_view(resource_group, vm_name)
+    instance_view = compute_client.virtual_machines.instance_view(
+        resource_group, vm_name
+    )
     statuses = list(getattr(instance_view, "statuses", []) or [])
     power_state = "PowerState/unknown"
     for status in statuses:
@@ -112,6 +137,7 @@ def run_command_on_vm(
     *,
     script_lines: list[str],
     name_prefix: str = "llm",
+    resource_group_name: str | None = None,
     credential: Any | None = None,
     client: Any | None = None,
 ) -> Any:
@@ -122,7 +148,9 @@ def run_command_on_vm(
     model repo/HF token as transient parameters (cloud-init.tftpl) - never via
     SSH (the VM has no public IP and no inbound NSG rule for jobs beyond the
     VNet-internal path already used for HTTP)."""
-    resource_group, vm_name, _nic_name = demo_resource_names(environment_id, name_prefix)
+    resource_group, vm_name, _nic_name = demo_resource_names(
+        environment_id, name_prefix, resource_group_name=resource_group_name
+    )
     compute_client = client or _default_compute_client(subscription_id, credential)
     poller = compute_client.virtual_machines.begin_run_command(
         resource_group,

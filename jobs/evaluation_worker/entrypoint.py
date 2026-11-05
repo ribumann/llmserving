@@ -10,6 +10,7 @@ activity as a job-start template override):
 - `WORKFLOW_ID`    - the Orchestration Workflow this run reports against.
 - `JOB_INPUT_JSON` - JSON object: {"environmentId": str, "runId": str,
                       "namePrefix": str (optional, default "llm"),
+                      "resourceGroupName": str (optional, saved scope),
                       "cases": [{"caseId": str, "prompt": str,
                                  "deterministicCheck": str (optional)}]}.
 
@@ -97,14 +98,20 @@ def run(
     cases: list[dict[str, Any]],
     name_prefix: str,
     callback: WorkflowCallbackClient,
+    resource_group_name: str | None = None,
     resolve_ip: Any = resolve_private_ip,
     submit: Any = submit_prompt,
 ) -> None:
     if not cases:
-        raise CallbackClientError("JOB_INPUT_JSON must include a non-empty 'cases' list.")
+        raise CallbackClientError(
+            "JOB_INPUT_JSON must include a non-empty 'cases' list."
+        )
 
     callback.report_progress(workflow_id, phase="resolving-endpoint")
-    private_ip = resolve_ip(subscription_id, environment_id, name_prefix=name_prefix)
+    target = {"name_prefix": name_prefix}
+    if resource_group_name is not None:
+        target["resource_group_name"] = resource_group_name
+    private_ip = resolve_ip(subscription_id, environment_id, **target)
     base_url = vllm_base_url(private_ip)
 
     evaluated: list[dict[str, Any]] = []
@@ -119,7 +126,9 @@ def run(
 
     counts = {"passCount": 0, "failCount": 0, "erroredCount": 0, "skippedCount": 0}
     for case_result in evaluated:
-        counts[f"{case_result['status']}Count"] = counts.get(f"{case_result['status']}Count", 0) + 1
+        counts[f"{case_result['status']}Count"] = (
+            counts.get(f"{case_result['status']}Count", 0) + 1
+        )
 
     completeness = "complete" if counts["erroredCount"] == 0 else "partial"
 
@@ -162,9 +171,12 @@ def main() -> int:
                 run_id=run_id,
                 cases=cases,
                 name_prefix=name_prefix,
+                resource_group_name=payload.get("resourceGroupName"),
                 callback=callback,
             )
-        except Exception as exc:  # noqa: BLE001 - last-resort safety net, see terraform_runner
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - last-resort safety net, see terraform_runner
             logger.exception("Evaluation run %s failed", run_id)
             callback.complete_workflow(
                 workflow_id,

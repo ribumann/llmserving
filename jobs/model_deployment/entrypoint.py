@@ -14,7 +14,8 @@ activity as a job-start template override, never baked into the image):
 - `JOB_INPUT_JSON` - JSON object: {"environmentId": str, "modelRepo": str,
                       "hfToken": str, "revision": str (optional, default
                       "main"), "namePrefix": str (optional, default
-                      "llm"), "extraArgs": list[str] (optional),
+                      "llm"), "resourceGroupName": str (optional, saved scope),
+                      "extraArgs": list[str] (optional),
                       "healthCheckAttempts": int (optional, default 120),
                       "healthCheckIntervalSeconds": number (optional, default 15)}.
                       `modelRepo` must be the actual Hugging Face repo id (e.g.
@@ -61,8 +62,12 @@ RUN_VLLM_SCRIPT_PATH = "/opt/llmserving/run-vllm.sh"
 def _build_script_lines(
     model_repo: str, hf_token: str, extra_args: list[str], *, revision: str = "main"
 ) -> list[str]:
-    quoted_args = " ".join(shlex.quote(str(arg)) for arg in [*extra_args, "--revision", revision])
-    command = f"{RUN_VLLM_SCRIPT_PATH} {shlex.quote(model_repo)} {shlex.quote(hf_token)}"
+    quoted_args = " ".join(
+        shlex.quote(str(arg)) for arg in [*extra_args, "--revision", revision]
+    )
+    command = (
+        f"{RUN_VLLM_SCRIPT_PATH} {shlex.quote(model_repo)} {shlex.quote(hf_token)}"
+    )
     if quoted_args:
         command = f"{command} {quoted_args}"
     return [command]
@@ -81,6 +86,7 @@ def run(
     health_check_interval_seconds: float,
     callback: WorkflowCallbackClient,
     revision: str = "main",
+    resource_group_name: str | None = None,
     resolve_ip: Any = resolve_private_ip,
     dispatch_run_command: Any = run_command_on_vm,
     ensure_running: Any = ensure_vm_running,
@@ -88,16 +94,21 @@ def run(
     sleep: Any = time.sleep,
 ) -> None:
     callback.report_progress(workflow_id, phase="ensuring-vm-running")
-    ensure_running(subscription_id, environment_id, name_prefix=name_prefix)
+    target = {"name_prefix": name_prefix}
+    if resource_group_name is not None:
+        target["resource_group_name"] = resource_group_name
+    ensure_running(subscription_id, environment_id, **target)
 
     callback.report_progress(workflow_id, phase="dispatching-run-command")
-    script_lines = _build_script_lines(model_repo, hf_token, extra_args, revision=revision)
+    script_lines = _build_script_lines(
+        model_repo, hf_token, extra_args, revision=revision
+    )
     dispatch_run_command(
-        subscription_id, environment_id, script_lines=script_lines, name_prefix=name_prefix
+        subscription_id, environment_id, script_lines=script_lines, **target
     )
 
     callback.report_progress(workflow_id, phase="waiting-for-vllm-health")
-    private_ip = resolve_ip(subscription_id, environment_id, name_prefix=name_prefix)
+    private_ip = resolve_ip(subscription_id, environment_id, **target)
     base_url = vllm_base_url(private_ip)
 
     # `docker run -d` (infra/demo/cloud-init.tftpl) returns as soon as the container
@@ -156,7 +167,11 @@ def main() -> int:
     subscription_id = required_env("AZURE_SUBSCRIPTION_ID")
 
     # Deliberately logs only the model repo, never hf_token (FR-082/FR-083).
-    logger.info("Starting model deployment for environment %s repo=%s", environment_id, model_repo)
+    logger.info(
+        "Starting model deployment for environment %s repo=%s",
+        environment_id,
+        model_repo,
+    )
     with WorkflowCallbackClient() as callback:
         try:
             if not environment_id or not model_repo:
@@ -171,6 +186,7 @@ def main() -> int:
                 hf_token=hf_token,
                 revision=revision,
                 name_prefix=name_prefix,
+                resource_group_name=payload.get("resourceGroupName"),
                 extra_args=extra_args,
                 health_check_attempts=health_check_attempts,
                 health_check_interval_seconds=health_check_interval_seconds,

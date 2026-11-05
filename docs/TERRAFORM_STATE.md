@@ -58,6 +58,46 @@ development/test behavior remains local-only. This is not a cloud opt-out:
 inherited Azure hosting/identity markers require remote state. Authentication
 is not weakened to make a test pass.
 
+## Retained demo resource groups
+
+The operator may set control input `demo_resource_group_name` (backend
+`AZURE_DEMO_RESOURCE_GROUP_NAME`) to an existing, approved group. It is not a
+browser-configurable input. The server persists `existing_resource_group_name`
+with the exact environment variables, and destroy reuses those saved variables
+even if operator settings later change. `demo_resource_tags` / JSON
+`AZURE_RESOURCE_TAGS` enforce ownership tags over caller tags; retained mode
+honors the operator's `managedBy` while Terraform still enforces environment
+and profile tags. Legacy managed mode keeps `managedBy=terraform`.
+
+Model dispatch carries only the saved effective group and name prefix, not
+the full Terraform variables. NIC resolution, VM power/start and Run Command
+use that same scope; retained deployments with missing or inconsistent scope
+fail rather than falling back to current operator settings. Worker inputs also
+support this explicit scope for future evaluation/performance use, but durable
+evaluation/performance routing and parity are not enabled by this change.
+
+Use **fresh per-environment state only**. In retained mode, `infra/demo` reads
+the group as data, never creates/adopts it, and owns only its NIC, VM and driver
+extension. Resource names still include the environment ID. Compute uses the
+shared subnet's region, not the group's metadata location. Teardown preview
+does not list the group for deletion or imply other environments/grants are
+removed. Omitted configuration preserves the original managed-group path; the
+explicit `moved` block maps its original group address to index zero.
+
+Inside the existing lease, after download and before Terraform initialization,
+the worker structurally validates state ownership. It rejects mode changes,
+wrong group/environment ownership, malformed group records and unexpected
+managed resource types. A managed-group state cannot be converted to retained
+mode, even for destroy. A data-only group is allowed only in its saved retained
+mode. Rejected pre-mutation attempts do not complete successfully.
+
+This guard checks the worker's downloaded state, **not arbitrary CLI use**.
+Never switch ownership using bare `terraform apply`/`destroy`, remove group
+records to evade the guard, or adopt original deployment state. A raw CLI
+conversion can plan deletion of the previously managed group. Shared/control
+group ownership and guarded all-layer bootstrap remain separate requirements;
+this option alone does not make protected-group deployment safe or enabled.
+
 ## Explicit remaining limitations
 
 The worker lease serializes cooperating executions; it does not provide atomic

@@ -12,7 +12,11 @@ from src.domain.profile import CloudDeploymentProfile
 from src.engines.vllm.adapter import VllmEngineAdapter
 from src.providers.azure.deploy import AzureDeployer, DeploymentContext
 from src.providers.azure.preflight import AzureCapacityPreflight
-from src.providers.azure.preview import AzurePreviewService, PreviewEvaluation, resolve_vm_size
+from src.providers.azure.preview import (
+    AzurePreviewService,
+    PreviewEvaluation,
+    resolve_vm_size,
+)
 from src.providers.azure.provision import AzureProvisioner, ProvisioningContext
 from src.providers.azure.state import AzureEnvironmentStateService
 from src.providers.base import (
@@ -221,7 +225,9 @@ class AzureProviderAdapter(ProviderAdapter):
 
         resources: list[dict[str, Any]] = []
         resource_group_name = provider_state.get("resourceGroupName")
-        if resource_group_name:
+        variables = (provider_state.get("terraform") or {}).get("variables") or {}
+        retained_group = variables.get("existing_resource_group_name") is not None
+        if resource_group_name and not retained_group:
             resources.append({"type": "resourceGroup", "name": resource_group_name})
         vm_name = provider_state.get("vmName")
         if vm_name:
@@ -232,9 +238,15 @@ class AzureProviderAdapter(ProviderAdapter):
             previewToken=f"teardown-{environmentId}",
             resources=resources,
             consequences=[
-                "Terraform destroy will remove every resource in this environment's "
-                "resource group, including the GPU VM and any deployed model state. "
-                "This action cannot be undone."
+                (
+                    "Terraform destroy removes only this environment's state-owned resources. "
+                    "The retained resource group, other environments and its existing role grants "
+                    "are not deleted. This action cannot be undone."
+                    if retained_group
+                    else "Terraform destroy will remove every resource in this environment's "
+                    "resource group, including the GPU VM and any deployed model state. "
+                    "This action cannot be undone."
+                )
             ],
         )
 

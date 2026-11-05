@@ -32,6 +32,26 @@ variable "tags" {
   default     = {}
 }
 
+variable "demo_resource_group_name" {
+  description = "Optional retained demo group selected by the operator, never by browser input. Fresh demo state only."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.demo_resource_group_name == null ? true : (
+      can(regex("^[A-Za-z0-9._()-]{1,90}$", var.demo_resource_group_name))
+      && !endswith(var.demo_resource_group_name, ".")
+    )
+    error_message = "demo_resource_group_name must be a nonempty Azure resource group name, not ending with a period."
+  }
+}
+
+variable "demo_resource_tags" {
+  description = "Operator-enforced demo ownership tags; these override browser-supplied tags."
+  type        = map(string)
+  default     = {}
+}
+
 variable "container_apps_workload_profile" {
   description = "Workload profile used by the Container Apps environment and every app/job in it. Consumption is the cheapest profile that still supports VNet integration."
   type        = string
