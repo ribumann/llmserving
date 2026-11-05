@@ -1,11 +1,11 @@
 output "resource_group_name" {
-  description = "The rg-llm-shared-{stage} resource group name."
-  value       = azurerm_resource_group.shared.name
+  description = "Effective shared resource group name (managed by default, or existing data-only group)."
+  value       = local.resource_group_name
 }
 
 output "location" {
   description = "Azure region shared by every layer."
-  value       = azurerm_resource_group.shared.location
+  value       = var.location
 }
 
 output "vnet_id" {

@@ -9,39 +9,50 @@
 # (FR-086). Applied once per stage; never touched by a per-environment infra/demo apply (FR-090).
 
 locals {
-  resource_group_name = "rg-llm-shared-${var.stage}"
+  group_name          = coalesce(var.existing_resource_group_name, "rg-llm-shared-${var.stage}")
+  resource_group_name = var.existing_resource_group_name == null ? azurerm_resource_group.shared[0].name : data.azurerm_resource_group.shared[0].name
 
-  common_tags = merge(var.tags, {
+  common_tags = merge({ managedBy = "terraform" }, var.tags, {
     feature   = "azure-llm-serving-demo"
     component = "shared"
     stage     = var.stage
-    managedBy = "terraform"
-  })
+  }, var.existing_resource_group_name == null ? { managedBy = "terraform" } : {})
 
   # Globally-unique resource names (ACR, Key Vault, Storage) get a short suffix derived from the
   # resource group id so re-running this module for a second stage/subscription never collides.
   unique_suffix = substr(md5("${var.subscription_id}-${var.stage}"), 0, 6)
 }
 
+moved {
+  from = azurerm_resource_group.shared
+  to   = azurerm_resource_group.shared[0]
+}
+
 resource "azurerm_resource_group" "shared" {
-  name     = local.resource_group_name
+  count    = var.existing_resource_group_name == null ? 1 : 0
+  name     = local.group_name
   location = var.location
   tags     = local.common_tags
+}
+
+data "azurerm_resource_group" "shared" {
+  count = var.existing_resource_group_name == null ? 0 : 1
+  name  = var.existing_resource_group_name
 }
 
 # --- Networking ---
 
 resource "azurerm_virtual_network" "shared" {
   name                = "${var.name_prefix}-shared-vnet"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
+  resource_group_name = local.resource_group_name
+  location            = var.location
   address_space       = var.vnet_address_space
   tags                = local.common_tags
 }
 
 resource "azurerm_subnet" "containerapps" {
   name                 = "snet-containerapps"
-  resource_group_name  = azurerm_resource_group.shared.name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.shared.name
   address_prefixes     = [var.container_apps_subnet_prefix]
 
@@ -63,7 +74,7 @@ resource "azurerm_subnet" "containerapps" {
 
 resource "azurerm_subnet" "functions" {
   name                 = "snet-functions"
-  resource_group_name  = azurerm_resource_group.shared.name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.shared.name
   address_prefixes     = [var.functions_subnet_prefix]
 
@@ -81,7 +92,7 @@ resource "azurerm_subnet" "functions" {
 
 resource "azurerm_subnet" "data" {
   name                 = "snet-data"
-  resource_group_name  = azurerm_resource_group.shared.name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.shared.name
   address_prefixes     = [var.data_subnet_prefix]
 
@@ -101,7 +112,7 @@ resource "azurerm_subnet" "data" {
 
 resource "azurerm_subnet" "private_endpoints" {
   name                 = "snet-private-endpoints"
-  resource_group_name  = azurerm_resource_group.shared.name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.shared.name
   address_prefixes     = [var.private_endpoints_subnet_prefix]
 
@@ -113,7 +124,7 @@ resource "azurerm_subnet" "private_endpoints" {
 # (FR-079) — reachability is limited to snet-containerapps by NSG rule below.
 resource "azurerm_subnet" "gpu" {
   name                 = "snet-gpu"
-  resource_group_name  = azurerm_resource_group.shared.name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.shared.name
   address_prefixes     = [var.gpu_subnet_prefix]
 
@@ -123,8 +134,8 @@ resource "azurerm_subnet" "gpu" {
 
 resource "azurerm_network_security_group" "gpu" {
   name                = "${var.name_prefix}-gpu-nsg"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
+  resource_group_name = local.resource_group_name
+  location            = var.location
   tags                = local.common_tags
 
   # vLLM's OpenAI-compatible port, reachable only from the Container Apps subnet (where
@@ -164,8 +175,8 @@ resource "azurerm_subnet_network_security_group_association" "gpu" {
 # the Terraform registry, etc.) — mirrors the old app-host NAT Gateway pattern.
 resource "azurerm_public_ip" "nat" {
   name                = "${var.name_prefix}-shared-nat-pip"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
+  resource_group_name = local.resource_group_name
+  location            = var.location
   allocation_method   = "Static"
   sku                 = "Standard"
   tags                = local.common_tags
@@ -177,8 +188,8 @@ resource "azurerm_public_ip" "nat" {
 
 resource "azurerm_nat_gateway" "shared" {
   name                = "${var.name_prefix}-shared-natgw"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
+  resource_group_name = local.resource_group_name
+  location            = var.location
   sku_name            = "Standard"
   tags                = local.common_tags
 }
@@ -214,13 +225,13 @@ resource "azurerm_subnet_nat_gateway_association" "gpu" {
 
 resource "azurerm_private_dns_zone" "postgres" {
   name                = "privatelink.postgres.database.azure.com"
-  resource_group_name = azurerm_resource_group.shared.name
+  resource_group_name = local.resource_group_name
   tags                = local.common_tags
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "postgres" {
   name                  = "${var.name_prefix}-postgres-link"
-  resource_group_name   = azurerm_resource_group.shared.name
+  resource_group_name   = local.resource_group_name
   private_dns_zone_name = azurerm_private_dns_zone.postgres.name
   virtual_network_id    = azurerm_virtual_network.shared.id
   tags                  = local.common_tags
@@ -228,13 +239,13 @@ resource "azurerm_private_dns_zone_virtual_network_link" "postgres" {
 
 resource "azurerm_private_dns_zone" "vault" {
   name                = "privatelink.vaultcore.azure.net"
-  resource_group_name = azurerm_resource_group.shared.name
+  resource_group_name = local.resource_group_name
   tags                = local.common_tags
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "vault" {
   name                  = "${var.name_prefix}-vault-link"
-  resource_group_name   = azurerm_resource_group.shared.name
+  resource_group_name   = local.resource_group_name
   private_dns_zone_name = azurerm_private_dns_zone.vault.name
   virtual_network_id    = azurerm_virtual_network.shared.id
   tags                  = local.common_tags
@@ -242,13 +253,13 @@ resource "azurerm_private_dns_zone_virtual_network_link" "vault" {
 
 resource "azurerm_private_dns_zone" "blob" {
   name                = "privatelink.blob.core.windows.net"
-  resource_group_name = azurerm_resource_group.shared.name
+  resource_group_name = local.resource_group_name
   tags                = local.common_tags
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "blob" {
   name                  = "${var.name_prefix}-blob-link"
-  resource_group_name   = azurerm_resource_group.shared.name
+  resource_group_name   = local.resource_group_name
   private_dns_zone_name = azurerm_private_dns_zone.blob.name
   virtual_network_id    = azurerm_virtual_network.shared.id
   tags                  = local.common_tags
@@ -259,13 +270,13 @@ resource "azurerm_private_dns_zone_virtual_network_link" "blob" {
 
 resource "azurerm_private_dns_zone" "queue" {
   name                = "privatelink.queue.core.windows.net"
-  resource_group_name = azurerm_resource_group.shared.name
+  resource_group_name = local.resource_group_name
   tags                = local.common_tags
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "queue" {
   name                  = "${var.name_prefix}-queue-link"
-  resource_group_name   = azurerm_resource_group.shared.name
+  resource_group_name   = local.resource_group_name
   private_dns_zone_name = azurerm_private_dns_zone.queue.name
   virtual_network_id    = azurerm_virtual_network.shared.id
   tags                  = local.common_tags
@@ -273,13 +284,13 @@ resource "azurerm_private_dns_zone_virtual_network_link" "queue" {
 
 resource "azurerm_private_dns_zone" "table" {
   name                = "privatelink.table.core.windows.net"
-  resource_group_name = azurerm_resource_group.shared.name
+  resource_group_name = local.resource_group_name
   tags                = local.common_tags
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "table" {
   name                  = "${var.name_prefix}-table-link"
-  resource_group_name   = azurerm_resource_group.shared.name
+  resource_group_name   = local.resource_group_name
   private_dns_zone_name = azurerm_private_dns_zone.table.name
   virtual_network_id    = azurerm_virtual_network.shared.id
   tags                  = local.common_tags
@@ -292,8 +303,8 @@ resource "azurerm_private_dns_zone_virtual_network_link" "table" {
 
 resource "azurerm_container_registry" "shared" {
   name                = "${replace(var.name_prefix, "-", "")}acr${local.unique_suffix}"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
+  resource_group_name = local.resource_group_name
+  location            = var.location
   sku                 = "Basic"
   admin_enabled       = false
   tags                = local.common_tags
@@ -306,8 +317,8 @@ resource "azurerm_container_registry" "shared" {
 
 resource "azurerm_key_vault" "shared" {
   name                = "${var.name_prefix}-kv-${local.unique_suffix}"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
+  resource_group_name = local.resource_group_name
+  location            = var.location
   tenant_id           = data.azurerm_client_config.current.tenant_id
   sku_name            = var.key_vault_sku
   tags                = local.common_tags
@@ -332,8 +343,8 @@ resource "azurerm_key_vault" "shared" {
 
 resource "azurerm_private_endpoint" "vault" {
   name                = "${var.name_prefix}-vault-pe"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
+  resource_group_name = local.resource_group_name
+  location            = var.location
   subnet_id           = azurerm_subnet.private_endpoints.id
   tags                = local.common_tags
 
@@ -359,8 +370,8 @@ data "azurerm_client_config" "current" {}
 
 resource "azurerm_log_analytics_workspace" "shared" {
   name                = "${var.name_prefix}-law"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
+  resource_group_name = local.resource_group_name
+  location            = var.location
   sku                 = "PerGB2018"
   retention_in_days   = var.log_retention_days
   tags                = local.common_tags
@@ -368,8 +379,8 @@ resource "azurerm_log_analytics_workspace" "shared" {
 
 resource "azurerm_application_insights" "shared" {
   name                = "${var.name_prefix}-appi"
-  resource_group_name = azurerm_resource_group.shared.name
-  location            = azurerm_resource_group.shared.location
+  resource_group_name = local.resource_group_name
+  location            = var.location
   workspace_id        = azurerm_log_analytics_workspace.shared.id
   application_type    = "web"
   tags                = local.common_tags

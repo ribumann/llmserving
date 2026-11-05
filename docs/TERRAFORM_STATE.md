@@ -94,9 +94,51 @@ mode. Rejected pre-mutation attempts do not complete successfully.
 This guard checks the worker's downloaded state, **not arbitrary CLI use**.
 Never switch ownership using bare `terraform apply`/`destroy`, remove group
 records to evade the guard, or adopt original deployment state. A raw CLI
-conversion can plan deletion of the previously managed group. Shared/control
+conversion can plan deletion of the previously managed group. Control
 group ownership and guarded all-layer bootstrap remain separate requirements;
 this option alone does not make protected-group deployment safe or enabled.
+
+## Retained shared group and private plan guard
+
+`infra/shared.existing_resource_group_name` selects an existing data-only group
+for **fresh non-group-owning state**. Null preserves the original managed mode;
+blank/invalid names fail. Owned child resources use the selected group and
+`location`, not the group's metadata region. Operator ownership tags are honored
+only in retained mode; default managed tag precedence stays unchanged.
+
+The explicit singleton-to-index-zero `moved` block preserves the default
+managed-state address. Credential-free native contracts run on Terraform 1.9.8;
+the exact old-singleton-state upgrade uses Terraform 1.14.0's `state_key`
+to share real mocked state across legacy and current module configurations.
+These are not Azure apply or cleanup evidence.
+
+After all independent deployment gates have passed, generate a native saved
+plan in a mode-0700 private directory from the reviewed module. Keep plan/state,
+tfvars and logs private and out of GitHub artifacts. Run the ownership guard
+**from the same initialized module directory**:
+
+```bash
+python ../../scripts/validate_retained_group_plan.py \
+  --plan /approved/private/retained.tfplan \
+  --resource-group "rg-approved-existing" \
+  --private-log /approved/private/new-guard.log
+```
+
+Validation does not apply. An explicitly authorized execution adds `--apply`
+and uses a **new** private log path. The guard copies the native plan privately,
+uses `terraform show -json`, checks its variables, prior/planned resources and
+all changes (including before-values of deletes/replacements), then applies
+that exact copied plan. It rejects any managed AzureRM group, group-owning prior
+state, malformed records and explicit foreign/unknown `resource_group_name`
+values. Terraform's native stale-plan checks still apply. Errors return failure;
+Terraform output stays in the mode-0600 private log, never public JSON dumps.
+
+This is an **ownership-only guard for reviewed module plans**, not a sandbox for
+arbitrary Terraform code. It does not establish foreign parent-ID/RBAC scope,
+hidden platform resources, tags, cost, auth, private remote-backend locking,
+pre-init state safety or independent cleanup. Raw CLI bypasses it. Never remove
+state records or use raw apply/destroy to convert group ownership. Control
+group/scoped-role support and safe all-layer deployment remain unfinished.
 
 ## Explicit remaining limitations
 
