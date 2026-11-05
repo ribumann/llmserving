@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 from src.api.app import create_app
 from src.persistence.db import get_db_session
@@ -31,7 +33,8 @@ def test_configuration_and_deployment_routes_follow_contract() -> None:
         },
     )
     assert model_response.status_code == 201
-    assert model_response.json()["modelConfigId"] == "env-demo-model-1"
+    model_id = model_response.json()["modelConfigId"]
+    assert str(UUID(model_id)) == model_id
 
     inference_response = client.post(
         "/environments/env-demo/inference-configurations",
@@ -43,14 +46,15 @@ def test_configuration_and_deployment_routes_follow_contract() -> None:
         },
     )
     assert inference_response.status_code == 201
-    assert inference_response.json()["inferenceConfigId"] == "env-demo-inference-1"
+    inference_id = inference_response.json()["inferenceConfigId"]
+    assert str(UUID(inference_id)) == inference_id
 
     deploy_response = client.post(
         "/environments/env-demo/deployments",
         headers=headers,
         json={
-            "modelConfigId": "env-demo-model-1",
-            "inferenceConfigId": "env-demo-inference-1",
+            "modelConfigId": model_id,
+            "inferenceConfigId": inference_id,
         },
     )
     assert deploy_response.status_code == 202
@@ -71,7 +75,7 @@ def test_configuration_and_deployment_routes_follow_contract() -> None:
         headers=headers,
     )
     assert history_response.status_code == 200
-    assert history_response.json()["items"][0]["modelConfigId"] == "env-demo-model-1"
+    assert history_response.json()["items"][0]["modelConfigId"] == model_id
 
 
 def test_deployment_requires_hf_token_for_gated_catalog_entry() -> None:

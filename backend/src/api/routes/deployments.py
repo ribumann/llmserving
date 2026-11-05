@@ -91,6 +91,28 @@ def create_deployment(
     provider: AzureProviderAdapter = Depends(_provider),
 ) -> dict[str, object]:
     environment = _require_environment(session, environment_id)
+    operation_id = getattr(request.state, "operation_id", None) or f"deploy-{environment_id}"
+    try:
+        EnvironmentLockService().acquire(
+            session, environment_id=environment_id, operation_id=operation_id
+        )
+    except EnvironmentNotFoundError as exc:
+        raise ApiError(
+            status_code=404,
+            code="environment_not_found",
+            message=str(exc),
+            details={"environmentId": environment_id},
+        ) from exc
+    except EnvironmentLockedError as exc:
+        raise ApiError(
+            status_code=409,
+            code="environment_locked",
+            message=str(exc),
+            details={"environmentId": environment_id},
+        ) from exc
+
+    # Read configuration rows only after the shared writer lock: cleanup may
+    # have deleted an unreferenced row while this request waited for the lock.
     model_configuration = session.get(ModelConfiguration, payload.modelConfigId)
     if model_configuration is None or model_configuration.environmentId != environment_id:
         raise ApiError(
@@ -126,26 +148,6 @@ def create_deployment(
             message="This checkpoint requires a Hugging Face token for deployment.",
             details={"catalogEntryId": catalog_entry.catalogEntryId},
         )
-
-    operation_id = getattr(request.state, "operation_id", None) or f"deploy-{environment_id}"
-    try:
-        EnvironmentLockService().acquire(
-            session, environment_id=environment_id, operation_id=operation_id
-        )
-    except EnvironmentNotFoundError as exc:
-        raise ApiError(
-            status_code=404,
-            code="environment_not_found",
-            message=str(exc),
-            details={"environmentId": environment_id},
-        ) from exc
-    except EnvironmentLockedError as exc:
-        raise ApiError(
-            status_code=409,
-            code="environment_locked",
-            message=str(exc),
-            details={"environmentId": environment_id},
-        ) from exc
 
     next_id = session.scalar(
         select(func.count())
