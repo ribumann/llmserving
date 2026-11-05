@@ -197,7 +197,7 @@ def main() -> None:
                     f'storage_account_name = "{HOST.split(".")[0]}"\n'
                     'container_name = "tfstate"\nkey = "fixture.tfstate"\n'
                     'sas_token = "sv=2023-11-03&sig=synthetic-fixture"\n'
-                    "use_cli = false\nuse_msi = false\n} }\n"
+                    "use_cli = false\nuse_msi = false\n}\n}\n"
                 )
                 result = subprocess.run(
                     ["terraform", "init", "-input=false", "-no-color"],
