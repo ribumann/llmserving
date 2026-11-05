@@ -136,6 +136,7 @@ def test_valid_owned_resource_without_group_record_is_allowed(tmp_path):
         tmp_path,
         resource_type="azurerm_linux_virtual_machine",
         attributes={
+            "name": "llm-demo123-vm",
             "resource_group_name": "rg-retained",
             "tags": {"environmentId": "demo123"},
         },
@@ -143,6 +144,78 @@ def test_valid_owned_resource_without_group_record_is_allowed(tmp_path):
     entrypoint._validate_group_ownership(
         tmp_path, "demo123", {"existing_resource_group_name": "rg-retained"}
     )
+
+
+@pytest.mark.parametrize(
+    "resource_type,attributes",
+    [
+        (
+            "azurerm_linux_virtual_machine",
+            {"name": "llm-other-vm", "resource_group_name": "rg-retained"},
+        ),
+        (
+            "azurerm_virtual_machine_extension",
+            {
+                "virtual_machine_id": (
+                    "/subscriptions/sub/resourceGroups/rg-retained/providers/"
+                    "Microsoft.Compute/virtualMachines/llm-other-vm"
+                )
+            },
+        ),
+    ],
+)
+def test_owned_tags_cannot_hide_wrong_resource_name_or_driver_parent(
+    tmp_path, resource_type, attributes
+):
+    state(
+        tmp_path,
+        resource_type=resource_type,
+        attributes={**attributes, "tags": {"environmentId": "demo123"}},
+    )
+    with pytest.raises(entrypoint.TerraformRunError, match="environment owner"):
+        entrypoint._validate_group_ownership(
+            tmp_path, "demo123", {"existing_resource_group_name": "rg-retained"}
+        )
+
+
+def test_owned_driver_parent_is_allowed(tmp_path):
+    state(
+        tmp_path,
+        resource_type="azurerm_virtual_machine_extension",
+        attributes={
+            "virtual_machine_id": (
+                "/subscriptions/sub/resourceGroups/rg-retained/providers/"
+                "Microsoft.Compute/virtualMachines/llm-demo123-vm"
+            ),
+            "tags": {"environmentId": "demo123"},
+        },
+    )
+    entrypoint._validate_group_ownership(
+        tmp_path, "demo123", {"existing_resource_group_name": "rg-retained"}
+    )
+
+
+def test_driver_cannot_reference_another_subscription(tmp_path):
+    state(
+        tmp_path,
+        resource_type="azurerm_virtual_machine_extension",
+        attributes={
+            "virtual_machine_id": (
+                "/subscriptions/unrelated/resourceGroups/rg-retained/providers/"
+                "Microsoft.Compute/virtualMachines/llm-demo123-vm"
+            ),
+            "tags": {"environmentId": "demo123"},
+        },
+    )
+    with pytest.raises(entrypoint.TerraformRunError, match="driver subscription"):
+        entrypoint._validate_group_ownership(
+            tmp_path,
+            "demo123",
+            {
+                "existing_resource_group_name": "rg-retained",
+                "subscription_id": "owned",
+            },
+        )
 
 
 @pytest.mark.parametrize("resource_type", ["azapi_resource", "tls_private_key"])

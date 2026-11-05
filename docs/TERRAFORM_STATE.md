@@ -69,6 +69,13 @@ even if operator settings later change. `demo_resource_tags` / JSON
 honors the operator's `managedBy` while Terraform still enforces environment
 and profile tags. Legacy managed mode keeps `managedBy=terraform`.
 
+Model dispatch carries only the saved effective group and name prefix, not
+the full Terraform variables. NIC resolution, VM power/start and Run Command
+use that same scope; retained deployments with missing or inconsistent scope
+fail rather than falling back to current operator settings. Worker inputs also
+support this explicit scope for future evaluation/performance use, but durable
+evaluation/performance routing and parity are not enabled by this change.
+
 Use **fresh per-environment state only**. In retained mode, `infra/demo` reads
 the group as data, never creates/adopts it, and owns only its NIC, VM and driver
 extension. Resource names still include the environment ID. Compute uses the

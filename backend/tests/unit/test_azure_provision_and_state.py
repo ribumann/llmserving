@@ -218,7 +218,11 @@ def _deployment_revision(session: MemorySession):
     return revision
 
 
-def test_deployer_dispatches_job_then_starts_orchestration(session: MemorySession) -> None:
+@pytest.mark.parametrize("retained", [False, True])
+@pytest.mark.parametrize("snapshot", [False, True])
+def test_deployer_dispatches_job_then_starts_orchestration(
+    session: MemorySession, retained: bool, snapshot: bool
+) -> None:
     _deployment_revision(session)
     functions_client = FakeFunctionsClient()
     job_dispatcher = FakeJobDispatcher()
@@ -227,10 +231,22 @@ def test_deployer_dispatches_job_then_starts_orchestration(session: MemorySessio
         settings=Settings(
             container_apps_resource_group="rg-container-apps",
             job_name_model_deployment="model-deployment",
+            azure_demo_resource_group_name="rg-current-not-saved",
         ),
         functions_client_factory=lambda: functions_client,
         job_dispatcher=job_dispatcher,
     )
+    if retained:
+        session.environments["env-demo"].providerState = {
+            "resourceGroupName": "rg-saved",
+            "terraform": {
+                "variables": {
+                    "existing_resource_group_name": "rg-saved",
+                    "name_prefix": "saved-prefix",
+                    "admin_ssh_public_key": "do-not-forward-full-variables",
+                }
+            },
+        }
     context = DeploymentContext(
         environmentId="env-demo",
         deploymentRevisionId="revision-1",
@@ -239,7 +255,11 @@ def test_deployer_dispatches_job_then_starts_orchestration(session: MemorySessio
         engineId="vllm",
         modelConfig={"resolvedCheckpointRef": "Qwen/Qwen3-4B"},
         inferenceConfig={},
-        targetEnvironment={},
+        targetEnvironment=(
+            {"providerState": dict(session.environments["env-demo"].providerState or {})}
+            if snapshot
+            else {}
+        ),
         hfToken="hf-token-value",
     )
     session.environments["env-demo"].activeOperationId = None
@@ -254,6 +274,11 @@ def test_deployer_dispatches_job_then_starts_orchestration(session: MemorySessio
     assert job_input["environmentId"] == "env-demo"
     assert job_input["modelRepo"] == "Qwen/Qwen3-4B"
     assert job_input["hfToken"] == "hf-token-value"
+    assert job_input.get("resourceGroupName") != "rg-current-not-saved"
+    assert "terraformVariables" not in job_input and "admin_ssh_public_key" not in job_input
+    if retained:
+        assert job_input["resourceGroupName"] == "rg-saved"
+        assert job_input["namePrefix"] == "saved-prefix"
 
     assert len(functions_client.calls) == 1
     call = functions_client.calls[0]
@@ -262,6 +287,45 @@ def test_deployer_dispatches_job_then_starts_orchestration(session: MemorySessio
 
     [workflow] = session.orchestration_workflows.values()
     assert workflow.diagnostics["deploymentRevisionId"] == "revision-1"
+
+
+@pytest.mark.parametrize("group,prefix", [("rg-wrong", "llm"), (None, "llm"), ("rg-saved", None)])
+def test_retained_deployer_refuses_incomplete_or_inconsistent_scope(
+    session: MemorySession, group: str | None, prefix: str | None
+) -> None:
+    from src.domain.enums import DeploymentRevisionState
+
+    revision = _deployment_revision(session)
+    dispatcher = FakeJobDispatcher()
+    deployer = AzureDeployer(
+        session_factory=_session_factory(session),
+        settings=Settings(),
+        functions_client_factory=FakeFunctionsClient,
+        job_dispatcher=dispatcher,
+    )
+    context = DeploymentContext(
+        environmentId="env-demo",
+        deploymentRevisionId="revision-1",
+        operationId="op-deploy-invalid",
+        actorEmail="presenter@example.com",
+        engineId="vllm",
+        modelConfig={"huggingFaceRepoId": "test-model"},
+        inferenceConfig={},
+        hfToken="",
+        targetEnvironment={
+            "providerState": {
+                "resourceGroupName": group,
+                "terraform": {
+                    "variables": {"existing_resource_group_name": "rg-saved", "name_prefix": prefix}
+                },
+            }
+        },
+    )
+    session.environments["env-demo"].activeOperationId = None
+    deployer._run(context)
+    assert dispatcher.calls == []
+    assert revision.lifecycleState == DeploymentRevisionState.DEPLOYMENT_FAILED
+    assert next(iter(session.orchestration_workflows.values())).status == WorkflowStatus.FAILED
 
 
 def test_deployer_prefers_hugging_face_repo_id_over_resolved_checkpoint_ref(

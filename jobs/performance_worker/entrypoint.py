@@ -8,6 +8,7 @@ activity as a job-start template override):
 - `WORKFLOW_ID`    - the Orchestration Workflow this run reports against.
 - `JOB_INPUT_JSON` - JSON object: {"environmentId": str, "runId": str,
                       "namePrefix": str (optional, default "llm"),
+                      "resourceGroupName": str (optional, saved scope),
                       "workload": {"concurrency": int, "requestCount": int,
                                     "prompt": str,
                                     "safetyLimits": {"maxConcurrency": int,
@@ -68,6 +69,7 @@ def run(
     request_count: int,
     name_prefix: str,
     callback: WorkflowCallbackClient,
+    resource_group_name: str | None = None,
     resolve_ip: Any = resolve_private_ip,
     submit: Any = submit_prompt,
 ) -> None:
@@ -78,7 +80,10 @@ def run(
     request_count = min(request_count, HARD_MAX_REQUESTS)
 
     callback.report_progress(workflow_id, phase="resolving-endpoint")
-    private_ip = resolve_ip(subscription_id, environment_id, name_prefix=name_prefix)
+    target = {"name_prefix": name_prefix}
+    if resource_group_name is not None:
+        target["resource_group_name"] = resource_group_name
+    private_ip = resolve_ip(subscription_id, environment_id, **target)
     base_url = vllm_base_url(private_ip)
 
     callback.report_progress(
@@ -91,7 +96,9 @@ def run(
     failures = 0
     started = perf_counter()
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        for result in pool.map(lambda _: submit(base_url, prompt), range(request_count)):
+        for result in pool.map(
+            lambda _: submit(base_url, prompt), range(request_count)
+        ):
             if result.ok:
                 latencies.append(result.latency_seconds)
             else:
@@ -137,7 +144,9 @@ def main() -> int:
     request_count = int(workload.get("requestCount", 0))
     subscription_id = required_env("AZURE_SUBSCRIPTION_ID")
 
-    logger.info("Starting performance run %s for environment %s", run_id, environment_id)
+    logger.info(
+        "Starting performance run %s for environment %s", run_id, environment_id
+    )
     with WorkflowCallbackClient() as callback:
         try:
             if not environment_id:
@@ -153,9 +162,12 @@ def main() -> int:
                 concurrency=concurrency,
                 request_count=request_count,
                 name_prefix=name_prefix,
+                resource_group_name=payload.get("resourceGroupName"),
                 callback=callback,
             )
-        except Exception as exc:  # noqa: BLE001 - last-resort safety net, see terraform_runner
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - last-resort safety net, see terraform_runner
             logger.exception("Performance run %s failed", run_id)
             callback.complete_workflow(
                 workflow_id,

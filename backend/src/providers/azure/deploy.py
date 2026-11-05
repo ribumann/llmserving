@@ -118,6 +118,12 @@ class AzureDeployer:
                     health={"status": "unknown", "diagnostics": []},
                 )
                 workflow_id = workflow.workflowId
+                provider_state = context.targetEnvironment.get("providerState")
+                if provider_state is None:
+                    environment = session.get(DemoEnvironment, context.environmentId)
+                    provider_state = (
+                        dict(environment.providerState or {}) if environment is not None else {}
+                    )
                 session.commit()
 
             # `modelRepo` must be the actual Hugging Face repo id (e.g.
@@ -138,20 +144,37 @@ class AzureDeployer:
             revision = str(context.modelConfig.get("resolvedCheckpointRef") or "main")
             serving_settings = context.inferenceConfig.get("servingSettings") or {}
             extra_args = _serving_settings_to_extra_args(serving_settings)
+            variables = (provider_state.get("terraform") or {}).get("variables") or {}
+            group = provider_state.get("resourceGroupName")
+            retained_group = variables.get("existing_resource_group_name")
+            prefix = variables.get("name_prefix")
+            if retained_group is not None and (
+                not isinstance(retained_group, str)
+                or not isinstance(group, str)
+                or retained_group.lower() != group.lower()
+                or not isinstance(prefix, str)
+                or not prefix
+            ):
+                raise ValueError(
+                    "Persisted retained demo deployment scope is missing or inconsistent."
+                )
+            job_input = {
+                "environmentId": context.environmentId,
+                "modelRepo": model_repo,
+                "revision": revision,
+                "hfToken": context.hfToken,
+                "extraArgs": extra_args,
+            }
+            if group is not None:
+                job_input["resourceGroupName"] = group
+            if prefix is not None:
+                job_input["namePrefix"] = prefix
             job_result = self._job_dispatcher(
                 self._settings.container_apps_resource_group or "",
                 self._settings.job_name_model_deployment or "",
                 {
                     "WORKFLOW_ID": workflow_id,
-                    "JOB_INPUT_JSON": json.dumps(
-                        {
-                            "environmentId": context.environmentId,
-                            "modelRepo": model_repo,
-                            "revision": revision,
-                            "hfToken": context.hfToken,
-                            "extraArgs": extra_args,
-                        }
-                    ),
+                    "JOB_INPUT_JSON": json.dumps(job_input),
                 },
             )
 

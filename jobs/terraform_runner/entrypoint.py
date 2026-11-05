@@ -78,6 +78,7 @@ from azure.core.exceptions import AzureError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from common.azure_demo_vm import demo_resource_names  # noqa: E402
 from common.callback_client import (  # noqa: E402
     CallbackClientError,
     WorkflowCallbackClient,
@@ -184,7 +185,11 @@ def _validate_group_ownership(
     if not state_file.exists():
         return
     state = _validate_state(state_file.read_bytes())
-    expected = existing or f"rg-llm-demo-{environment_id}"
+    expected, vm_name, nic_name = demo_resource_names(
+        environment_id,
+        variables.get("name_prefix", "llm"),
+        resource_group_name=existing,
+    )
     for resource in state["resources"]:
         if not isinstance(resource, dict):
             raise TerraformRunError("Invalid resource state.", stdout="", stderr="")
@@ -242,6 +247,46 @@ def _validate_group_ownership(
                     if not isinstance(name, str) or name.lower() != expected.lower():
                         raise TerraformRunError(
                             "Terraform resource group does not match the environment owner.",
+                            stdout="",
+                            stderr="",
+                        )
+                    expected_name = (
+                        vm_name
+                        if resource_type == "azurerm_linux_virtual_machine"
+                        else nic_name
+                    )
+                    name = attributes.get("name")
+                    if (
+                        not isinstance(name, str)
+                        or name.lower() != expected_name.lower()
+                    ):
+                        raise TerraformRunError(
+                            "Terraform resource name does not match the environment owner.",
+                            stdout="",
+                            stderr="",
+                        )
+                else:
+                    parent = attributes.get("virtual_machine_id")
+                    suffix = (
+                        f"/resourceGroups/{expected}/providers/Microsoft.Compute/"
+                        f"virtualMachines/{vm_name}"
+                    )
+                    if not isinstance(parent, str) or not parent.lower().endswith(
+                        suffix.lower()
+                    ):
+                        raise TerraformRunError(
+                            "Terraform driver parent does not match the environment owner.",
+                            stdout="",
+                            stderr="",
+                        )
+                    subscription = variables.get("subscription_id")
+                    if (
+                        subscription is not None
+                        and parent.lower()
+                        != f"/subscriptions/{subscription}{suffix}".lower()
+                    ):
+                        raise TerraformRunError(
+                            "Terraform driver subscription does not match the environment owner.",
                             stdout="",
                             stderr="",
                         )
