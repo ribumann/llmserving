@@ -133,6 +133,78 @@ def identity(*, protected: bool) -> None:
             raise shared.SharedError("Retained group ownership is unverified.")
 
 
+def owned_endpoint_ipconfigurations() -> set[str]:
+    endpoint_id = scope.RESOURCES["azurerm_private_endpoint.vault"]["id"]
+    subnet_id = scope.RESOURCES["azurerm_subnet.private_endpoints"]["id"]
+    endpoint = shared.arm(endpoint_id, "2023-09-01")
+    properties = endpoint.get("properties") if isinstance(endpoint, dict) else None
+    subnet = properties.get("subnet") if isinstance(properties, dict) else None
+    interfaces = (
+        properties.get("networkInterfaces") if isinstance(properties, dict) else None
+    )
+    if (
+        not isinstance(endpoint, dict)
+        or not scope.equal(endpoint.get("id"), endpoint_id)
+        or endpoint.get("tags") != scope.TAGS
+        or not isinstance(subnet, dict)
+        or not scope.equal(subnet.get("id"), subnet_id)
+        or not isinstance(interfaces, list)
+        or len(interfaces) != 1
+        or not isinstance(interfaces[0], dict)
+    ):
+        raise shared.SharedError(
+            "Owned vault endpoint subnet/NIC binding is unverified."
+        )
+    nic_id = interfaces[0].get("id")
+    prefix = f"{scope.ROOT}/providers/Microsoft.Network/networkInterfaces/"
+    if (
+        not isinstance(nic_id, str)
+        or not nic_id.casefold().startswith(prefix.casefold())
+        or not nic_id[len(prefix) :]
+        or "/" in nic_id[len(prefix) :]
+    ):
+        raise shared.SharedError(
+            "Owned endpoint NIC is outside the exact shared group."
+        )
+    nic = shared.arm(nic_id, "2023-09-01")
+    details = nic.get("properties") if isinstance(nic, dict) else None
+    parent = details.get("privateEndpoint") if isinstance(details, dict) else None
+    configurations = (
+        details.get("ipConfigurations") if isinstance(details, dict) else None
+    )
+    if (
+        not isinstance(nic, dict)
+        or not scope.equal(nic.get("id"), nic_id)
+        or not isinstance(parent, dict)
+        or not scope.equal(parent.get("id"), endpoint_id)
+        or details.get("virtualMachine") is not None
+        or not isinstance(configurations, list)
+        or len(configurations) != 1
+    ):
+        raise shared.SharedError(
+            "Endpoint NIC reverse binding/IP configuration is unverified."
+        )
+    configuration = configurations[0]
+    values = (
+        configuration.get("properties") if isinstance(configuration, dict) else None
+    )
+    selected_subnet = values.get("subnet") if isinstance(values, dict) else None
+    name = configuration.get("name") if isinstance(configuration, dict) else None
+    identifier = configuration.get("id") if isinstance(configuration, dict) else None
+    if (
+        not isinstance(name, str)
+        or not name
+        or "/" in name
+        or not scope.equal(identifier, f"{nic_id}/ipConfigurations/{name}")
+        or not isinstance(selected_subnet, dict)
+        or not scope.equal(selected_subnet.get("id"), subnet_id)
+    ):
+        raise shared.SharedError(
+            "Endpoint NIC IP configuration exact subnet binding differs."
+        )
+    return {identifier.casefold()}
+
+
 def reject_attached_children(records: dict) -> None:
     for address, record in records.items():
         if not address.startswith("azurerm_subnet."):
@@ -149,13 +221,46 @@ def reject_attached_children(records: dict) -> None:
             children = properties.get(field, [])
             if not isinstance(children, list):
                 raise shared.SharedError("Malformed live subnet attachment metadata.")
-            if field == "privateEndpoints":
+            if (
+                field == "privateEndpoints"
+                and address == "azurerm_subnet.private_endpoints"
+            ):
                 allowed = scope.RESOURCES["azurerm_private_endpoint.vault"]["id"]
                 if all(
                     isinstance(item, dict) and scope.equal(item.get("id"), allowed)
                     for item in children
                 ):
                     continue
+            if (
+                field == "ipConfigurations"
+                and children
+                and address == "azurerm_subnet.private_endpoints"
+            ):
+                endpoint = scope.RESOURCES["azurerm_private_endpoint.vault"]["id"]
+                endpoints = properties.get("privateEndpoints")
+                if (
+                    not isinstance(endpoints, list)
+                    or len(endpoints) != 1
+                    or not isinstance(endpoints[0], dict)
+                    or not scope.equal(endpoints[0].get("id"), endpoint)
+                    or any(
+                        not isinstance(item, dict)
+                        or not isinstance(item.get("id"), str)
+                        for item in children
+                    )
+                ):
+                    raise shared.SharedError(
+                        "Subnet NIC attachment lacks exact owned endpoint."
+                    )
+                identifiers = [item["id"].casefold() for item in children]
+                if (
+                    len(set(identifiers)) != len(identifiers)
+                    or set(identifiers) != owned_endpoint_ipconfigurations()
+                ):
+                    raise shared.SharedError(
+                        "Subnet IP attachment differs from verified owned endpoint NIC."
+                    )
+                continue
             if children:
                 raise shared.SharedError(
                     "Subnet has active attachments; never cascade-delete dependencies."
