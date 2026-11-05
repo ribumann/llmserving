@@ -118,6 +118,15 @@ The API image retains the real ray-project LLMPerf commit
 commit, not install a different PyPI package named `llmperf`.
 Runtime smoke containers use no network and receive no cloud credentials.
 
+Manual main-only Runtime CI can additionally export checked release-candidate
+archives (`package_release=true`). Ordinary CI keeps this off. The complete
+manifest requires every runtime job to pass; a partial attempt is not a release.
+Credential-free tests cover exact source/run/attempt binding, all eight required
+components, corrupted/missing archives, path/symlink rejection and the opt-in
+workflow guards. The archive SHA-256 and Docker config ID do not establish an
+actual registry pull digest, signed provenance or Azure readiness. See
+[candidate handling and limits](AZURE.md#credential-free-checked-artifact-candidates).
+
 ## Real local API and small-model validation
 
 The read-only `Real local API` workflow uses actual loopback HTTP services:
