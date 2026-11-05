@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from time import monotonic, sleep
 from urllib.parse import urlparse
@@ -179,6 +180,26 @@ def test_real_local_api_flow() -> None:
             assert prompt["responseText"].strip()
             assert prompt["timing"]["ttftMs"] > 0
             evidence["prompt"] = prompt
+            if os.getenv("LIVE_BROWSER_ENABLED") == "1":
+                subprocess.run(
+                    ["npm", "test", "--", "--config=playwright.live.config.ts"],
+                    cwd=Path(__file__).resolve().parents[3] / "e2e",
+                    env={
+                        **os.environ,
+                        "LIVE_ENVIRONMENT_ID": environment_id,
+                        "LIVE_DEPLOYMENT_REVISION_ID": revision,
+                    },
+                    check=True,
+                    timeout=180,
+                )
+                browser = json.loads(Path(os.environ["LIVE_BROWSER_EVIDENCE_FILE"]).read_text())
+                assert browser["passed"] and browser["revisionId"] == revision
+                assert browser["model"]["digest"] == expected_digest
+                evidence["browser"] = browser
+                evidence["scope"] = (
+                    "CPU-only real browser/API; local-demo, not Azure SSO, LLMPerf "
+                    "or benchmark acceptance"
+                )
             golden_id = None
             for kind, definition in (
                 ("quality-golden", f"{prefix}-golden"),
