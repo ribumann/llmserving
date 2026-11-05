@@ -60,6 +60,18 @@ gate. See [state ownership and the private plan guard](../docs/TERRAFORM_STATE.m
    failure until the corresponding image is pushed (`az acr build ...`) and the variable is set to
    the real tag. This is expected and mirrors the former `infra/app-host` module's bring-up
    behavior — infra validates independently of application code being ready.
+   Clean private-network applies may set `manage_database_url_secret=true` to
+   write the PostgreSQL URL into the shared private vault after database
+   creation and before the backend revision. This requires an actual approved
+   private Terraform executor with narrow vault secret-write access, not an
+   external runner or ARM permission alone. The default retains external
+   secret seeding. See the [complete app bootstrap ordering](../docs/APP_BOOTSTRAP.md#database-secret-and-full-apply-ordering);
+   no targeted apply or authentication bypass is needed.
+   The keyless Premium Functions route also requires the reviewed
+   `functions_package_sha256`: a private digest-named Blob package replaces
+   Azure Files/account-key content storage. Upload that exact ZIP with OAuth
+   after full apply and then restart/sync triggers; see
+   [Functions package startup](../docs/APP_BOOTSTRAP.md#functions-deployment-and-startup).
 3. `infra/demo` — applied once per Demo Environment, not by an operator running Terraform
    directly. The `terraform_runner` Container Apps Job (defined in `infra/control`) executes this
    module against a per-environment backend state key inside `infra/control`'s `tfstate` storage

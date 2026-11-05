@@ -117,6 +117,8 @@ def control_inputs(contract: dict) -> dict:
         "existing_sso_tenant_id": TENANT,
         "existing_sso_secret_id": f"https://{contract['vault_name']}.vault.azure.net/secrets/{SECRET_NAME}",
         "auth_allowed_email_domains": ",".join(contract["allowed_email_domains"]),
+        "functions_package_sha256": contract["functions_sha256"],
+        "manage_database_url_secret": True,
         **{f"{name}_image": image for name, image in contract["images"].items()},
     }
 

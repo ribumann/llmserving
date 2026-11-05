@@ -76,6 +76,8 @@ class BootstrapTests(unittest.TestCase):
         self.assertTrue(values["enable_sso"])
         self.assertEqual(values["auth_allowed_email_domains"], "liberatetheinnerchild.net")
         self.assertEqual(values["existing_sso_client_id"], bootstrap.CLIENT)
+        self.assertEqual(values["functions_package_sha256"], contract["functions_sha256"])
+        self.assertTrue(values["manage_database_url_secret"])
         self.assertEqual(values["existing_sso_secret_id"],
                          "https://synthetic-vault.vault.azure.net/secrets/sso-client-secret")
 
