@@ -5,6 +5,22 @@ private Azure blob state, then invokes Terraform with a local backend. This
 guide documents fail-closed transfer and worker leasing, not a full remote backend or
 complete reproducible Azure bootstrap certification.
 
+## Optional keyless storage proposal
+
+[`infra/bootstrap`](../infra/bootstrap) creates only a new state account,
+blob-service recovery settings and `tfstate` container through ARM in a required
+existing group, using fresh local bootstrap state. It does not own the group,
+duplicate shared's ACR/control's runtime storage, list storage keys, grant roles
+or migrate state. Its OAuth/OIDC backend outputs propose separate
+`bootstrap.tfstate`, `shared.tfstate` and `control.tfstate` keys; existing
+shared/control/demo local-state wiring and the worker protocol below are unchanged.
+
+**Current data-plane access is not authorized.** Owner management rights do not
+provide OAuth blob data access. Explicit user approval for Storage Blob Data
+Contributor at the exact new account is required before grant, use or migration.
+The source and mocked plans are not an applied storage backend, permission
+check, locking/restore proof or clean-bootstrap certification.
+
 ## Required behavior
 
 Both `TF_STATE_STORAGE_ACCOUNT` and `TF_STATE_CONTAINER` must be configured in
