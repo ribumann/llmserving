@@ -2,10 +2,10 @@ name: Cloud safety CI
 
 on:
   pull_request:
-    paths: ["scripts/azure_canary.py", "scripts/azure_disk_probe.py", "scripts/azure_release_preflight.py", "scripts/azure_release_import.py", "scripts/release_bundle.py", "scripts/validate_*_plan.py", "scripts/tests/**", ".github/workflows/**", "docs/AZURE_CANARY.md"]
+    paths: ["scripts/azure_canary.py", "scripts/azure_disk_probe.py", "scripts/azure_release_preflight.py", "scripts/azure_release_import.py", "scripts/azure_shared_lifecycle.py", "scripts/release_bundle.py", "scripts/validate_*_plan.py", "scripts/tests/**", ".github/workflows/**", "docs/AZURE_CANARY.md"]
   push:
     branches: [main]
-    paths: ["scripts/azure_canary.py", "scripts/azure_disk_probe.py", "scripts/azure_release_preflight.py", "scripts/azure_release_import.py", "scripts/release_bundle.py", "scripts/validate_*_plan.py", "scripts/tests/**", ".github/workflows/**", "docs/AZURE_CANARY.md"]
+    paths: ["scripts/azure_canary.py", "scripts/azure_disk_probe.py", "scripts/azure_release_preflight.py", "scripts/azure_release_import.py", "scripts/azure_shared_lifecycle.py", "scripts/release_bundle.py", "scripts/validate_*_plan.py", "scripts/tests/**", ".github/workflows/**", "docs/AZURE_CANARY.md"]
   workflow_dispatch: {}
 
 permissions:
@@ -26,3 +26,23 @@ jobs:
       - name: Inspect fixed public disk pricing without Azure credentials or resource mutation
         if: github.event_name == 'workflow_dispatch'
         run: python scripts/azure_disk_probe.py quote
+
+  staged-shared-schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: "1.16.6"
+          terraform_wrapper: false
+      - name: Stage exact fallback provider/backend overrides without Azure credentials
+        run: >-
+          python scripts/azure_shared_lifecycle.py stage-check
+          --destination "$RUNNER_TEMP/shared-schema"
+      - name: Validate actual resolved provider schema without initializing remote state
+        run: |
+          terraform -chdir="$RUNNER_TEMP/shared-schema" init -backend=false -input=false -no-color
+          terraform -chdir="$RUNNER_TEMP/shared-schema" validate -no-color

@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: azure-fallback-release-import
+  group: azure-fallback-shared-lifecycle
   cancel-in-progress: false
 
 jobs:
