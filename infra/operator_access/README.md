@@ -61,6 +61,51 @@ OAuth blob/lease checks and invoke the reviewed Terraform 1.16.6 control plan
 from the canonical private directory. Private blob access is not migration,
 locking recovery or restore proof.
 
+## Guarded initial local execution
+
+After review/CI, shared29 completion and the actual native seven-create check,
+arm the independent protected-main cleanup with **the same** public root
+fingerprint and a fixed deadline no later than the already-armed shared
+deadline. Set repository variables `OPERATOR_ACCESS_CLEANUP_ARMED=true`,
+`OPERATOR_ACCESS_ROOT_SHA256=<PUBLIC-ROOT-SHA256>` and
+`OPERATOR_ACCESS_EXPIRES_AT=<FIXED-UTC-DEADLINE>`, then dispatch:
+
+```text
+gh workflow run azure-operator-access-cleanup.yml --repo ribumann/llmserving \
+  --ref main -f cleanup_now=false
+```
+
+Require actual successful attempt1 on protected main, no older than 30 minutes.
+Before the deadline this performs ARM identity/ownership/inventory checks,
+not deletion. Do not extend the existing campaign deadline automatically.
+No concurrent shared cleanup or apply may run. To stop independently,
+dispatch the same cleanup workflow with `cleanup_now=true`.
+
+From the restricted canonical **operator_access** directory, use native
+Terraform **1.16.6**, fresh full private saved plan and public target JSON
+containing only public certificate DER/hash/expiry. A verified second backup
+must be outside the canonical module and retain appropriate host ACLs:
+
+```text
+python <reviewed-source>/scripts/azure_operator_apply.py \
+  --plan <PRIVATE-main-operator-access-create.tfplan> \
+  --private-log <NEW-PRIVATE-operator-apply.log> \
+  --target <PRIVATE-PUBLIC-ONLY-main-operator-access-target.json> \
+  --second-backup <RESTRICTED-EXTERNAL-BACKUP-DIRECTORY> \
+  --cleanup-run <RECENT-SUCCESSFUL-OPERATOR-CLEANUP-RUN>
+```
+
+This wrapper executes a private copied plan only after the unchanged exact
+seven-create native guard, complete owned shared infrastructure, absent
+operator resources, registered policy-required public-IP feature, default
+workspace/local backend, matching cleanup variables/run and fixed deadline.
+It preserves verified before/after checkpoints even on apply failure.
+Existing local state, partial failure or lost state cannot be retried/adopted
+automatically. Preserve logs/checkpoints for separate reviewed reconciliation.
+The operator PIP mirrors shared lifecycle `ignore_changes=[ip_tags,zones]` so
+enforced platform policy's appended IP tags are not removed by Terraform;
+this is not policy exemption or public-IP tag removal.
+
 ## Cost and teardown budget
 
 **Live retail pricing could not be retrieved from this execution host**
