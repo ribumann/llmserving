@@ -118,3 +118,58 @@ not an arbitrary-code/ownership sandbox. They make no Azure calls and prove neit
 availability, actual apply, usable blob access, locking, restore nor deployment.
 The credential-free Infra CI matrix includes this module; no deployment
 workflow or Azure write permission is added.
+
+## Initial saved-plan execution gate
+
+Before any independently authorized bootstrap apply, use
+[`validate_bootstrap_plan.py`](../../scripts/validate_bootstrap_plan.py) from
+the **initialized, independently reviewed bootstrap module directory**, with
+the same approved provider authentication environment. This is separate from
+the AzureRM retained-group guard: that guard does not validate AzAPI parents.
+Keep the native plan, state, expected-target JSON and log private. Create the
+target JSON independently from approved inputs, not by extracting whatever
+the plan happens to select. It must contain exactly `subscription_id`,
+`tenant_id`, `existing_resource_group_name`, `location`, `name_prefix`, `stage`
+and `tags` (the complete exact expected account tag map).
+
+```bash
+python ../../scripts/validate_bootstrap_plan.py \
+  --plan /approved/private/bootstrap.tfplan \
+  --expected-target /approved/private/bootstrap-target.json \
+  --private-log /approved/private/new-bootstrap-guard.log
+```
+
+Default execution **checks only**. Only an independently authorized execution
+adds `--apply`, with a new log path; the guard then applies the exact same
+private copied binary plan that `terraform show -json` validated. Terraform's
+native stale-plan checks still apply. The private copy/log are mode 0600
+inside a temporary mode-0700 directory (log path is operator-selected).
+The guard strips inherited `TF_CLI_ARGS*`/`TF_LOG*`; Terraform errors/output
+remain in the private log, never a public payload dump.
+
+The initial gate requires exactly the three reviewed AzAPI managed addresses,
+create-only changes with no prior managed resources/import/move/update/delete,
+the exact pinned APIs/provider, explicit target inputs, known account parent,
+exact security/recovery bodies, names and tags, and resolved tenant/group data
+reads. Unknown critical security fields, extra resources/providers/modules and
+foreign or ambiguous parents fail closed.
+
+Fresh child IDs are normally unknown. In that case the guard requires exactly
+the reviewed configuration dependency on `azapi_resource.state.id` for the
+blob service and `azapi_resource.blobs.id` for the container, while binding the
+known account parent to the exact approved group. Empty nested unknown-metadata
+objects do not mean the security properties are unknown. Terraform JSON
+references **do not encode full expression semantics**: a malicious expression
+can mention the right resource while computing a foreign ID. Consequently
+this is an execution gate for the **reviewed module**, not a sandbox or
+approval for arbitrary Terraform code/provider binaries/environment.
+Do not substitute unreviewed module code, use targeting, edit plan JSON, or
+retry against an existing account/state. State refresh/update/recovery needs
+a separate reviewed gate; this script intentionally refuses it.
+
+Credential-free unit tests mirror native first-plan shapes and reject malformed
+targets/payloads, foreign parent chains, roles/extra resources, prior state,
+shared keys/public access and unknown security. They also verify private-copy
+check-only/apply behavior without invoking Azure. Passing this guard is not
+permission to create storage or grant/use data access, nor evidence of apply,
+migration, actual backend locking, restore or complete deployment.
