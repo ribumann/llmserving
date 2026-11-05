@@ -763,3 +763,20 @@ private before/after checkpoints even if apply fails. A second failure or
 changed canonical hash is a new incident requiring review, not another retry.
 Successful scope checks are not a claim that Azure allocation or the
 subsequent application deployment succeeds.
+# Retained platform storage event topic
+
+The actual retained state account acquired one platform-created Event Grid
+system topic, `llmreleasestate0ea5e6-e8ee3cde-435b-41d3-bd0b-ec07e5d98c99`.
+Operator evidence identified its creator as the Microsoft.EventGrid
+application and its sole `StorageAntimalwareSubscription` WebHook
+subscription. This is evidence of storage antimalware automation, **not**
+a separate assertion that Defender configuration was checked.
+
+Shared/operator inventory now recognizes this **exact** topic only after
+GET-verifying its full ID, region, Storage account source, topic type and
+Succeeded state, plus the exact sole successful subscription identity/type.
+Pagination, extra subscriptions, foreign source/ID or changed metadata stop
+the operation. No endpoint URL is logged. Recognition is preserve-only:
+neither resource enters Terraform state, delete lists or ownership adoption.
+Cleanup preserves the topic, subscription and retained account/grants; it
+never deletes/disables platform security automation to make a guard pass.
