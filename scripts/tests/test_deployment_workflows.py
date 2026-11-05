@@ -24,11 +24,15 @@ class DeploymentWorkflowTests(unittest.TestCase):
         for name in ("backend", "frontend"):
             source = (ROOT / ".github" / "workflows" / f"{name}.yml").read_text()
             read_only, deployment = source.split("\n  deploy:\n", 1)
-            keys = COMMON_KEYS + (("BACKEND_CONTAINER_APP_NAME",) if name == "frontend" else ())
+            keys = COMMON_KEYS + (
+                ("BACKEND_CONTAINER_APP_NAME",) if name == "frontend" else ()
+            )
             yield name, read_only, deployment, keys
 
     def mask_script(self, deployment):
-        script = deployment.split("python - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+        script = deployment.split("python - <<'PY'\n", 1)[1].split("\n          PY", 1)[
+            0
+        ]
         return textwrap.dedent(script)
 
     def execute(self, deployment, environment):
@@ -48,7 +52,9 @@ class DeploymentWorkflowTests(unittest.TestCase):
                 self.assertIn(LOGIN, deployment)
                 self.assertNotIn("uses: azure/login@v", deployment)
                 self.assertIn("persist-credentials: false", deployment)
-                self.assertLess(deployment.index("python - <<'PY'"), deployment.index(LOGIN))
+                self.assertLess(
+                    deployment.index("python - <<'PY'"), deployment.index(LOGIN)
+                )
                 for identifier in (
                     "AZURE_RESOURCE_GROUP",
                     "AZURE_ACR_NAME",
@@ -58,7 +64,9 @@ class DeploymentWorkflowTests(unittest.TestCase):
                     self.assertIn("${{ secrets." + identifier + " }}", deployment)
                     self.assertNotIn("${{ vars." + identifier + " }}", deployment)
 
-    def test_deployment_remains_protected_opt_in_and_pr_checks_have_no_credentials(self):
+    def test_deployment_remains_protected_opt_in_and_pr_checks_have_no_credentials(
+        self,
+    ):
         for name, read_only, deployment, _ in self.deployments():
             with self.subTest(workflow=name):
                 self.assertIn("github.event_name == 'workflow_dispatch'", deployment)
@@ -87,15 +95,22 @@ class DeploymentWorkflowTests(unittest.TestCase):
         for name, _, deployment, keys in self.deployments():
             for missing in keys:
                 with self.subTest(workflow=name, missing=missing):
-                    environment = {key: f"test-{key.lower()}" for key in keys if key != missing}
+                    environment = {
+                        key: f"test-{key.lower()}" for key in keys if key != missing
+                    }
                     result = self.execute(deployment, environment)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(
-                        f"Missing protected deployment configuration: {missing}", result.stderr
+                        f"Missing protected deployment configuration: {missing}",
+                        result.stderr,
                     )
                     self.assertEqual(
                         result.stdout.splitlines(),
-                        [f"::add-mask::{environment[key]}" for key in keys if key != missing],
+                        [
+                            f"::add-mask::{environment[key]}"
+                            for key in keys
+                            if key != missing
+                        ],
                     )
                     for value in environment.values():
                         self.assertNotIn(value, result.stderr)
@@ -115,11 +130,155 @@ class DeploymentWorkflowTests(unittest.TestCase):
 
     def test_resolved_backend_hostname_is_masked_before_later_step_environment(self):
         frontend = next(
-            deployment for name, _, deployment, _ in self.deployments() if name == "frontend"
+            deployment
+            for name, _, deployment, _ in self.deployments()
+            if name == "frontend"
         )
         self.assertLess(
-            frontend.index('echo "::add-mask::$fqdn"'), frontend.index('echo "fqdn=$fqdn"')
+            frontend.index('echo "::add-mask::$fqdn"'),
+            frontend.index('echo "fqdn=$fqdn"'),
         )
+
+
+class FallbackCanaryWorkflowTests(unittest.TestCase):
+    keys = COMMON_KEYS[:3] + ("AZURE_CANARY_RESOURCE_GROUP", "AZURE_CANARY_REGION")
+
+    def workflows(self):
+        for filename in (
+            "azure-fallback-oidc-canary.yml",
+            "azure-fallback-canary-cleanup.yml",
+        ):
+            yield filename, (ROOT / ".github" / "workflows" / filename).read_text()
+
+    def test_protected_fallback_target_and_pinned_actions(self):
+        for filename, source in self.workflows():
+            with self.subTest(workflow=filename):
+                self.assertIn("environment: azure-e2e-fallback\n", source)
+                self.assertIn("github.ref == 'refs/heads/main'", source)
+                self.assertIn("github.repository == 'ribumann/llmserving'", source)
+                self.assertNotIn("${{ vars.", source)
+                self.assertIn(CHECKOUT, source)
+                self.assertIn(LOGIN, source)
+                self.assertIn("persist-credentials: false", source)
+                for key in self.keys:
+                    self.assertIn("${{ secrets." + key + " }}", source)
+                for key in COMMON_KEYS[:3]:
+                    self.assertIn("${{ env." + key + " }}", source)
+                validation = (
+                    "python scripts/azure_canary.py validate-config --target fallback"
+                )
+                self.assertLess(source.index("python - <<'PY'"), source.index(CHECKOUT))
+                self.assertLess(source.index(CHECKOUT), source.index(validation))
+                self.assertLess(source.index(validation), source.index(LOGIN))
+                operation = "cleanup" if "cleanup" in filename else "create"
+                self.assertIn(
+                    f"python scripts/azure_canary.py {operation} --target fallback",
+                    source,
+                )
+                self.assertNotIn("pull_request:", source)
+                self.assertNotIn("push:", source)
+
+    def test_same_fallback_concurrency_and_independent_trusted_cleanup(self):
+        sources = dict(self.workflows())
+        for source in sources.values():
+            concurrency = source.split("concurrency:\n", 1)[1].split("\njobs:", 1)[0]
+            self.assertIn("group: azure-fallback-oidc-canary-resource", concurrency)
+            self.assertIn("cancel-in-progress: false", concurrency)
+        cleanup = sources["azure-fallback-canary-cleanup.yml"]
+        self.assertIn("workflows: [Azure fallback OIDC canary]", cleanup)
+        self.assertIn("types: [completed]", cleanup)
+        self.assertIn("branches: [main]", cleanup)
+        self.assertIn("schedule:", cleanup)
+        self.assertIn("workflow_dispatch:", cleanup)
+        self.assertIn("ref: main", cleanup)
+        self.assertIn("github.event.workflow_run.event == 'workflow_dispatch'", cleanup)
+        self.assertIn(
+            "github.event.workflow_run.head_repository.full_name == github.repository",
+            cleanup,
+        )
+        self.assertNotIn("actions/download-artifact", cleanup)
+        self.assertNotIn("${{ github.event.workflow_run.head_sha }}", cleanup)
+
+    def test_prelogin_masking_and_missing_configuration(self):
+        for filename, source in self.workflows():
+            script = DeploymentWorkflowTests.mask_script(self, source)
+            for missing in (None, *self.keys):
+                with self.subTest(workflow=filename, missing=missing):
+                    environment = {
+                        key: f"test-{key}" for key in self.keys if key != missing
+                    }
+                    result = subprocess.run(
+                        [sys.executable, "-c", script],
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    self.assertEqual(result.returncode == 0, missing is None)
+                    self.assertEqual(
+                        result.stdout.splitlines(),
+                        [
+                            f"::add-mask::{environment[key]}"
+                            for key in self.keys
+                            if key != missing
+                        ],
+                    )
+                    if missing:
+                        self.assertIn(missing, result.stderr)
+                        for value in environment.values():
+                            self.assertNotIn(value, result.stderr)
+
+    def test_masking_escapes_control_characters(self):
+        for filename, source in self.workflows():
+            with self.subTest(workflow=filename):
+                environment = dict.fromkeys(self.keys, "test-value")
+                environment[self.keys[0]] = "test%\r\n::warning::not-a-workflow-command"
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        DeploymentWorkflowTests.mask_script(self, source),
+                    ],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(
+                    result.stdout.splitlines()[0],
+                    "::add-mask::test%25%0D%0A::warning::not-a-workflow-command",
+                )
+                self.assertEqual(len(result.stdout.splitlines()), len(self.keys))
+
+    def test_exact_federated_subject_is_masked_before_login(self):
+        for filename, source in self.workflows():
+            with self.subTest(workflow=filename):
+                environment = dict.fromkeys(self.keys, "test-value")
+                environment.update(
+                    GITHUB_REPOSITORY="ribumann/llmserving",
+                    GITHUB_REPOSITORY_OWNER_ID="123",
+                    GITHUB_REPOSITORY_ID="456",
+                )
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        DeploymentWorkflowTests.mask_script(self, source),
+                    ],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode, 0)
+                self.assertIn(
+                    "::add-mask::repo:ribumann@123/llmserving@456:environment:azure-e2e-fallback",
+                    result.stdout.splitlines(),
+                )
 
 
 if __name__ == "__main__":
