@@ -373,6 +373,56 @@ not a signed provenance attestation, dependency lock, reproducible rebuild,
 public GitHub release or proof of cloud deployment. No model weights, secrets,
 Terraform state or database contents are bundled.
 
+### Consume the retained candidate without rebuilding
+
+`azure-fallback-release-import.yml` is a protected `main`-only manual consumer
+of Runtime CI run `42031238122`, attempt `1`, source
+`1f9f15f2c7046c81f9b988170d77ea3750a3ac65`. The expected identity is fixed
+in reviewed source, never chosen by the downloaded manifest. It verifies the
+successful producer attempt through GitHub and the fixed reviewed manifest
+SHA-256 `2392632e34ff4622fdb4ab311637e9e70767cccb2b2ae91f1632b3451c2a3c7a`,
+hashes all eight actual downloads,
+then Docker-loads the seven checked images and compares Linux/amd64 config IDs.
+It does not run their application entrypoints or claim new runtime acceptance.
+
+```sh
+gh workflow run azure-fallback-release-import.yml --repo ribumann/llmserving \
+  --ref main --field push_to_registry=false
+```
+
+The default above performs **no Azure login or resource mutation**. Candidate
+expiry or missing files fail closed; this workflow cannot select a replacement
+build. A new candidate requires a reviewed source change.
+
+Only after the approved persistence/provisioning/independent-cleanup gates have
+created the shared registry may an authorized operator explicitly select
+`push_to_registry=true`. The same download/hash/Docker-load gate completes
+**before** OIDC login. Publication accepts only the existing
+`llmreleaseacr0ea5e6` Basic registry in `rg-llmserving-e2e-shared`, Italy North,
+with the fixed fallback subscription/principal, campaign/shared/stage tags and
+admin credentials disabled. It never creates or adopts a registry/group, grants
+roles, generates credentials, or falls back to another identity.
+
+Images use `tested-<source-sha>` tags. An existing tag must first pull to the
+expected config ID; a different image is rejected without overwrite. Missing
+tags are published through a unique source-bound upload tag and ACR's server-side
+**NoForce** import (never `--force`), so a concurrently created source tag cannot
+be overwritten between inventory and publication. The verified upload tag is
+untagged after successful promotion; failures can leave a source-bound upload
+tag in the owned registry for operator inspection or whole-registry cleanup. Each
+published image is pulled by its **actual registry manifest digest**, checked
+against the tested config ID, and its tag and manifest write/delete flags are
+disabled and read back. Privileged registry administrators can change those flags; deployment
+must use the recorded digest references, not trust a tag. A partial push/lock
+failure fails the run; an exact-image rerun can finish the remaining work.
+No registry resources are deleted automatically by this consumer.
+
+Successful nonsecret evidence is retained for seven days as
+`checked-import-<run-id>-<attempt>` and distinguishes download/load-only evidence
+from registry publication. Functions remains a checksum-verified ZIP, not an
+image. Neither mode deploys applications, downloads models, proves full-stack
+cleanup, or supplies the outstanding state-data/auth/ACA permissions.
+
 ### Remaining full release acceptance
 
 1. Establish private, encrypted remote Terraform state with least-privilege

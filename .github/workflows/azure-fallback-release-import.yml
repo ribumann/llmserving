@@ -1,0 +1,90 @@
+name: Azure fallback checked artifact consumption
+
+on:
+  workflow_dispatch:
+    inputs:
+      push_to_registry:
+        description: Push to the already-provisioned owned shared registry (false verifies Docker load only)
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-fallback-release-import
+  cancel-in-progress: false
+
+jobs:
+  consume:
+    if: github.ref == 'refs/heads/main' && github.repository == 'ribumann/llmserving'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: azure-e2e-fallback
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_CORE_OUTPUT: none
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Validate fixed main-only consumer and mask subject before any login
+        run: python scripts/azure_release_import.py validate-config
+      - name: Download the fixed successful attempt manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          repository: ribumann/llmserving
+          run-id: 42031238122
+          name: release-manifest-1
+          path: ${{ runner.temp }}/candidate
+      - name: Download only the seven fixed attempt image archives
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          repository: ribumann/llmserving
+          run-id: 42031238122
+          pattern: release-image-*-1
+          merge-multiple: true
+          path: ${{ runner.temp }}/candidate
+      - name: Download the same-source Functions package for complete bundle verification
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          repository: ribumann/llmserving
+          run-id: 42031238122
+          name: functions-1f9f15f2c7046c81f9b988170d77ea3750a3ac65
+          path: ${{ runner.temp }}/candidate
+      - name: Verify actual downloaded hashes and Docker-load/config IDs without Azure access
+        run: >-
+          python scripts/azure_release_import.py consume
+          --archives "$RUNNER_TEMP/candidate"
+          --result "$RUNNER_TEMP/verified-import.json"
+      - name: Azure OIDC login only for explicitly selected existing-registry publication
+        if: inputs.push_to_registry
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify and publish exact tested images with immutable pull digests and tag locks
+        if: inputs.push_to_registry
+        run: >-
+          python scripts/azure_release_import.py consume --push
+          --archives "$RUNNER_TEMP/candidate"
+          --result "$RUNNER_TEMP/verified-import.json"
+      - name: Retain only successful nonsecret consumption evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: checked-import-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verified-import.json
+          if-no-files-found: error
+          retention-days: 7
