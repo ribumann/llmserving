@@ -39,7 +39,9 @@ The application can accept an externally approved app without granting Graph
 application-write rights to the scoped Actions identity. A compliant,
 tenant-approved operator must provide the following for a **new isolated** app:
 
-- Same-tenant application client UUID and service principal.
+- Approved operator-tenant application client UUID and service principal. The
+  deployment tenant is the default; an explicitly approved external tenant uses
+  `existing_sso_tenant_id` without changing ARM/internal managed-identity tenants.
 - Both exact new callbacks:
   `https://<frontend-fqdn>/.auth/login/aad/callback` and
   `https://<backend-fqdn>/.auth/login/aad/callback`.
@@ -50,7 +52,10 @@ tenant-approved operator must provide the following for a **new isolated** app:
   reaches the backend with the correct signed audience/issuer.
 
 Terraform inputs are paired `existing_sso_client_id` and
-`existing_sso_secret_id`; see [the exact contract](AUTHENTICATION.md).
+`existing_sso_secret_id`, plus optional explicit `existing_sso_tenant_id`; see
+[the exact contract](AUTHENTICATION.md). Backend `AUTH_TENANT_ID` and both
+Easy Auth issuers use that operator tenant. `AZURE_TENANT_ID` remains the ARM/
+internal callback tenant; never replace it globally for cross-tenant sign-in.
 Final callback FQDNs must be known, so external bootstrap may still require an
 operator after planning/reserving endpoint names. ARM/OIDC success cannot
 remove that prerequisite. Never reuse/alter the original app, put credential

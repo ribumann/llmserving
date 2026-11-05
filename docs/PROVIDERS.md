@@ -49,3 +49,16 @@ Capability flags describe checked-in routing, not deployment test evidence.
 In particular, `durableEvaluation=false` must remain honest until golden,
 benchmark, LLMPerf and report semantics match the proven backend path and
 restart/duplicate/cancellation/failure handling has been exercised.
+
+The evaluation worker now imports the backend's pure golden-scoring module
+(exact/contains/regex and final-answer reasoning handling), rather than maintaining
+a second scorer. Its legacy callback keys/statuses remain unchanged. The shared
+scorer also fixes two coupled grading errors in both paths: a reasoning-only
+response cannot pass by mentioning an answer in its trace, and regex patterns
+retain their case instead of being lowercased along with the rule name.
+The legacy performance worker measures successful requests per actual elapsed wall time,
+not summed per-request latencies; it still does **not** implement genuine LLMPerf,
+token throughput, TTFT or ITL. Neither change certifies complete durable parity:
+prompt/model invocation, benchmark execution, report normalization, immutable
+snapshots and durable restart/cancellation/ownership gates remain required.
+No API routing or capability flag is enabled by these preparatory changes.

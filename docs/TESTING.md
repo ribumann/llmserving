@@ -76,6 +76,15 @@ Terraform command behavior; dedicated tests separately assert missing-identity
 and denied-login failures stop before Terraform and that successful login uses
 only `az login --identity`. Production authentication is not disabled for tests.
 
+Terraform state regressions also exercise rejected partial/cloud configuration,
+denied identity/download/upload, malformed state, BlobNotFound versus missing
+container, required destroy state, state-owner mismatch, partial apply failure/
+timeout persistence, and output failures. State failure cannot become a completed
+callback or silently start from empty state. Fixtures explicitly remove inherited
+host markers for local-only cases; separate cloud-marker cases require state.
+These are credential-free HTTP/CLI fixtures, **not** live blob locking or cloud
+recovery certification. See [the state recovery boundary](TERRAFORM_STATE.md).
+
 ## Browser and image validation
 
 Install frontend and E2E lockfiles with `npm ci`; from `e2e`, install Chromium
@@ -89,6 +98,45 @@ The API image retains the real ray-project LLMPerf commit
 commit, not install a different PyPI package named `llmperf`.
 Runtime smoke containers use no network and receive no cloud credentials.
 
+## Real local API and small-model validation
+
+The read-only `Real local API` workflow uses actual loopback HTTP services:
+PostgreSQL 16, the backend in explicit `local-demo` mode, and a digest-pinned
+Ollama container capped at two CPUs/two GiB. It downloads the genuine
+`qwen2.5:0.5b-instruct` model and records its manifest digest. No Azure credentials,
+GPU or remote inference service is used. Network/model-download failure is a
+failed gate, never replaced with an inference mock.
+
+`tests/integration/test_live_ollama.py` is intentionally skipped unless
+`LIVE_API_URL`, `OLLAMA_BASE_URL` and `TEST_DATABASE_URL` point to explicitly
+started disposable loopback services. The database must be `llmserving_ci`;
+run migrations and `python -m src.persistence.seed_catalog` first. From `backend`:
+
+```bash
+LIVE_API_URL=http://127.0.0.1:8000 \
+OLLAMA_BASE_URL=http://127.0.0.1:11434 \
+TEST_DATABASE_URL="$DATABASE_URL" \
+OLLAMA_EXPECTED_DIGEST=a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67 \
+python -m pytest -q -s -o addopts="" tests/integration/test_live_ollama.py
+```
+
+The live API process must separately use `AUTH_MODE=local-demo APP_ENV=test`
+and the same database/Ollama URLs. Required `OLLAMA_EXPECTED_DIGEST` rejects an unexpected
+model version; `FULLSTACK_EVIDENCE_FILE` saves only this synthetic run's evidence.
+The test covers real prompts, two golden cases, immutable versioned configuration,
+single-stream (two requests) and concurrency-10 (ten requests) HTTP performance,
+negative authentication, cancellation, reports and local environment teardown.
+Golden failures are recorded honestly rather than requiring a tiny model to
+achieve a predetermined quality score. One real warmup precedes each measured
+performance workload and is excluded from throughput counts/timing.
+
+These are fixed-prompt CPU smoke workloads, not standardized LLMPerf results,
+benchmark acceptance, real-browser testing or Azure release acceptance. The
+Ollama runner does not synthesize a specified input-token distribution. API-mocked
+Playwright tests remain a separate boundary. Cloud authentication, real Azure
+GPU/networking and independently owned billable-resource cleanup require their
+own evidence.
+
 ## Release evidence
 
 Report exact commit/image/model versions, workload, counts/failures and measured
@@ -98,3 +146,21 @@ as blocked. Passing CI alone is not release acceptance.
 
 See [the canary runbook](AZURE_CANARY.md) for the independent failure/cancellation
 cleanup gate and its deliberately narrow scope.
+
+## Separate operator and deployment tenants
+
+Signed-token regressions exercise a valid external operator tenant, rejection
+of deployment-tenant operator tokens, unchanged domain/audience enforcement,
+and internal managed-identity tokens that must still use the deployment issuer.
+Keys are synthetic, but signature/issuer/audience/tenant checks are real.
+Unset operator tenant preserves existing behavior; invalid explicit tenant
+configuration fails rather than selecting a broader issuer.
+
+Infra CI also runs five native `terraform test` **mocked-provider plans** in
+`infra/control/tests/sso_tenant.tftest.hcl`. They inspect both actual Easy Auth
+JSON bodies and actual backend environment fields, verify external mode creates
+no application/password/SP, preserve managed defaults and reject an invalid
+tenant or an explicit tenant without external app inputs. Every Azure/directory
+provider is mocked and shared-state data is overridden; there is no live plan,
+app/secret/redirect mutation or cloud credential. These tests do not establish
+real Entra consent, platform injection or browser acceptance.

@@ -59,15 +59,10 @@ class OperatorTokenValidator(EntraTokenVerifier):
 
 
 def build_operator_token_validator(settings: Settings) -> OperatorTokenValidator | None:
-    if (
-        settings.auth_mode != "entra-jwt"
-        or not settings.azure_tenant_id
-        or not settings.auth_audience
-    ):
+    tenant_id = settings.auth_tenant_id or settings.azure_tenant_id
+    if settings.auth_mode != "entra-jwt" or not tenant_id or not settings.auth_audience:
         return None
-    return OperatorTokenValidator(
-        tenant_id=settings.azure_tenant_id, audience=settings.auth_audience
-    )
+    return OperatorTokenValidator(tenant_id=tenant_id, audience=settings.auth_audience)
 
 
 def is_exempt_path(path: str, settings: Settings) -> bool:

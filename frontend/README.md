@@ -11,7 +11,7 @@ This frontend is a Vite + React + TypeScript shell for the Azure LLM Serving Dem
 
 ```bash
 cd frontend
-npm install
+npm ci
 ```
 
 ## Run locally
@@ -50,5 +50,24 @@ npx playwright install chromium
 npm test
 ```
 
-The Playwright config starts the frontend dev server automatically and currently includes a single
-app-load smoke test. Scenario coverage for the user stories will be added later.
+The Playwright config starts the frontend automatically. Its nine API-mocked
+scenarios are browser coverage, not genuine inference or Azure SSO validation.
+
+## Production API transport
+
+Production builds default to same-origin `/api`; set `BACKEND_URL=https://<backend-fqdn>`
+on the nginx container at runtime. Do not bake a cloud backend hostname into
+`VITE_API_BASE_URL`: that bypasses the same-origin proxy. Local Vite development
+retains the explicit API URL and optional `VITE_DEMO_USER`; production builds
+never generate a demo identity.
+
+The proxy forwards an Easy Auth ID token as bearer authorization, or preserves
+an explicit bearer token. It strips unsigned identity headers and never invents
+an identity. The backend still validates the JWT signature, tenant, audience,
+expiry and user/domain policy. Upstream HTTPS certificate verification is enabled.
+No token returns 401; missing platform token injection is not a demo fallback.
+
+The real-image smoke uses a synthetic loopback upstream to check path/header
+transport and missing-token rejection. It does not validate an Entra session.
+Actual platform ID-token injection and authenticated browser requests remain a
+separate release gate; see [authentication prerequisites](../docs/AUTHENTICATION.md).

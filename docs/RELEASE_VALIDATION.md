@@ -1,22 +1,27 @@
 # Public validation evidence and blocked gates
 
 This is a pre-release evidence record, not full Azure acceptance. Source
-baseline `d5b851647589dd7b05b08f225f327e527571dcd7` includes reviewed PRs
+baseline `119b39d03c87814cbbe9e78d6a261d75a14c0341` includes reviewed PRs
 [1](https://github.com/ribumann/llmserving/pull/1) through
-[7](https://github.com/ribumann/llmserving/pull/7). Feature-branch evidence below
-is explicitly **not merged/released behavior** at this baseline.
+[11](https://github.com/ribumann/llmserving/pull/11), plus
+[13](https://github.com/ribumann/llmserving/pull/13). Each implementation PR
+received independent agentic review and passing checks before merge.
+Named test runs below retain their exact original source SHA; merged code is
+not a claim that an earlier measurement came from a newer combined revision.
 
 ## Passed gates
 
 | Gate | Exact evidence | Boundary |
 | --- | --- | --- |
 | Signed API auth and external SSO inputs | Merged `ba505da1f2d6463ddd29dd8b0d89f25f79b25e9d`; [Runtime](https://github.com/ribumann/llmserving/actions/runs/41928480988) | Signed-token tests, not actual Entra browser consent/session |
-| Effective-SKU quota and honest power states | Merged baseline; [Backend](https://github.com/ribumann/llmserving/actions/runs/41929501210), [Runtime](https://github.com/ribumann/llmserving/actions/runs/41929501372) | Quota/visibility is not physical capacity or warm inference |
+| Effective-SKU quota and honest power states | Merged `d5b851647589dd7b05b08f225f327e527571dcd7`; [Backend](https://github.com/ribumann/llmserving/actions/runs/41929501210), [Runtime](https://github.com/ribumann/llmserving/actions/runs/41929501372) | Quota/visibility is not physical capacity or warm inference |
 | OIDC failure cleanup | Canary SHA `f52fcacffd8734de84cd4443744862982e8f9a71`; [deliberate failure](https://github.com/ribumann/llmserving/actions/runs/41922899569), [independent cleanup](https://github.com/ribumann/llmserving/actions/runs/41922982864) | Fixed managed identity absent; persistent group preserved |
 | OIDC cancellation cleanup | Same canary SHA; [cancelled canary](https://github.com/ribumann/llmserving/actions/runs/41923092659), [independent cleanup](https://github.com/ribumann/llmserving/actions/runs/41923357529) | Not cleanup of billable resources |
-| Genuine local-model API flow | Feature branch `test/real-local-model`, `2c2b65b95e5a39817c13cbb30d59099aaeb5dcba`; [Backend](https://github.com/ribumann/llmserving/actions/runs/41933197656), [Runtime/live evidence](https://github.com/ribumann/llmserving/actions/runs/41933201127) | Independently reviewed; CPU HTTP/PostgreSQL/Ollama, not browser/Azure/LLMPerf |
-| Signed browser proxy transport | Feature branch `fix/browser-auth-transport`, `d7cf35253ad19e17ed3d94aa019508ac1ef00106`; [Frontend](https://github.com/ribumann/llmserving/actions/runs/41931903053), [Runtime nginx smoke](https://github.com/ribumann/llmserving/actions/runs/41931907502), [Terraform](https://github.com/ribumann/llmserving/actions/runs/41932598360) | Independently reviewed; synthetic signed-header transport, not real platform injection or Entra UX |
-| Shared scoring foundation | Feature branch `refactor/shared-runner-semantics`, `61183e9b97140729abec87293454aa3d1ff0293e`; [Backend](https://github.com/ribumann/llmserving/actions/runs/41935634541), [Runtime](https://github.com/ribumann/llmserving/actions/runs/41935637966) | Independently reviewed; 219 backend/77 worker tests and changed-worker Ruff, not complete durable parity |
+| Genuine local-model API flow | [Merged PR 13](https://github.com/ribumann/llmserving/pull/13), `bca486590e5168a91f7bcd79e0bda5276f4ab964`; original measured SHA `2c2b65b95e5a39817c13cbb30d59099aaeb5dcba`, [Backend](https://github.com/ribumann/llmserving/actions/runs/41933197656), [Runtime/live evidence](https://github.com/ribumann/llmserving/actions/runs/41933201127) | CPU HTTP/PostgreSQL/Ollama, not browser/Azure/LLMPerf |
+| Signed browser proxy transport | [Merged PR 10](https://github.com/ribumann/llmserving/pull/10), `119b39d03c87814cbbe9e78d6a261d75a14c0341`; tested SHA `d7cf35253ad19e17ed3d94aa019508ac1ef00106`, [Frontend](https://github.com/ribumann/llmserving/actions/runs/41931903053), [Runtime nginx smoke](https://github.com/ribumann/llmserving/actions/runs/41931907502), [Terraform](https://github.com/ribumann/llmserving/actions/runs/41932598360) | Synthetic signed-header transport, not real platform injection or Entra UX |
+| Shared scoring foundation | [Merged PR 11](https://github.com/ribumann/llmserving/pull/11), `ec70fcd1c27638d0c36f93adc044035e98edc93b`; tested SHA `61183e9b97140729abec87293454aa3d1ff0293e`, [Backend](https://github.com/ribumann/llmserving/actions/runs/41935634541), [Runtime](https://github.com/ribumann/llmserving/actions/runs/41935637966) | 219 backend/77 worker tests and changed-worker Ruff, not complete durable parity |
+| Fail-closed Terraform state persistence | [Merged PR 8](https://github.com/ribumann/llmserving/pull/8), `ab68d71b235c0a1bed3225356b656f60ed34c363`; tested SHA `a931e2238bdbb061358bb7809c70e7129f4dcc8a`, [Runtime](https://github.com/ribumann/llmserving/actions/runs/41974553102), [Terraform](https://github.com/ribumann/llmserving/actions/runs/41974555984) | 110 worker tests; manual transfer is not distributed locking or independent cancel recovery |
+| Separate operator SSO tenant | [Merged PR 9](https://github.com/ribumann/llmserving/pull/9), `0acbe3d330b1a11fe2b6f79dc60d80fe9a0fe50f`; tested SHA `593b56331878d882cd5ed0084f6db94df2a7e669`, [Backend](https://github.com/ribumann/llmserving/actions/runs/41975399550), [Terraform](https://github.com/ribumann/llmserving/actions/runs/41975402414), [Runtime](https://github.com/ribumann/llmserving/actions/runs/41975405361) | 226 PostgreSQL tests, five native mocked plans; not live cross-tenant browser consent/injection |
 
 The local flow exercised prompt, immutable versioned configuration/report
 snapshots, two golden cases, single-stream and concurrency-10 performance,

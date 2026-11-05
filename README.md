@@ -13,7 +13,7 @@ Several later-stage UI areas are still scaffolded rather than fully productized 
 
 **Status:** exploratory, not production-ready or a certified unattended Azure
 release. Read-only CI, scoped OIDC and independent canary cleanup have passed.
-Fresh CPU/Ollama API acceptance passed on a separately reviewed feature branch;
+Fresh CPU/Ollama API acceptance and its reviewed implementation are now merged;
 authenticated Azure browser acceptance and GPU deployment remain blocked.
 See [exact commits, runs, measurements and limitations](docs/RELEASE_VALIDATION.md).
 Canary cleanup does not establish cleanup of billable application resources.
@@ -110,8 +110,8 @@ and, for local development only, `VITE_DEMO_USER=presenter@example.com`. The sam
 allows `example.com`; set `AUTH_ALLOWED_EMAIL_DOMAINS` explicitly for your deployment.
 Set `AUTH_MODE=local-demo` and `APP_ENV=development` on the local backend only.
 Demo headers cannot authenticate the cloud API: its default `entra-jwt` mode
-validates a signed user token. Production browser token transport still needs
-the separately reviewed proxy work and actual platform/SSO acceptance described
+validates a signed user token. The reviewed production browser proxy is wired;
+actual platform/SSO acceptance is still required as described
 in the [authentication guide](docs/AUTHENTICATION.md).
 
 ## Getting started
@@ -231,17 +231,19 @@ Only on an explicitly enabled manual deployment dispatch from `main`:
 - logs into Azure with OIDC
 - resolves the live backend Container App FQDN
 - builds and pushes `llmserving-frontend:${github.sha}` with `az acr build`
-- passes `VITE_API_BASE_URL=https://<backend-fqdn>` as a build arg
-- points Container App `llm-frontend` at that commit-labelled tag
+- sets `BACKEND_URL=https://<backend-fqdn>` at runtime for the same-origin signed-token proxy
+- points the configured frontend Container App at the commit-tagged image (a tag is not digest immutability)
 - polls the frontend root URL
 
 ### Terraform validation (`.github/workflows/infra.yml`)
 
-This workflow does **static validation only**:
+This workflow performs static validation and credential-free mocked-provider
+plan contracts, never live cloud plan/apply:
 
 - `terraform fmt -check -recursive`
 - `terraform init -backend=false`
 - `terraform validate`
+- five native mocked-provider SSO-tenant plans against actual auth bodies/env fields
 
 It also asserts that no Hugging Face token-shaped variable appears in `infra/demo` or `infra/control`.
 
@@ -250,9 +252,9 @@ It also asserts that no Hugging Face token-shaped variable appears in `infra/dem
 Runs every Functions/worker test, packages and imports the dependency-inclusive
 Functions ZIP, builds all seven images, and runs nine API-mocked Playwright
 scenarios. These browser tests do not establish full-stack or cloud acceptance.
-The separately reviewed real-model workflow/evidence is explicitly identified
+The merged real-model workflow/evidence is explicitly identified
 in [release validation](docs/RELEASE_VALIDATION.md), not represented as a
-main-branch or Azure result.
+Azure/browser/benchmark result.
 
 ## Licensing and external assets
 

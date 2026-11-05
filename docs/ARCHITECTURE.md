@@ -462,7 +462,7 @@ The backend uses:
 
 There are two different auth paths:
 
-1. **operator-facing cloud requests** require a cryptographically validated RS256 Entra user JWT with correct tenant, issuer, audience, timestamps and allowed domain. Unsigned principal/email/demo headers are rejected; signed token header contents are still verified (`backend/src/api/auth.py`).
+1. **operator-facing cloud requests** require a cryptographically validated RS256 Entra user JWT with correct issuer, audience, timestamps, explicit operator tenant and allowed domain. Unsigned name/demo headers are not identities. The production frontend uses a same-origin nginx proxy to transport an actual platform ID token as bearer authorization; token contents are still verified.
 2. **internal callbacks** use managed-identity bearer token validation in `backend/src/api/internal_auth.py`
 
 That keeps browser/session auth separate from service-to-service orchestration

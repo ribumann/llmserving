@@ -1,0 +1,92 @@
+name: Real local API
+
+on:
+  workflow_call: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  real-local-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-test
+          POSTGRES_DB: llmserving_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d llmserving_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:ci-only-test@127.0.0.1:5432/llmserving_ci
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:ci-only-test@127.0.0.1:5432/llmserving_ci
+      AUTH_MODE: local-demo
+      APP_ENV: test
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      OLLAMA_EXPECTED_DIGEST: a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67
+      LIVE_API_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install and migrate disposable backend
+        working-directory: backend
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m alembic upgrade head
+          python -m src.persistence.seed_catalog
+      - name: Start bounded real CPU model
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach --name live-ollama --cpus=2 --memory=2g \
+            --pids-limit=256 -e OLLAMA_MAX_LOADED_MODELS=1 -e OLLAMA_NUM_PARALLEL=2 \
+            -p 127.0.0.1:11434:11434 \
+            ollama/ollama@sha256:2c9595c555fd70a28363489ac03bd5bf9e7c5bdf2890373c3a830ffd7252ce6d
+          curl --fail --retry 10 --retry-all-errors --retry-delay 1 \
+            --retry-max-time 30 --max-time 3 \
+            "$OLLAMA_BASE_URL/api/version"
+          curl --fail --silent --show-error --max-time 300 \
+            -H 'Content-Type: application/json' \
+            --data '{"model":"qwen2.5:0.5b-instruct","stream":false}' \
+            "$OLLAMA_BASE_URL/api/pull"
+      - name: Real HTTP prompt, golden, versioned config, perf and cancellation
+        working-directory: backend
+        shell: bash
+        env:
+          FULLSTACK_EVIDENCE_FILE: ${{ runner.temp }}/live-api-evidence.json
+        run: |
+          set -euo pipefail
+          python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000 \
+            > "$RUNNER_TEMP/live-api.log" 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" || true' EXIT
+          curl --fail --retry 15 --retry-all-errors --retry-delay 1 \
+            --retry-max-time 45 --max-time 3 \
+            "$LIVE_API_URL/readyz"
+          python -m pytest -q -s -o addopts="" tests/integration/test_live_ollama.py
+      - name: Capture model evidence
+        if: always()
+        run: |
+          curl --fail --silent --show-error --max-time 10 \
+            "$OLLAMA_BASE_URL/api/tags" > "$RUNNER_TEMP/ollama-models.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: real-local-api-evidence
+          path: |
+            ${{ runner.temp }}/live-api-evidence.json
+            ${{ runner.temp }}/ollama-models.json
+            ${{ runner.temp }}/live-api.log
+          retention-days: 7
+      - name: Remove only this job's Ollama container
+        if: always()
+        run: docker rm --force live-ollama

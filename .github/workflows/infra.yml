@@ -1,7 +1,7 @@
 name: Infra CI
 
-# Static validation only — `terraform fmt -check` and `terraform validate` for every module under
-# infra/. Deliberately does NOT run `terraform init`/`plan`/`apply`: infra/shared and infra/control
+# Static validation and credential-free mocked-provider plan tests; never live cloud plan/apply.
+# infra/shared and infra/control
 # are single-applier modules run by hand from the operator's machine, and infra/demo is applied
 # repeatedly, per-environment, from inside the VNet by the terraform_runner Container Apps Job —
 # none of these are meant to be applied from CI. This workflow only catches formatting drift and
@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # FR-082: a Hugging Face credential must only ever live in the model_deployment Container
       # Apps Job's own process memory, transiently, as a Run Command parameter — never as a
@@ -47,6 +49,8 @@ jobs:
         module: [shared, control, demo]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -63,3 +67,8 @@ jobs:
       - name: terraform validate
         working-directory: infra/${{ matrix.module }}
         run: terraform validate
+
+      - name: SSO tenant contract with mocked providers (no Azure credentials)
+        if: matrix.module == 'control'
+        working-directory: infra/control
+        run: terraform test -no-color -filter=tests/sso_tenant.tftest.hcl

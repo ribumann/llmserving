@@ -203,6 +203,16 @@ variable "existing_sso_secret_id" {
   }
 }
 
+variable "existing_sso_tenant_id" {
+  description = "Optional operator SSO tenant UUID for an externally approved application. Null retains the ARM deployment tenant; never changes ARM or internal managed-identity callback tenants."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.existing_sso_tenant_id == null || can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.existing_sso_tenant_id))
+    error_message = "existing_sso_tenant_id must be a tenant UUID."
+  }
+}
+
 variable "entra_app_display_name" {
   description = "Display name for the Microsoft Entra ID app registration backing Container Apps' built-in (Easy Auth) sign-in."
   type        = string
