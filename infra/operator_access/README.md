@@ -39,6 +39,11 @@ replace DNS with public endpoint enablement, a policy exemption or an
 unreviewed hosts-file workaround. Downloading a client profile is distinct
 from permission to install software, certificates or routes on the user's OS.
 
+The separate [isolated Linux operator candidate](../../tools/private_operator/README.md)
+avoids a Windows client/certificate-store installation, but requires actual
+local Docker ownership/TUN verification and independent runtime-boundary
+review. Its CI is not evidence that the actual operator can connect.
+
 ## Required gates before execution
 
 This is **not executable approval**: the exact native scope guard, independent
