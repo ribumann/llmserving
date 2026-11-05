@@ -2,7 +2,7 @@
 
 The current `terraform_runner` uses its managed identity to download/upload
 private Azure blob state, then invokes Terraform with a local backend. This
-guide documents fail-closed behavior, not a protected remote-backend/lease or
+guide documents fail-closed transfer and worker leasing, not a full remote backend or
 complete reproducible Azure bootstrap certification.
 
 ## Required behavior
@@ -28,6 +28,31 @@ Upload failure prevents the success callback even if Terraform returned zero.
 An apply also requires a successful object-shaped JSON output before it can
 report completion.
 
+Before any state read or Terraform command, cloud workers acquire an exclusive
+Azure blob lease on `locks/<environmentId>.json` in the state container.
+Creation is conditional; existing ownership metadata must match the environment.
+Only the acquiring lease ID can update the owning workflow or release it.
+Concurrent workers fail before Terraform; no worker breaks, expires or steals
+another worker's lease. The lease covers shared/environment state reads,
+initialization, apply/destroy, partial-state persistence and output validation.
+Completion requires acknowledged state persistence and owned lease release.
+
+Leases are intentionally infinite rather than automatically expiring into an
+untracked retry. Initialization failures release the lease, but failed mutations,
+timeouts, persistence/output failures and force-killed workers retain it for
+operator recovery. This sacrifices automatic retry availability to preserve
+ownership while resource/state changes may be uncertain.
+
+Before acquisition, every attempt durably writes its proposed lease UUID,
+workflow/environment IDs and recovery-record name to a new private
+`locks/<environmentId>/attempts/<random-attempt-id>.json` blob, using conditional
+creation. Acquisition cannot proceed without acknowledgment. The lock's
+ownership metadata points to that recovery record after acquisition. Attempt
+records cover termination before that metadata update and ambiguous acquisition
+responses; they are retained, not automatically deleted. Lease IDs never appear
+in logs, public diagnostics, Terraform state or public artifacts. Treat these
+private records as sensitive lease capabilities, not an outputs manifest.
+
 Outside Azure hosting, with **both** storage variables unset, existing local
 development/test behavior remains local-only. This is not a cloud opt-out:
 inherited Azure hosting/identity markers require remote state. Authentication
@@ -35,11 +60,12 @@ is not weakened to make a test pass.
 
 ## Explicit remaining limitations
 
-Manual blob transfer does not establish ownership-safe distributed locking,
-an Azure blob lease, atomic Terraform remote-backend semantics, or independently
-verified restart recovery. The API's environment lock is not a storage lease.
-Concurrent/restarted workers and force-killed runners remain cloud release
-gates. The runner's failure handler cannot survive process/host cancellation;
+The worker lease serializes cooperating executions; it does not provide atomic
+Terraform remote-backend semantics or fence an authorized external writer that
+ignores this lock. Shared-layer writers need their own backend/locking contract.
+Protocol/guarded-run tests are credential-free, not actual Azure lease acceptance
+or independently verified restart recovery. The API lock is a separate control.
+The runner's failure handler cannot survive process/host cancellation;
 independent server-side billable-resource cleanup remains required.
 
 Do not provision billable resources until those gates, actual authenticated
@@ -60,6 +86,17 @@ inventory exactly scoped owned resources and recover state through an approved
 private channel before retrying. If local state was lost, recover/import only
 after independently proving ownership and reviewing a plan; never reconstruct
 state by guessing resource names or adopting original deployment resources.
+
+For a retained lease, first prove the named worker and its child processes have
+terminated, recover the latest private state and independently inventory owned
+resources. Read the private per-attempt recovery record for that execution to
+obtain its proposed lease UUID. If acquisition or metadata acknowledgment was
+lost, inspect the private attempt records instead of assuming the lock's older
+workflow label is current. An authorized operator may then release the exact
+held lease through the storage lease API and review the next plan. A mismatched
+lease UUID must fail, never trigger a break or takeover. Never blindly break a lease,
+delete the lock blob, automatically expire it, or retry against an active or
+unverified owner. No automated unlock/recovery command is provided.
 
 Keep state, backups, plans, tfvars and provider output out of Git, public
 artifacts/logs and chat. Recovery messages expose error class/status rather

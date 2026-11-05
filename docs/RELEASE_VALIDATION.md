@@ -1,15 +1,15 @@
 # Public validation evidence and blocked gates
 
 This is a pre-release evidence record, not full Azure acceptance. Source
-baseline `bf90ce8de6f23bc25db04f0d61cbac6a22765fab` includes reviewed PRs
+baseline `c165562db0b1a57a5dd96597727d048b3b54c679` includes reviewed PRs
 [1](https://github.com/ribumann/llmserving/pull/1) through
-[11](https://github.com/ribumann/llmserving/pull/11), plus
-[13](https://github.com/ribumann/llmserving/pull/13). Each implementation PR
+[15](https://github.com/ribumann/llmserving/pull/15). Each implementation PR
 received independent agentic review and passing checks before merge.
 Named test runs below retain their exact original source SHA; merged code is
 not a claim that an earlier measurement came from a newer combined revision.
-Privileged action/log masking hardening is additionally merged in
-[PR 14](https://github.com/ribumann/llmserving/pull/14), at this baseline.
+This includes privileged action/log masking hardening in
+[PR 14](https://github.com/ribumann/llmserving/pull/14) and the separate genuine
+browser gate in [PR 15](https://github.com/ribumann/llmserving/pull/15).
 
 ## Passed gates
 
@@ -24,11 +24,13 @@ Privileged action/log masking hardening is additionally merged in
 | Shared scoring foundation | [Merged PR 11](https://github.com/ribumann/llmserving/pull/11), `ec70fcd1c27638d0c36f93adc044035e98edc93b`; tested SHA `61183e9b97140729abec87293454aa3d1ff0293e`, [Backend](https://github.com/ribumann/llmserving/actions/runs/41935634541), [Runtime](https://github.com/ribumann/llmserving/actions/runs/41935637966) | 219 backend/77 worker tests and changed-worker Ruff, not complete durable parity |
 | Fail-closed Terraform state persistence | [Merged PR 8](https://github.com/ribumann/llmserving/pull/8), `ab68d71b235c0a1bed3225356b656f60ed34c363`; tested SHA `a931e2238bdbb061358bb7809c70e7129f4dcc8a`, [Runtime](https://github.com/ribumann/llmserving/actions/runs/41974553102), [Terraform](https://github.com/ribumann/llmserving/actions/runs/41974555984) | 110 worker tests; manual transfer is not distributed locking or independent cancel recovery |
 | Separate operator SSO tenant | [Merged PR 9](https://github.com/ribumann/llmserving/pull/9), `0acbe3d330b1a11fe2b6f79dc60d80fe9a0fe50f`; tested SHA `593b56331878d882cd5ed0084f6db94df2a7e669`, [Backend](https://github.com/ribumann/llmserving/actions/runs/41975399550), [Terraform](https://github.com/ribumann/llmserving/actions/runs/41975402414), [Runtime](https://github.com/ribumann/llmserving/actions/runs/41975405361) | 226 PostgreSQL tests, five native mocked plans; not live cross-tenant browser consent/injection |
+| Real local browser/API inference | Merged `c165562db0b1a57a5dd96597727d048b3b54c679`; [fresh combined-main Runtime](https://github.com/ribumann/llmserving/actions/runs/41978810510), downloadable `real-local-api-evidence` | Actual Chromium renders a real CPU Ollama response/revision/timing; anonymous 401 and reload-history behavior verified, plus API golden/perf/cancel/teardown; local-demo/dev, not production proxy, Azure SSO or every UI journey |
 
 The local flow exercised prompt, immutable versioned configuration/report
 snapshots, two golden cases, single-stream and concurrency-10 performance,
 missing-auth 401, a 50-case cancellation path, report retrieval and verified
-local teardown. Golden quality was honestly **one passed, one failed**, with
+local teardown. In the original measured run, golden quality was honestly
+**one passed, one failed**, with
 zero errored/skipped cases; the tiny model answered `0+1` incorrectly. The
 passing flow checks integration, not a model-quality threshold.
 
@@ -43,7 +45,10 @@ Ollama 0.13.5 image:
 Disposable PostgreSQL image:
 `postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab`.
 
-Same current-head Runtime run linked above; 2 CPU/2 GiB model container,
+The table below retains original run
+[`41933201127`](https://github.com/ribumann/llmserving/actions/runs/41933201127)
+at `2c2b65b95e5a39817c13cbb30d59099aaeb5dcba`, not newer combined-main/browser
+measurements: 2 CPU/2 GiB model container,
 `OLLAMA_NUM_PARALLEL=2`, fixed prompt `Count from one to five.`, output budget
 8 tokens, one warmup outside each measured workload, 120-second request safety
 limit. Client concurrency 10 includes server queueing; it is **not ten GPU
@@ -66,19 +71,21 @@ run in this flow.
 
 Both primary canary/cleanup workflows are currently disabled pending exact
 approved target setup; their historical proof does not establish active cleanup
-or access to a fallback tenant. A coordinator-reported isolated fallback Graph
-capability check is not consent, an application registration, federated CI
-access, a deployed auth configuration or authenticated browser acceptance.
-No fallback app/resource creation is authorized by that capability check alone.
+or access to a fallback subscription. An operator-approved isolated external
+SSO app registration exists in a separate tenant, supported by the explicit
+operator-tenant input. It has no bootstrapped credential/callback configuration
+or deployed platform acceptance. That registration does not change the ARM
+deployment subscription, establish federated CI access there, or authorize
+additional fallback resources.
 
 | Gate | Status and next prerequisite |
 | --- | --- |
-| Actual authenticated Azure browser/API | Blocked: approved isolated SSO app/credential/consent/assignments, final callbacks and real platform signed-token injection; no policy bypass/sign-in retries |
-| Clean cloud bootstrap | Pending: remote state/locking, digest artifacts, all jobs/Functions deployment, existing-group parameterization, private network verification |
+| Actual authenticated Azure browser/API | Blocked: isolated SSO app exists; private credential/approved consent/assignments, test-only vault, final callbacks and real platform signed-token injection still required; no policy bypass/sign-in retries |
+| Clean cloud bootstrap | Pending: all-layer native remote state/locking/recovery, digest artifacts, all jobs/Functions deployment, existing-group parameterization, private network verification |
 | Independent billable-resource cleanup | Pending: actual failure/cancellation cleanup plus fallback and absence checks before provisioning |
 | Small-model Azure GPU acceptance | Not run; gated on auth, cleanup and bounded aggregate exposure |
 | Complete durable run parity | Pending: proven golden/benchmark/genuine pinned LLMPerf/report semantics plus immutable snapshots, restart/duplicate/cancellation/stale/failure/owner-lock tests; routing remains disabled |
-| Real browser full-stack and small benchmark subset | Not run; API-mocked browsers and real API smoke are distinct evidence |
+| Additional real browser journeys and small benchmark subset | Real local inference UI passed above; remaining real UI journeys and compatible lm-eval subset not run; mocked scenarios remain distinct |
 | Immutable full release/optimized API image | Not complete; do not remove proven API runners or call commit tags immutable |
 
 No new billable Azure resource was created by this validation execution.

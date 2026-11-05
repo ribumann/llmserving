@@ -51,19 +51,27 @@ specific blob name (`_SHARED_STATE_BLOB_NAME`) and downloaded into a sibling
 `../shared/terraform.tfstate` working directory before every run, exactly
 mirroring the per-environment state download above (never re-uploaded by this
 job - infra/shared is only ever applied by an operator, not by this job).
-This remains a manual state transfer, not a blob lease or full remote-backend
-locking contract. It must not be treated as cloud bootstrap certification.
+An environment-specific blob lease serializes cooperating workers across
+download, mutation and persistence. This remains manual state transfer, not
+a full remote backend or cloud bootstrap certification.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import format_datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from azure.core.exceptions import AzureError
@@ -92,7 +100,11 @@ def _blob_url(blob_name: str) -> str | None:
     if not account and not container:
         if any(
             os.environ.get(name)
-            for name in ("CONTAINER_APP_JOB_NAME", "CONTAINER_APP_NAME", "IDENTITY_ENDPOINT")
+            for name in (
+                "CONTAINER_APP_JOB_NAME",
+                "CONTAINER_APP_NAME",
+                "IDENTITY_ENDPOINT",
+            )
         ):
             raise TerraformRunError(
                 "Cloud Terraform execution requires configured remote state.",
@@ -111,7 +123,9 @@ def _blob_url(blob_name: str) -> str | None:
         or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])", container)
         or "--" in container
     ):
-        raise TerraformRunError("Invalid remote state storage name.", stdout="", stderr="")
+        raise TerraformRunError(
+            "Invalid remote state storage name.", stdout="", stderr=""
+        )
     return f"https://{account}.blob.core.windows.net/{container}/{blob_name}"
 
 
@@ -119,8 +133,16 @@ def _storage_bearer_headers() -> dict[str, str]:
     try:
         from azure.identity import DefaultAzureCredential
 
-        token = DefaultAzureCredential().get_token("https://storage.azure.com/.default").token
-        return {"Authorization": f"Bearer {token}", "x-ms-version": "2023-11-03"}
+        token = (
+            DefaultAzureCredential()
+            .get_token("https://storage.azure.com/.default")
+            .token
+        )
+        return {
+            "Authorization": f"Bearer {token}",
+            "x-ms-version": "2023-11-03",
+            "x-ms-date": format_datetime(datetime.now(UTC), usegmt=True),
+        }
     except AzureError as exc:
         raise TerraformRunError(
             "Remote state identity authentication failed.", stdout="", stderr=""
@@ -131,24 +153,32 @@ def _validate_state(content: bytes) -> None:
     try:
         payload = json.loads(content)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise TerraformRunError("Terraform state is not valid JSON.", stdout="", stderr="") from exc
+        raise TerraformRunError(
+            "Terraform state is not valid JSON.", stdout="", stderr=""
+        ) from exc
     if (
         not isinstance(payload, dict)
         or payload.get("version") != 4
         or not isinstance(payload.get("resources"), list)
         or not isinstance(payload.get("outputs"), dict)
     ):
-        raise TerraformRunError("Terraform state has invalid structure.", stdout="", stderr="")
+        raise TerraformRunError(
+            "Terraform state has invalid structure.", stdout="", stderr=""
+        )
 
 
 def _download_state(url: str, destination: Path, *, allow_missing: bool) -> bool:
     headers = _storage_bearer_headers()
     if not headers:
-        raise TerraformRunError("Remote state identity unavailable.", stdout="", stderr="")
+        raise TerraformRunError(
+            "Remote state identity unavailable.", stdout="", stderr=""
+        )
     try:
         response = httpx.get(url, headers=headers, timeout=30.0)
     except httpx.RequestError as exc:
-        raise TerraformRunError("Remote state download failed.", stdout="", stderr="") from exc
+        raise TerraformRunError(
+            "Remote state download failed.", stdout="", stderr=""
+        ) from exc
     if (
         response.status_code == 404
         and response.headers.get("x-ms-error-code") == "BlobNotFound"
@@ -178,10 +208,14 @@ def _download_remote_state(
 ) -> None:
     url = _blob_url(f"{environment_id}.tfstate")
     if url:
-        _download_state(url, working_dir / _STATE_FILE_NAME, allow_missing=allow_missing)
+        _download_state(
+            url, working_dir / _STATE_FILE_NAME, allow_missing=allow_missing
+        )
 
 
-def _upload_remote_state(working_dir: Path, environment_id: str, *, required: bool = True) -> None:
+def _upload_remote_state(
+    working_dir: Path, environment_id: str, *, required: bool = True
+) -> None:
     """Persist state, including partial mutations, or explicitly fail the run."""
     state_file = working_dir / _STATE_FILE_NAME
     url = _blob_url(f"{environment_id}.tfstate")
@@ -197,8 +231,14 @@ def _upload_remote_state(working_dir: Path, environment_id: str, *, required: bo
         return
     headers = _storage_bearer_headers()
     if not headers:
-        raise TerraformRunError("Remote state identity unavailable.", stdout="", stderr="")
-    headers = {**headers, "x-ms-blob-type": "BlockBlob", "Content-Type": "application/json"}
+        raise TerraformRunError(
+            "Remote state identity unavailable.", stdout="", stderr=""
+        )
+    headers = {
+        **headers,
+        "x-ms-blob-type": "BlockBlob",
+        "Content-Type": "application/json",
+    }
     content = state_file.read_bytes()
     _validate_state(content)
     try:
@@ -223,7 +263,174 @@ def _download_shared_state(working_dir: Path) -> None:
     url = _blob_url(_SHARED_STATE_BLOB_NAME)
     if not url:
         return
-    _download_state(url, working_dir.parent / "shared" / _STATE_FILE_NAME, allow_missing=False)
+    _download_state(
+        url, working_dir.parent / "shared" / _STATE_FILE_NAME, allow_missing=False
+    )
+
+
+@dataclass
+class _StateLock:
+    mutation_started: bool = False
+
+
+def _lock_put(
+    url: str, headers: dict[str, str], content: bytes = b""
+) -> httpx.Response:
+    try:
+        return httpx.put(
+            url,
+            headers={**_storage_bearer_headers(), **headers},
+            content=content,
+            timeout=30.0,
+        )
+    except httpx.RequestError as exc:
+        raise TerraformRunError(
+            "Remote state lock request failed; verify ownership before retry.",
+            stdout="",
+            stderr="",
+        ) from exc
+
+
+@contextmanager
+def _remote_state_lock(environment_id: str, workflow_id: str) -> Iterator[_StateLock]:
+    marker = _StateLock()
+    url = _blob_url(f"locks/{environment_id}.json")
+    if not url:
+        yield marker
+        return
+    lease_id = str(uuid4())
+    recovery_blob = f"locks/{environment_id}/attempts/{uuid4()}.json"
+    ownership = {
+        "environmentId": environment_id,
+        "workflowId": workflow_id,
+        "recoveryBlob": recovery_blob,
+    }
+    owner = json.dumps(ownership).encode("utf-8")
+    try:
+        existing = httpx.get(url, headers=_storage_bearer_headers(), timeout=30.0)
+    except httpx.RequestError as exc:
+        raise TerraformRunError(
+            "Remote state lock read failed.", stdout="", stderr=""
+        ) from exc
+    if (
+        existing.status_code == 404
+        and existing.headers.get("x-ms-error-code") == "BlobNotFound"
+    ):
+        created = _lock_put(
+            url,
+            {
+                "If-None-Match": "*",
+                "x-ms-blob-type": "BlockBlob",
+                "Content-Type": "application/json",
+            },
+            owner,
+        )
+        if created.status_code != 201 and not (
+            created.status_code == 412
+            and created.headers.get("x-ms-error-code") == "ConditionNotMet"
+        ):
+            raise TerraformRunError(
+                f"Remote state lock creation returned HTTP {created.status_code}.",
+                stdout="",
+                stderr="",
+            )
+    elif existing.status_code == 200:
+        try:
+            previous_owner = existing.json()
+        except ValueError as exc:
+            raise TerraformRunError(
+                "Remote state lock ownership is malformed.", stdout="", stderr=""
+            ) from exc
+        if (
+            not isinstance(previous_owner, dict)
+            or previous_owner.get("environmentId") != environment_id
+            or not isinstance(previous_owner.get("workflowId"), str)
+        ):
+            raise TerraformRunError(
+                "Remote state lock ownership does not match.", stdout="", stderr=""
+            )
+    else:
+        raise TerraformRunError(
+            f"Remote state lock read returned HTTP {existing.status_code}.",
+            stdout="",
+            stderr="",
+        )
+    recovery_url = _blob_url(recovery_blob)
+    if not recovery_url:
+        raise TerraformRunError(
+            "Remote state configuration changed before acquisition.",
+            stdout="",
+            stderr="",
+        )
+    recovered = _lock_put(
+        recovery_url,
+        {
+            "If-None-Match": "*",
+            "x-ms-blob-type": "BlockBlob",
+            "Content-Type": "application/json",
+        },
+        json.dumps({**ownership, "leaseId": lease_id}).encode("utf-8"),
+    )
+    if recovered.status_code != 201:
+        raise TerraformRunError(
+            f"Remote state lease recovery record returned HTTP {recovered.status_code}; "
+            "refusing acquisition without durable ownership recovery.",
+            stdout="",
+            stderr="",
+        )
+    acquired = _lock_put(
+        f"{url}?comp=lease",
+        {
+            "x-ms-lease-action": "acquire",
+            "x-ms-lease-duration": "-1",
+            "x-ms-proposed-lease-id": lease_id,
+        },
+    )
+    if acquired.status_code != 201 or acquired.headers.get("x-ms-lease-id") != lease_id:
+        raise TerraformRunError(
+            f"Remote state lock acquisition returned HTTP {acquired.status_code}; "
+            "verify the owning workflow before retry.",
+            stdout="",
+            stderr="",
+        )
+    successful = False
+    try:
+        recorded = _lock_put(
+            url,
+            {
+                "x-ms-lease-id": lease_id,
+                "x-ms-blob-type": "BlockBlob",
+                "Content-Type": "application/json",
+            },
+            owner,
+        )
+        if recorded.status_code != 201:
+            raise TerraformRunError(
+                f"Remote state lock ownership write returned HTTP {recorded.status_code}.",
+                stdout="",
+                stderr="",
+            )
+        yield marker
+        successful = True
+    finally:
+        # Never expire or release a failed mutation's lock into a blind retry.
+        if successful or not marker.mutation_started:
+            released = _lock_put(
+                f"{url}?comp=lease",
+                {"x-ms-lease-action": "release", "x-ms-lease-id": lease_id},
+            )
+            if released.status_code != 200:
+                raise TerraformRunError(
+                    f"Remote state lock release returned HTTP {released.status_code}; "
+                    "operator recovery required.",
+                    stdout="",
+                    stderr="",
+                )
+        else:
+            logging.getLogger(__name__).error(
+                "Remote state lock retained after failed mutation; "
+                "verify worker termination and recover state before retry."
+            )
 
 
 class TerraformRunError(RuntimeError):
@@ -311,71 +518,95 @@ def run(
     callback: WorkflowCallbackClient,
 ) -> None:
     if action not in _ALLOWED_ACTIONS:
-        raise CallbackClientError(f"Unsupported action '{action}'; expected apply or destroy.")
+        raise CallbackClientError(
+            f"Unsupported action '{action}'; expected apply or destroy."
+        )
     if not re.fullmatch(r"[a-z0-9-]{3,20}", environment_id):
-        raise CallbackClientError("Invalid environmentId for Terraform state isolation.")
+        raise CallbackClientError(
+            "Invalid environmentId for Terraform state isolation."
+        )
     if (
         "environment_id" in terraform_variables
         and terraform_variables["environment_id"] != environment_id
     ):
-        raise CallbackClientError("Terraform environment_id must match the state owner.")
+        raise CallbackClientError(
+            "Terraform environment_id must match the state owner."
+        )
     _blob_url(f"{environment_id}.tfstate")
 
     callback.report_progress(workflow_id, phase="initializing")
     _ensure_azure_cli_auth()
-    _download_shared_state(working_dir)
-    _download_remote_state(working_dir, environment_id, allow_missing=action == "apply")
-    _write_tfvars(working_dir, terraform_variables)
-
-    init_result = _run_terraform(["init", "-input=false", "-no-color"], cwd=working_dir)
-    if init_result.returncode != 0:
-        raise TerraformRunError(
-            "terraform init failed", stdout=init_result.stdout, stderr=init_result.stderr
+    with _remote_state_lock(environment_id, workflow_id) as lock:
+        _download_shared_state(working_dir)
+        _download_remote_state(
+            working_dir, environment_id, allow_missing=action == "apply"
         )
+        _write_tfvars(working_dir, terraform_variables)
 
-    callback.report_progress(workflow_id, phase=f"running terraform {action}")
-    verb_args = (
-        ["apply", "-input=false", "-auto-approve", "-no-color", "-var-file=terraform.tfvars.json"]
-        if action == "apply"
-        else [
-            "destroy",
-            "-input=false",
-            "-auto-approve",
-            "-no-color",
-            "-var-file=terraform.tfvars.json",
-        ]
-    )
-    run_result = None
-    try:
-        run_result = _run_terraform(verb_args, cwd=working_dir)
-    finally:
-        _upload_remote_state(
-            working_dir,
-            environment_id,
-            required=run_result is not None and run_result.returncode == 0,
+        init_result = _run_terraform(
+            ["init", "-input=false", "-no-color"], cwd=working_dir
         )
-    if run_result.returncode != 0:
-        raise TerraformRunError(
-            f"terraform {action} failed", stdout=run_result.stdout, stderr=run_result.stderr
-        )
-
-    outputs: dict[str, Any] = {}
-    if action == "apply":
-        output_result = _run_terraform(["output", "-json"], cwd=working_dir)
-        if output_result.returncode != 0:
+        if init_result.returncode != 0:
             raise TerraformRunError(
-                "terraform output failed",
-                stdout=output_result.stdout,
-                stderr=output_result.stderr,
+                "terraform init failed",
+                stdout=init_result.stdout,
+                stderr=init_result.stderr,
             )
+
+        callback.report_progress(workflow_id, phase=f"running terraform {action}")
+        verb_args = (
+            [
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "-no-color",
+                "-var-file=terraform.tfvars.json",
+            ]
+            if action == "apply"
+            else [
+                "destroy",
+                "-input=false",
+                "-auto-approve",
+                "-no-color",
+                "-var-file=terraform.tfvars.json",
+            ]
+        )
+        run_result = None
+        lock.mutation_started = True
         try:
-            outputs = json.loads(output_result.stdout)
-        except json.JSONDecodeError as exc:
+            run_result = _run_terraform(verb_args, cwd=working_dir)
+        finally:
+            _upload_remote_state(
+                working_dir,
+                environment_id,
+                required=run_result is not None and run_result.returncode == 0,
+            )
+        if run_result.returncode != 0:
             raise TerraformRunError(
-                "terraform output is not valid JSON", stdout="", stderr=""
-            ) from exc
-        if not isinstance(outputs, dict):
-            raise TerraformRunError("terraform output has invalid structure", stdout="", stderr="")
+                f"terraform {action} failed",
+                stdout=run_result.stdout,
+                stderr=run_result.stderr,
+            )
+
+        outputs: dict[str, Any] = {}
+        if action == "apply":
+            output_result = _run_terraform(["output", "-json"], cwd=working_dir)
+            if output_result.returncode != 0:
+                raise TerraformRunError(
+                    "terraform output failed",
+                    stdout=output_result.stdout,
+                    stderr=output_result.stderr,
+                )
+            try:
+                outputs = json.loads(output_result.stdout)
+            except json.JSONDecodeError as exc:
+                raise TerraformRunError(
+                    "terraform output is not valid JSON", stdout="", stderr=""
+                ) from exc
+            if not isinstance(outputs, dict):
+                raise TerraformRunError(
+                    "terraform output has invalid structure", stdout="", stderr=""
+                )
 
     callback.complete_workflow(
         workflow_id,
