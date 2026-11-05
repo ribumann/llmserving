@@ -1,5 +1,9 @@
 # Authentication and external SSO bootstrap
 
+For the fixed main environment's executable operator phases, exact input
+contract and separately approved callback/private-vault writes, see
+[main application bootstrap](APP_BOOTSTRAP.md).
+
 Public UI/backend ingress is an intentional supported architecture, distinct
 from anonymous access or public database/inference ports. UI and headless
 clients use the same protected operator APIs; a private backend is not required.
