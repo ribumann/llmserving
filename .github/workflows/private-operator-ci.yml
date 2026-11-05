@@ -2,10 +2,10 @@ name: Isolated private operator image CI
 
 on:
   pull_request:
-    paths: ["tools/private_operator/**", "infra/**", "scripts/**", ".github/workflows/private-operator-ci.yml"]
+    paths: ["tools/private_operator/**", "tools/private_proxy/**", "infra/**", "scripts/**", ".github/workflows/private-operator-ci.yml"]
   push:
     branches: [main]
-    paths: ["tools/private_operator/**", "infra/**", "scripts/**", ".github/workflows/private-operator-ci.yml"]
+    paths: ["tools/private_operator/**", "tools/private_proxy/**", "infra/**", "scripts/**", ".github/workflows/private-operator-ci.yml"]
   workflow_dispatch: {}
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
       - name: Build only reviewed tracked source, without credentials or publication
         run: |
           mkdir "$RUNNER_TEMP/operator-source"
-          git archive HEAD infra scripts tools/private_operator |
+          git archive HEAD infra scripts tools/private_operator tools/private_proxy |
             tar -x -C "$RUNNER_TEMP/operator-source"
           docker build --platform linux/amd64 \
             --build-arg "SOURCE_REVISION=$(git rev-parse HEAD)" \
