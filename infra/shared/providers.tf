@@ -28,5 +28,6 @@ provider "azurerm" {
     }
   }
 
-  subscription_id = var.subscription_id
+  subscription_id            = var.subscription_id
+  skip_provider_registration = var.existing_resource_group_name == null ? null : true
 }

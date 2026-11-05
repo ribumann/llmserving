@@ -19,7 +19,10 @@ data "azurerm_client_config" "current" {}
 
 locals {
   shared              = data.terraform_remote_state.shared.outputs
-  resource_group_name = "rg-llm-control-${var.stage}"
+  retained_group      = var.existing_resource_group_name != null
+  resource_group_name = local.retained_group ? data.azurerm_resource_group.control[0].name : azurerm_resource_group.control[0].name
+  resource_group_id   = local.retained_group ? data.azurerm_resource_group.control[0].id : azurerm_resource_group.control[0].id
+  control_scope_id    = "/subscriptions/${var.subscription_id}/resourceGroups/${local.resource_group_name}"
   location            = local.shared.location
   unique_suffix       = substr(md5("${var.subscription_id}-${var.stage}-control"), 0, 6)
   manage_sso          = var.enable_sso && var.existing_sso_client_id == null
@@ -31,7 +34,7 @@ locals {
     feature   = "azure-llm-serving-demo"
     component = "control"
     stage     = var.stage
-    managedBy = "terraform"
+    managedBy = local.retained_group ? lookup(var.tags, "managedBy", "terraform") : "terraform"
   })
 
   # Placeholder image tags before the first `az acr build` push, mirroring the superseded
@@ -46,8 +49,19 @@ locals {
   export_worker_image      = coalesce(var.export_worker_image, "${local.shared.acr_login_server}/llmserving-export-worker:latest")
 }
 
+moved {
+  from = azurerm_resource_group.control
+  to   = azurerm_resource_group.control[0]
+}
+
+data "azurerm_resource_group" "control" {
+  count = local.retained_group ? 1 : 0
+  name  = var.existing_resource_group_name
+}
+
 resource "azurerm_resource_group" "control" {
-  name     = local.resource_group_name
+  count    = local.retained_group ? 0 : 1
+  name     = "rg-llm-control-${var.stage}"
   location = local.location
   tags     = local.common_tags
 }
@@ -66,7 +80,7 @@ locals {
 
 resource "azurerm_postgresql_flexible_server" "control" {
   name                = "${var.name_prefix}-control-pg-${local.unique_suffix}"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   tags                = local.common_tags
 
@@ -123,7 +137,7 @@ locals {
 resource "azapi_resource" "functions_storage" {
   type      = "Microsoft.Storage/storageAccounts@2023-01-01"
   name      = "${replace(var.name_prefix, "-", "")}func${local.unique_suffix}"
-  parent_id = azurerm_resource_group.control.id
+  parent_id = local.resource_group_id
   location  = local.location
   tags      = local.common_tags
 
@@ -145,7 +159,7 @@ resource "azapi_resource" "functions_storage" {
 resource "azapi_resource" "tfstate_storage" {
   type      = "Microsoft.Storage/storageAccounts@2023-01-01"
   name      = "${replace(var.name_prefix, "-", "")}tfstate${local.unique_suffix}"
-  parent_id = azurerm_resource_group.control.id
+  parent_id = local.resource_group_id
   location  = local.location
   tags      = local.common_tags
 
@@ -177,7 +191,7 @@ resource "azapi_resource" "tfstate_container" {
 resource "azapi_resource" "artifacts_storage" {
   type      = "Microsoft.Storage/storageAccounts@2023-01-01"
   name      = "${replace(var.name_prefix, "-", "")}art${local.unique_suffix}"
-  parent_id = azurerm_resource_group.control.id
+  parent_id = local.resource_group_id
   location  = local.location
   tags      = local.common_tags
 
@@ -208,7 +222,7 @@ resource "azapi_resource" "exports_container" {
 
 resource "azurerm_private_endpoint" "functions_blob" {
   name                = "${var.name_prefix}-func-blob-pe"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   subnet_id           = local.shared.private_endpoints_subnet_id
   tags                = local.common_tags
@@ -228,7 +242,7 @@ resource "azurerm_private_endpoint" "functions_blob" {
 
 resource "azurerm_private_endpoint" "functions_queue" {
   name                = "${var.name_prefix}-func-queue-pe"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   subnet_id           = local.shared.private_endpoints_subnet_id
   tags                = local.common_tags
@@ -248,7 +262,7 @@ resource "azurerm_private_endpoint" "functions_queue" {
 
 resource "azurerm_private_endpoint" "functions_table" {
   name                = "${var.name_prefix}-func-table-pe"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   subnet_id           = local.shared.private_endpoints_subnet_id
   tags                = local.common_tags
@@ -268,7 +282,7 @@ resource "azurerm_private_endpoint" "functions_table" {
 
 resource "azurerm_private_endpoint" "tfstate" {
   name                = "${var.name_prefix}-tfstate-pe"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   subnet_id           = local.shared.private_endpoints_subnet_id
   tags                = local.common_tags
@@ -288,7 +302,7 @@ resource "azurerm_private_endpoint" "tfstate" {
 
 resource "azurerm_private_endpoint" "artifacts" {
   name                = "${var.name_prefix}-artifacts-pe"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   subnet_id           = local.shared.private_endpoints_subnet_id
   tags                = local.common_tags
@@ -310,7 +324,7 @@ resource "azurerm_private_endpoint" "artifacts" {
 
 resource "azurerm_container_app_environment" "control" {
   name                               = "${var.name_prefix}-cae"
-  resource_group_name                = azurerm_resource_group.control.name
+  resource_group_name                = local.resource_group_name
   location                           = local.location
   log_analytics_workspace_id         = local.shared.log_analytics_workspace_id
   infrastructure_subnet_id           = local.shared.container_apps_subnet_id
@@ -350,14 +364,14 @@ resource "azurerm_container_app_environment" "control" {
 # fully granted before the Container App is ever created.
 resource "azurerm_user_assigned_identity" "backend" {
   name                = "${var.name_prefix}-backend-id"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   tags                = local.common_tags
 }
 
 resource "azurerm_container_app" "backend" {
   name                         = "${var.name_prefix}-backend"
-  resource_group_name          = azurerm_resource_group.control.name
+  resource_group_name          = local.resource_group_name
   container_app_environment_id = azurerm_container_app_environment.control.id
   revision_mode                = "Single"
   workload_profile_name        = "Consumption"
@@ -514,10 +528,9 @@ resource "azurerm_container_app" "backend" {
       }
 
       # T140: lets AzureProviderAdapter start/cancel Orchestration Workflows on the Durable
-      # Functions app (functions/function_app.py's http_start/raise_cancel_event). Auth reuses
-      # the backend's existing subscription-level Contributor RBAC (azurerm_role_assignment
-      # .backend_contributor, above) rather than a new app registration or Easy Auth config:
-      # that role already grants Microsoft.Web/sites/host/listkeys/action, so the backend can
+      # Functions app (functions/function_app.py's http_start/raise_cancel_event). Retained mode
+      # uses Website Contributor at that exact site; legacy mode uses subscription Contributor.
+      # Both grant Microsoft.Web/sites/host/listkeys/action, so the backend can
       # fetch this Function App's own function key via the ARM control plane
       # (POST {id}/host/default/listkeys) using its ordinary ARM-audience managed-identity
       # token, then present that key as the function key on the actual HTTP call - no secret is
@@ -539,7 +552,7 @@ resource "azurerm_container_app" "backend" {
       # one workflow type FastAPI dispatches itself instead of via dispatch_job.
       env {
         name  = "CONTAINER_APPS_RESOURCE_GROUP"
-        value = azurerm_resource_group.control.name
+        value = local.resource_group_name
       }
       env {
         name  = "JOB_NAME_MODEL_DEPLOYMENT"
@@ -561,6 +574,28 @@ resource "azurerm_container_app" "backend" {
 
   lifecycle {
     ignore_changes = [template[0].container[0].image]
+    precondition {
+      condition = !local.retained_group || (
+        var.demo_resource_group_name != null
+        && var.enable_sso
+        && var.existing_sso_client_id != null
+        && var.existing_sso_secret_id != null
+        && var.container_apps_infrastructure_resource_group_name != null
+      )
+      error_message = "Retained control groups require a retained demo group, external SSO with Easy Auth enabled, and an explicitly approved platform infrastructure group name."
+    }
+    precondition {
+      condition = !local.retained_group ? true : (
+        length(distinct([for name in [
+          var.existing_resource_group_name, var.demo_resource_group_name,
+          local.shared.resource_group_name, var.container_apps_infrastructure_resource_group_name
+        ] : lower(name) if name != null])) == 4
+        && alltrue([for id in local.shared_scope_ids :
+          startswith(lower(id), lower("/subscriptions/${var.subscription_id}/resourceGroups/${local.shared.resource_group_name}/providers/"))
+        ])
+      )
+      error_message = "Retained control, shared, demo and platform groups must be distinct; shared resource IDs must belong to the selected subscription and shared group."
+    }
     precondition {
       condition     = (var.existing_sso_client_id == null) == (var.existing_sso_secret_id == null)
       error_message = "Supply both existing_sso_client_id and existing_sso_secret_id, or neither."
@@ -587,14 +622,14 @@ resource "azurerm_container_app" "backend" {
 # before this resource is created, avoiding the same bootstrap circular dependency.
 resource "azurerm_user_assigned_identity" "frontend" {
   name                = "${var.name_prefix}-frontend-id"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   tags                = local.common_tags
 }
 
 resource "azurerm_container_app" "frontend" {
   name                         = "${var.name_prefix}-frontend"
-  resource_group_name          = azurerm_resource_group.control.name
+  resource_group_name          = local.resource_group_name
   container_app_environment_id = azurerm_container_app_environment.control.id
   revision_mode                = "Single"
   workload_profile_name        = "Consumption"
@@ -674,27 +709,54 @@ resource "azurerm_role_assignment" "frontend_acr_pull" {
   principal_id         = azurerm_user_assigned_identity.frontend.principal_id
 }
 
-# Least-privilege: the backend needs Contributor scoped to exactly this environment's future
-# `rg-llm-demo-{environmentId}` resource groups, which don't exist yet at apply time. Scoping to
-# the subscription (as the superseded infra/app-host module did) is the pragmatic interim; the
-# follow-up is a narrower custom role once demo resource groups exist to scope against (flagged
-# in a prior rubber-duck review, FR-081 tracks fully closing this out).
+locals {
+  vm_scopes = local.retained_group ? (
+    var.demo_resource_group_name == null ? {} : {
+      demo = "/subscriptions/${var.subscription_id}/resourceGroups/${var.demo_resource_group_name}"
+    }
+  ) : { subscription = "/subscriptions/${var.subscription_id}" }
+
+  shared_scope_ids = !local.retained_group ? [] : [
+    local.shared.acr_id, local.shared.key_vault_id, local.shared.gpu_subnet_id,
+    local.shared.data_subnet_id, local.shared.private_endpoints_subnet_id,
+    local.shared.container_apps_subnet_id, local.shared.functions_subnet_id,
+    local.shared.postgres_private_dns_zone_id, local.shared.blob_private_dns_zone_id,
+    local.shared.queue_private_dns_zone_id, local.shared.table_private_dns_zone_id,
+    local.shared.log_analytics_workspace_id
+  ]
+
+  storage_scope_ids = {
+    tfstate   = "${local.control_scope_id}/providers/Microsoft.Storage/storageAccounts/${azapi_resource.tfstate_storage.name}"
+    artifacts = "${local.control_scope_id}/providers/Microsoft.Storage/storageAccounts/${azapi_resource.artifacts_storage.name}"
+    functions = "${local.control_scope_id}/providers/Microsoft.Storage/storageAccounts/${azapi_resource.functions_storage.name}"
+  }
+}
+
+moved {
+  from = azurerm_role_assignment.backend_contributor
+  to   = azurerm_role_assignment.backend_contributor["subscription"]
+}
+
+# Preserve legacy subscription grants by default; retained mode never emits one.
 resource "azurerm_role_assignment" "backend_contributor" {
-  scope                = "/subscriptions/${var.subscription_id}"
-  role_definition_name = "Contributor"
+  for_each             = local.vm_scopes
+  scope                = each.value
+  role_definition_name = local.retained_group ? "Virtual Machine Contributor" : "Contributor"
   principal_id         = azurerm_user_assigned_identity.backend.principal_id
 }
 
 resource "azurerm_role_assignment" "backend_tfstate_blob" {
-  scope                = azapi_resource.tfstate_storage.id
+  scope                = local.retained_group ? local.storage_scope_ids.tfstate : azapi_resource.tfstate_storage.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.backend.principal_id
+  depends_on           = [azapi_resource.tfstate_storage]
 }
 
 resource "azurerm_role_assignment" "backend_artifacts_blob" {
-  scope                = azapi_resource.artifacts_storage.id
+  scope                = local.retained_group ? local.storage_scope_ids.artifacts : azapi_resource.artifacts_storage.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.backend.principal_id
+  depends_on           = [azapi_resource.artifacts_storage]
 }
 
 
@@ -733,7 +795,7 @@ resource "azurerm_user_assigned_identity" "jobs" {
   for_each = local.jobs
 
   name                = "${var.name_prefix}-job-${replace(each.key, "_", "-")}-id"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   tags                = local.common_tags
 }
@@ -742,7 +804,7 @@ resource "azurerm_container_app_job" "jobs" {
   for_each = local.jobs
 
   name                         = local.job_names[each.key]
-  resource_group_name          = azurerm_resource_group.control.name
+  resource_group_name          = local.resource_group_name
   location                     = local.location
   container_app_environment_id = azurerm_container_app_environment.control.id
   workload_profile_name        = "Consumption"
@@ -860,37 +922,114 @@ resource "azurerm_role_assignment" "job_acr_pull" {
 # container — least-privilege per FR-081 (evaluation/performance/export workers don't touch
 # Terraform state at all).
 resource "azurerm_role_assignment" "terraform_runner_tfstate_blob" {
-  scope                = azapi_resource.tfstate_storage.id
+  scope                = local.retained_group ? local.storage_scope_ids.tfstate : azapi_resource.tfstate_storage.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.jobs["terraform_runner"].principal_id
+  depends_on           = [azapi_resource.tfstate_storage]
 }
 
-# The terraform_runner job creates/destroys rg-llm-demo-{environmentId} resource groups and their
-# contents — same interim subscription-scoped Contributor caveat as the backend's role assignment
-# above, pending a narrower custom role.
+moved {
+  from = azurerm_role_assignment.terraform_runner_contributor
+  to   = azurerm_role_assignment.terraform_runner_contributor["subscription"]
+}
+
+# Retained demo state owns only the NIC/VM children, never the demo group.
 resource "azurerm_role_assignment" "terraform_runner_contributor" {
-  scope                = "/subscriptions/${var.subscription_id}"
-  role_definition_name = "Contributor"
+  for_each             = local.vm_scopes
+  scope                = each.value
+  role_definition_name = local.retained_group ? "Virtual Machine Contributor" : "Contributor"
   principal_id         = azurerm_user_assigned_identity.jobs["terraform_runner"].principal_id
 }
 
-# The model_deployment job invokes the Azure VM Run Command extension
-# (Microsoft.Compute/virtualMachines/runCommand/action) against the demo VM in
-# rg-llm-demo-{environmentId} to start vLLM — this was missing entirely, causing every deploy
-# to fail with AuthorizationFailed. "Virtual Machine Contributor" is the narrowest built-in role
-# that includes runCommand/action; scoped at the subscription because the per-environment demo
-# resource group doesn't exist at apply time (same interim caveat as backend_contributor/
-# terraform_runner_contributor above, pending a narrower custom role under FR-081).
+moved {
+  from = azurerm_role_assignment.model_deployment_vm_contributor
+  to   = azurerm_role_assignment.model_deployment_vm_contributor["subscription"]
+}
+
+# The deployment worker uses VM Run Command within the selected demo group.
 resource "azurerm_role_assignment" "model_deployment_vm_contributor" {
-  scope                = "/subscriptions/${var.subscription_id}"
+  for_each             = local.vm_scopes
+  scope                = each.value
   role_definition_name = "Virtual Machine Contributor"
   principal_id         = azurerm_user_assigned_identity.jobs["model_deployment"].principal_id
 }
 
 resource "azurerm_role_assignment" "export_worker_artifacts_blob" {
-  scope                = azapi_resource.artifacts_storage.id
+  scope                = local.retained_group ? local.storage_scope_ids.artifacts : azapi_resource.artifacts_storage.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.jobs["export_worker"].principal_id
+  depends_on           = [azapi_resource.artifacts_storage]
+}
+
+data "azurerm_role_definition" "subnet_vm" {
+  count              = local.retained_group ? 1 : 0
+  role_definition_id = "9980e02c-c2be-4d73-94e8-173b1dc7cf3c"
+  scope              = local.shared.gpu_subnet_id
+}
+
+locals {
+  subnet_permissions = local.retained_group ? data.azurerm_role_definition.subnet_vm[0].permissions : []
+  subnet_actions     = flatten([for permission in local.subnet_permissions : permission.actions])
+  subnet_operations = {
+    read   = "microsoft.network/virtualnetworks/subnets/read"
+    join   = "microsoft.network/virtualnetworks/subnets/join/action"
+    write  = "microsoft.network/virtualnetworks/subnets/write"
+    delete = "microsoft.network/virtualnetworks/subnets/delete"
+  }
+  subnet_operation_allowed = {
+    for key, operation in local.subnet_operations : key => anytrue([
+      for action in local.subnet_actions :
+      can(regex("^[a-z0-9./*-]+$", lower(action))) &&
+      can(regex("^${replace(replace(lower(action), ".", "\\."), "*", ".*")}$", operation))
+    ])
+  }
+  safe_subnet_permissions = (
+    length(local.subnet_permissions) > 0
+    && alltrue([for action in local.subnet_actions : can(regex("^[a-z0-9./*-]+$", lower(action)))])
+    && alltrue([for permission in local.subnet_permissions :
+      length(permission.not_actions) == 0 &&
+      (permission.condition == null || permission.condition == "") &&
+      (permission.condition_version == null || permission.condition_version == "")
+    ])
+    && local.subnet_operation_allowed.read && local.subnet_operation_allowed.join
+    && !local.subnet_operation_allowed.write && !local.subnet_operation_allowed.delete
+  )
+}
+
+# VM Contributor can join/read this exact subnet, not edit/delete it. Validate the actual
+# definition before assigning it; unknown, conditional or denial-bearing metadata is not proof.
+resource "azurerm_role_assignment" "runtime_gpu_subnet" {
+  for_each = local.retained_group ? {
+    backend          = azurerm_user_assigned_identity.backend.principal_id
+    terraform_runner = azurerm_user_assigned_identity.jobs["terraform_runner"].principal_id
+  } : {}
+
+  scope              = local.shared.gpu_subnet_id
+  role_definition_id = data.azurerm_role_definition.subnet_vm[0].id
+  principal_id       = each.value
+
+  lifecycle {
+    precondition {
+      condition     = local.safe_subnet_permissions
+      error_message = "The subnet role must unconditionally allow read/join, with no possible subnet write/delete or not_actions; no automatic broad-role fallback is allowed."
+    }
+  }
+}
+
+resource "azurerm_role_assignment" "backend_functions_keys" {
+  count                = local.retained_group ? 1 : 0
+  scope                = local.functions_resource_id
+  role_definition_name = "Website Contributor"
+  principal_id         = azurerm_user_assigned_identity.backend.principal_id
+  depends_on           = [azurerm_linux_function_app.orchestrator]
+}
+
+resource "azurerm_role_assignment" "backend_model_job" {
+  count                = local.retained_group ? 1 : 0
+  scope                = local.job_scope_ids["model_deployment"]
+  role_definition_name = "Container Apps Jobs Operator"
+  principal_id         = azurerm_user_assigned_identity.backend.principal_id
+  depends_on           = [azurerm_container_app_job.jobs]
 }
 
 # Azure RBAC role assignments are eventually consistent: the write can succeed while the grant
@@ -938,7 +1077,7 @@ resource "time_sleep" "job_rbac_propagation" {
 
 resource "azurerm_service_plan" "functions" {
   name                = "${var.name_prefix}-functions-plan"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   os_type             = "Linux"
   sku_name            = var.functions_plan_sku
@@ -947,7 +1086,7 @@ resource "azurerm_service_plan" "functions" {
 
 resource "azurerm_linux_function_app" "orchestrator" {
   name                = local.functions_app_name
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   location            = local.location
   service_plan_id     = azurerm_service_plan.functions.id
   tags                = local.common_tags
@@ -993,7 +1132,7 @@ resource "azurerm_linux_function_app" "orchestrator" {
     JOB_NAME_EVALUATION_WORKER    = azurerm_container_app_job.jobs["evaluation_worker"].name
     JOB_NAME_PERFORMANCE_WORKER   = azurerm_container_app_job.jobs["performance_worker"].name
     JOB_NAME_EXPORT_WORKER        = azurerm_container_app_job.jobs["export_worker"].name
-    CONTAINER_APPS_RESOURCE_GROUP = azurerm_resource_group.control.name
+    CONTAINER_APPS_RESOURCE_GROUP = local.resource_group_name
   }
 }
 
@@ -1002,27 +1141,31 @@ resource "azurerm_linux_function_app" "orchestrator" {
 resource "azurerm_role_assignment" "functions_start_job" {
   for_each = local.jobs
 
-  scope                = azurerm_container_app_job.jobs[each.key].id
-  role_definition_name = "Container Apps Jobs Contributor"
+  scope                = local.retained_group ? local.job_scope_ids[each.key] : azurerm_container_app_job.jobs[each.key].id
+  role_definition_name = local.retained_group ? "Container Apps Jobs Operator" : "Container Apps Jobs Contributor"
   principal_id         = azurerm_linux_function_app.orchestrator.identity[0].principal_id
+  depends_on           = [azurerm_container_app_job.jobs]
 }
 
 resource "azurerm_role_assignment" "functions_storage_blob" {
-  scope                = azapi_resource.functions_storage.id
+  scope                = local.retained_group ? local.storage_scope_ids.functions : azapi_resource.functions_storage.id
   role_definition_name = "Storage Blob Data Owner"
   principal_id         = azurerm_linux_function_app.orchestrator.identity[0].principal_id
+  depends_on           = [azapi_resource.functions_storage]
 }
 
 resource "azurerm_role_assignment" "functions_storage_queue" {
-  scope                = azapi_resource.functions_storage.id
+  scope                = local.retained_group ? local.storage_scope_ids.functions : azapi_resource.functions_storage.id
   role_definition_name = "Storage Queue Data Contributor"
   principal_id         = azurerm_linux_function_app.orchestrator.identity[0].principal_id
+  depends_on           = [azapi_resource.functions_storage]
 }
 
 resource "azurerm_role_assignment" "functions_storage_table" {
-  scope                = azapi_resource.functions_storage.id
+  scope                = local.retained_group ? local.storage_scope_ids.functions : azapi_resource.functions_storage.id
   role_definition_name = "Storage Table Data Contributor"
   principal_id         = azurerm_linux_function_app.orchestrator.identity[0].principal_id
+  depends_on           = [azapi_resource.functions_storage]
 }
 
 # --- Internal orchestration callback API audience (FR-076/FR-086): the `aud` claim the backend
@@ -1062,7 +1205,8 @@ locals {
 locals {
   functions_app_name    = "${var.name_prefix}-functions-${local.unique_suffix}"
   functions_fqdn        = "${local.functions_app_name}.azurewebsites.net"
-  functions_resource_id = "/subscriptions/${var.subscription_id}/resourceGroups/${azurerm_resource_group.control.name}/providers/Microsoft.Web/sites/${local.functions_app_name}"
+  functions_resource_id = "${local.control_scope_id}/providers/Microsoft.Web/sites/${local.functions_app_name}"
+  job_scope_ids         = { for key, name in local.job_names : key => "${local.control_scope_id}/providers/Microsoft.App/jobs/${name}" }
 }
 
 # --- Entra ID SSO for the Container Apps' built-in auth (FR-075) ---
@@ -1217,14 +1361,14 @@ resource "azapi_resource" "frontend_auth_config" {
 
 resource "azurerm_monitor_action_group" "control" {
   name                = "${var.name_prefix}-control-alerts"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   short_name          = "llmalerts"
   tags                = local.common_tags
 }
 
 resource "azurerm_monitor_metric_alert" "postgres_unavailable" {
   name                = "${var.name_prefix}-postgres-unavailable"
-  resource_group_name = azurerm_resource_group.control.name
+  resource_group_name = local.resource_group_name
   scopes              = [azurerm_postgresql_flexible_server.control.id]
   description         = "PostgreSQL Flexible Server availability dropped (FR-087)."
   severity            = 1
@@ -1244,14 +1388,14 @@ resource "azurerm_monitor_metric_alert" "postgres_unavailable" {
 
 resource "azurerm_monitor_activity_log_alert" "job_failures" {
   name                = "${var.name_prefix}-container-apps-job-failures"
-  resource_group_name = azurerm_resource_group.control.name
-  scopes              = [azurerm_resource_group.control.id]
+  resource_group_name = local.resource_group_name
+  scopes              = [local.resource_group_id]
   description         = "Any Container Apps Job execution fails (FR-087)."
 
   criteria {
     resource_type  = "Microsoft.App/jobs"
     category       = "ResourceHealth"
-    resource_group = azurerm_resource_group.control.name
+    resource_group = local.resource_group_name
   }
 
   action {

@@ -2,8 +2,8 @@
 
 **A clean reproducible Azure release is not yet demonstrated.** The modules
 describe shared/control/demo layers, but still have local cross-module state,
-placeholder image defaults and default to managing their own groups. Shared and
-demo retained-group modes are opt-in; control still manages its group. Existing
+placeholder image defaults and default to managing their own groups. Shared,
+control and demo retained-group modes are opt-in. Existing
 deployment workflows update API/UI images only; they are not an end-to-end
 bootstrap or independent cleanup of billable resources.
 Their privileged checkout/login actions are now commit-pinned. Resource-name
@@ -23,8 +23,8 @@ treating a blank typo as managed mode. Caller input cannot select a group or
 override enforced operator tags. This does not adopt existing group state or
 change already-saved teardown configuration; see
 [state ownership and CLI limitations](TERRAFORM_STATE.md#retained-demo-resource-groups).
-Control persistent-group ownership, protected bootstrap and independently
-verified actual-resource cleanup are still pending. No Azure or GPU acceptance
+Protected bootstrap and independently verified actual-resource cleanup are
+still pending. No Azure or GPU acceptance
 gate is satisfied by credential-free plan tests.
 
 For **fresh non-group-owning shared state**, `infra/shared` also accepts
@@ -37,6 +37,41 @@ an actual mocked-state upgrade contract. This is **not** permission to switch
 old group-owning state to retained mode. Use the
 [private exact-plan ownership guard](TERRAFORM_STATE.md#retained-shared-group-and-private-plan-guard)
 before any approved retained-group apply.
+
+For **fresh non-group-owning control state**, `infra/control` accepts the same
+`existing_resource_group_name` option. It reads, never manages, that group and
+requires distinct shared/control/demo/platform groups, a retained demo group,
+external SSO with Easy Auth enabled, and an explicit platform infrastructure
+group name. Referenced shared resource IDs must belong to the selected
+subscription/shared group. Region still comes from shared outputs; retained
+child tags honor the operator's `managedBy`. This does not authorize applying
+the plan or changing existing group-owning state.
+
+Retained control mode replaces the three legacy subscription grants with
+Virtual Machine Contributor at the exact demo group for the backend,
+Terraform runner and model worker. The backend gets Website Contributor only
+at the isolated Functions site (host-key retrieval) and Jobs Operator only
+at its model-deployment job. Functions gets Jobs Operator at each of its five
+jobs. Blob/queue/table grants remain at their exact storage accounts. Backend
+and Terraform runner receive VM Contributor at the exact shared GPU subnet
+only after reading its real role definition and proving unconditional
+read/join without subnet write/delete. Missing, conditional, denial-bearing
+or unsafe metadata blocks the plan; no broad-role fallback or custom role is
+created. These assignments are **proposed source-level scopes**, not existing
+grants, permission to grant them, or evidence that denied subscription-level
+SKU/quota reads will work. Obtain approval for exact live scopes before apply.
+Default managed mode retains its old broad subscription grants and names;
+it is not the least-privilege protected deployment path.
+
+Retained shared/control mode sets AzureRM 3.x
+`skip_provider_registration=true`; retained demo mode sets AzureRM 5.x
+`resource_provider_registrations="none"`. Omitted retained-group input preserves
+provider defaults. Required namespaces must already be registered by an
+authorized operator; do not grant subscription writes to make a plan succeed.
+Do not opt into AzureRM 3's 4.0 beta provider semantics: alternate registration
+settings can conflict and must fail configuration rather than trigger a
+registration workaround. Native mocked plans do not exercise Azure provider
+authentication, registration, actual grants or deny assignments.
 
 Control's VNet-integrated Consumption workload-profile environment accepts
 `container_apps_infrastructure_resource_group_name`. Null retains the legacy

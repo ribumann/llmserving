@@ -14,6 +14,20 @@ variable "stage" {
   default     = "dev"
 }
 
+variable "existing_resource_group_name" {
+  description = "Optional retained control group. Fresh isolated state only; Terraform reads the group and manages its children, never the group itself."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.existing_resource_group_name == null ? true : (
+      can(regex("^[A-Za-z0-9._()-]{1,90}$", var.existing_resource_group_name))
+      && !endswith(var.existing_resource_group_name, ".")
+    )
+    error_message = "existing_resource_group_name must be a nonempty Azure resource group name, not ending with a period."
+  }
+}
+
 variable "shared_state_path" {
   description = "Path to infra/shared's local state file, relative to this module's working directory."
   type        = string

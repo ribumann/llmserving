@@ -12,14 +12,13 @@ never sees or forwards a Hugging Face token (FR-082/FR-083, research.md
 
 Auth: the Functions app's HTTP endpoints require a function key
 (`AuthLevel.FUNCTION`, functions/function_app.py) rather than an Entra ID app
-registration. The backend's existing subscription-level
-Contributor role (`azurerm_role_assignment.backend_contributor`) already
-grants `Microsoft.Web/sites/host/listkeys/action`, so the default function key
+registration. Retained-group deployments use Website Contributor at the exact
+Functions site; legacy deployments retain subscription-level Contributor.
+Both grant `Microsoft.Web/sites/host/listkeys/action`, so the default function key
 is fetched at call time via the ARM control plane
 (`POST {functionAppResourceId}/host/default/listkeys`) using the backend's
 ordinary ARM-audience managed-identity token - no key is ever stored in Key
-Vault or as a plain env var, and no new RBAC grant or app registration is
-needed.
+Vault or as a plain env var, and no new app registration is needed.
 """
 
 from __future__ import annotations

@@ -1,6 +1,7 @@
 # Terraform + azurerm provider configuration for the control-plane module.
 #
-# infra/control owns the persistent application control plane (rg-llm-control-{stage}):
+# infra/control owns the persistent application control plane's child resources
+# (default group rg-llm-control-{stage}, or an explicitly retained data-only group):
 # Container Apps (React + FastAPI), Container Apps Jobs, the Durable Functions app, PostgreSQL,
 # and their supporting storage/identities. It reads infra/shared's outputs via a local
 # terraform_remote_state data source (see main.tf) — no Azure remote-state backend is required
@@ -51,7 +52,8 @@ provider "azurerm" {
     }
   }
 
-  subscription_id = var.subscription_id
+  subscription_id            = var.subscription_id
+  skip_provider_registration = var.existing_resource_group_name == null ? null : true
 }
 
 provider "random" {}
