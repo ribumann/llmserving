@@ -150,6 +150,12 @@ variable "database_admin_user" {
   default = "llmadmin"
 }
 
+variable "manage_database_url_secret" {
+  description = "Write database-url into the shared private vault after PostgreSQL/database creation and before the backend revision. Requires a private-network Terraform executor with separately approved vault secret-write access. False preserves external seeding."
+  type        = bool
+  default     = false
+}
+
 variable "database_name" {
   type    = string
   default = "llmserving"
@@ -214,6 +220,17 @@ variable "functions_plan_sku" {
   description = "Elastic Premium SKU for the Functions app's hosting plan. Premium (not Consumption) is required for regional VNet Integration to reach private PostgreSQL/Key Vault."
   type        = string
   default     = "EP1"
+}
+
+variable "functions_package_sha256" {
+  description = "Optional reviewed ready-to-run Functions ZIP SHA-256. Uses a private digest-named blob in the Functions host account instead of Azure Files or ZIP push. Upload that exact ZIP with OAuth after full apply, then restart/sync triggers. Null preserves legacy deployment settings."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.functions_package_sha256 == null ? true : can(regex("^[0-9a-f]{64}$", var.functions_package_sha256))
+    error_message = "functions_package_sha256 must be the reviewed ZIP's 64-character lowercase SHA-256, never a URL, SAS or tag."
+  }
 }
 
 # --- Entra ID SSO (FR-075) ---
