@@ -26,7 +26,10 @@ Use the backend and frontend setup guides, an isolated PostgreSQL database and
 the local Ollama profile. Set `AUTH_MODE=local-demo`, `APP_ENV=development` and
 an explicitly allowed demo email domain on the **local** backend. Set
 `VITE_API_BASE_URL` to that backend and `VITE_DEMO_USER` to a matching email for
-Vite. Do not use this configuration on an internet-facing server.
+Vite. Also set backend `CORS_ALLOWED_ORIGINS` to the exact Vite browser origin
+(for example `http://localhost:5173`); it defaults to an empty list. Use the
+actual origin if Vite selects another port, and do not substitute a wildcard.
+Do not use this configuration on an internet-facing server.
 
 This keeps the same provisioning/configuration/prompt/run/report APIs as the
 cloud application. Local Ollama is not evidence of Azure deployment or GPU
