@@ -52,6 +52,7 @@ class SharedLifecycleTests(unittest.TestCase):
             "STATE_DATA_ACCESS_APPROVED": "true",
             "SHARED_CLEANUP_ARMED": "true",
             "SHARED_CREATION_ENABLED": "true",
+            "PRIVATE_STATE_EXECUTOR_READY": "true",
         }
 
     def test_exact_owner_attempt_and_expiry(self):
@@ -577,7 +578,7 @@ class SharedLifecycleTests(unittest.TestCase):
             "supportsHttpsTrafficOnly": True,
             "defaultToOAuthAuthentication": True,
             "minimumTlsVersion": "TLS1_2",
-            "publicNetworkAccess": "Enabled",
+            "publicNetworkAccess": "Disabled",
         }
         storage = {
             "name": lifecycle.ACCOUNT,
@@ -606,9 +607,11 @@ class SharedLifecycleTests(unittest.TestCase):
                 ],
             ),
             patch.object(lifecycle, "blob") as data,
+            patch.object(lifecycle, "validate_private_state_route") as route,
         ):
             lifecycle.validate_scope()
             data.assert_not_called()
+            route.assert_called_once_with(properties)
         properties["allowSharedKeyAccess"] = True
         with (
             patch.object(lifecycle, "az", side_effect=metadata),

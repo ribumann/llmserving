@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import ipaddress
 import json
 import os
 import re
+import socket
 import subprocess
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -33,6 +35,10 @@ CONTAINER = "tfstate"
 STATE_KEY = "shared.tfstate"
 OWNER_KEY = "shared-owner.json"
 ACCOUNT_ID = f"{scope.ROOT}/providers/Microsoft.Storage/storageAccounts/{ACCOUNT}"
+STATE_ENDPOINT_ID = (
+    f"{scope.ROOT}/providers/Microsoft.Network/privateEndpoints/llmrelease-state-pe"
+)
+STATE_SUBNET_ID = scope.RESOURCES["azurerm_subnet.private_endpoints"]["id"]
 SOURCE_FILES = {"main.tf", "variables.tf", "providers.tf", "outputs.tf"}
 OWNER_FIELDS = {
     "schemaVersion",
@@ -164,6 +170,7 @@ def validate_environment(*, cleanup: bool) -> None:
         "AZURE_CLIENT_ID": FALLBACK_TARGET.client,
         "STATE_DATA_ACCESS_APPROVED": "true",
         "SHARED_CLEANUP_ARMED": "true",
+        "PRIVATE_STATE_EXECUTOR_READY": "true",
     }
     if any(os.environ.get(key) != value for key, value in expected.items()):
         raise SharedError(
@@ -434,7 +441,7 @@ def validate_scope() -> None:
         or properties.get("supportsHttpsTrafficOnly") is not True
         or properties.get("defaultToOAuthAuthentication") is not True
         or properties.get("minimumTlsVersion") != "TLS1_2"
-        or properties.get("publicNetworkAccess") != "Enabled"
+        or properties.get("publicNetworkAccess") != "Disabled"
     ):
         raise SharedError(
             "Existing retained state account is absent, foreign or not keyless/private."
@@ -465,6 +472,89 @@ def validate_scope() -> None:
         or container["properties"].get("publicAccess") != "None"
     ):
         raise SharedError("The fixed state container is not private.")
+    validate_private_state_route(properties)
+
+
+def validate_private_state_route(properties: dict) -> None:
+    connections = properties.get("privateEndpointConnections")
+    if not isinstance(connections, list):
+        raise SharedError("State account has no verified private endpoint connection.")
+    approved = []
+    for connection in connections:
+        details = connection.get("properties") if isinstance(connection, dict) else None
+        if not isinstance(details, dict):
+            raise SharedError("Malformed storage private endpoint connection.")
+        endpoint = details.get("privateEndpoint")
+        status = details.get("privateLinkServiceConnectionState")
+        if (
+            isinstance(endpoint, dict)
+            and scope.equal(endpoint.get("id"), STATE_ENDPOINT_ID)
+            and isinstance(status, dict)
+            and status.get("status") == "Approved"
+            and details.get("provisioningState") == "Succeeded"
+        ):
+            approved.append(connection)
+    if len(approved) != 1:
+        raise SharedError("The retained state blob endpoint is not uniquely approved.")
+    endpoint = arm(STATE_ENDPOINT_ID, "2023-09-01")
+    details = endpoint.get("properties")
+    if (
+        not isinstance(details, dict)
+        or details.get("provisioningState") != "Succeeded"
+        or not isinstance(details.get("subnet"), dict)
+        or not scope.equal(details["subnet"].get("id"), STATE_SUBNET_ID)
+        or details.get("manualPrivateLinkServiceConnections", []) != []
+    ):
+        raise SharedError("Retained state endpoint/subnet is unverified.")
+    links = details.get("privateLinkServiceConnections")
+    if not isinstance(links, list) or len(links) != 1:
+        raise SharedError(
+            "Retained state endpoint must select only the blob subresource."
+        )
+    link = links[0].get("properties") if isinstance(links[0], dict) else None
+    if (
+        not isinstance(link, dict)
+        or not scope.equal(link.get("privateLinkServiceId"), ACCOUNT_ID)
+        or link.get("groupIds") != ["blob"]
+        or not isinstance(link.get("privateLinkServiceConnectionState"), dict)
+        or link["privateLinkServiceConnectionState"].get("status") != "Approved"
+    ):
+        raise SharedError(
+            "Retained state endpoint is not the fixed approved blob target."
+        )
+    configurations = details.get("customDnsConfigs")
+    hostname = f"{ACCOUNT}.blob.core.windows.net"
+    if not isinstance(configurations, list):
+        raise SharedError("Retained blob endpoint IP metadata is unverified.")
+    expected = set()
+    networks = [
+        ipaddress.ip_network(value)
+        for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    ]
+    for configuration in configurations:
+        if not isinstance(configuration, dict) or configuration.get("fqdn") != hostname:
+            raise SharedError("Unexpected retained state endpoint DNS target.")
+        addresses = configuration.get("ipAddresses")
+        if not isinstance(addresses, list) or not addresses:
+            raise SharedError("Missing retained state endpoint private IP.")
+        for value in addresses:
+            address = ipaddress.ip_address(value)
+            if not any(address in network for network in networks):
+                raise SharedError("State endpoint must use an RFC1918 address.")
+            expected.add(str(address))
+    try:
+        resolved = {
+            item[4][0]
+            for item in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
+        }
+    except OSError:
+        raise SharedError(
+            "Private executor cannot resolve the fixed state blob endpoint."
+        ) from None
+    if not expected or resolved != expected:
+        raise SharedError(
+            "Private executor DNS does not resolve exclusively to the verified state endpoint."
+        )
 
 
 def dependencies_absent() -> None:
@@ -594,7 +684,9 @@ def trigger_run() -> dict:
     return run
 
 
-def inventory(owner: dict | None) -> dict[str, dict]:
+def inventory(owner: dict | None, *, bridge: bool = False) -> dict[str, dict]:
+    if bridge and owner is not None:
+        raise SharedError("Local bridge cannot use remote campaign ownership.")
     resources = az("resource", "list", "--resource-group", GROUP)
     if not isinstance(resources, list):
         raise SharedError("Shared inventory is unverified.")
@@ -616,13 +708,13 @@ def inventory(owner: dict | None) -> dict[str, dict]:
         if address in records:
             raise SharedError("Duplicate fixed shared ARM resource.")
         records[address] = resource
-    if owner is None:
+    if owner is None and not bridge:
         if records or generated:
             raise SharedError(
                 "Initial shared inventory is not empty except retained bootstrap storage."
             )
         return records
-    expected_tags = {**scope.TAGS, **owner_tags(owner)}
+    expected_tags = scope.TAGS if bridge else {**scope.TAGS, **owner_tags(owner)}
 
     def check(address: str, resource: dict) -> None:
         expected = scope.RESOURCES[address]

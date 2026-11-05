@@ -21,8 +21,9 @@ jobs:
       github.repository == 'ribumann/llmserving' &&
       github.ref == 'refs/heads/main' &&
       vars.FALLBACK_STATE_DATA_ACCESS_APPROVED == 'true' &&
-      vars.FALLBACK_SHARED_CLEANUP_ARMED == 'true'
-    runs-on: ubuntu-latest
+      vars.FALLBACK_SHARED_CLEANUP_ARMED == 'true' &&
+      vars.FALLBACK_PRIVATE_STATE_EXECUTOR_READY == 'true'
+    runs-on: [self-hosted, linux, x64, llmserving-private-state]
     environment: azure-e2e-fallback
     timeout-minutes: 60
     permissions:
@@ -36,6 +37,7 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       STATE_DATA_ACCESS_APPROVED: ${{ vars.FALLBACK_STATE_DATA_ACCESS_APPROVED }}
       SHARED_CLEANUP_ARMED: ${{ vars.FALLBACK_SHARED_CLEANUP_ARMED }}
+      PRIVATE_STATE_EXECUTOR_READY: ${{ vars.FALLBACK_PRIVATE_STATE_EXECUTOR_READY }}
       AZURE_CORE_OUTPUT: none
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
