@@ -29,9 +29,12 @@ The account requires HTTPS and TLS 1.2, disables shared-key and anonymous blob
 access, defaults to OAuth and disables cross-tenant replication. Blobs use
 Microsoft-managed encryption. Blob versioning and seven-day blob/container
 soft delete provide recovery; these are not independently tested restores or
-immutable backups. The container has `publicAccess=None`. The public TLS
-endpoint is intentional: no private-network prerequisite, key/SAS fallback
-or anonymous access is introduced.
+immutable backups. The container has `publicAccess=None`.
+Account `publicNetworkAccess` is **Disabled**, respecting enforced governance.
+ARM-only provisioning does not need a blob data-plane route. A separately
+reviewed private endpoint/DNS and execution route are required before actual
+OAuth blob access or backend migration; this module does not create that route.
+No key/SAS fallback, exemption or public-network re-enable workaround is allowed.
 
 All three Terraform records have `prevent_destroy`; replacement/destruction is blocked
 while these declarations remain in configuration. This is a Terraform guard,
@@ -221,6 +224,36 @@ independent GET verification remains mandatory. Only after independent review,
 passing checks and explicit apply authorization may the operator use the same
 guard with `--recover-account-only --apply` and a new private log. No state
 migration, role grant or blob access is implicit in this operation.
+
+### Verified governance refresh baseline
+
+The original campaign account was created requesting public networking
+Enabled, but management-group governance changed it to Disabled during creation.
+Do not treat this as permission to reverse policy or seek an exemption.
+The corrected module and guard require Disabled. First independently verify
+the exact account's ARM GET and activity-policy result, preserving original
+partial state and the native drift evidence privately.
+
+If the new full recovery plan contains **only** that exact account refresh
+transition, add `--accept-policy-network-disable` alongside
+`--recover-account-only`. This accepts exactly one fully known drift record:
+the owned account's `Enabled → Disabled` refresh, with every other field
+unchanged. The sole optional normalization is an empty AzAPI computed
+`output` object becoming null; it is not a resource setting.
+The refreshed account must match preserved refreshed prior state and still
+have a **no-op** planned action with exact approved security/tags/location.
+An account update of any kind remains rejected, including a proposed network
+re-enable or computed-output-only update. No general drift allowlist exists.
+If the native shape differs, stop and inspect it privately rather than
+refreshing/removing state records or weakening the checks.
+
+This flag checks a precisely described native transition; it does not prove
+the live cause was policy or authorize execution. Independent policy evidence
+and reviewed exact-plan authorization remain required. After a later reviewed
+state refresh removes that drift from the plan, use ordinary account-only
+recovery instead; the policy flag requires the actual transition to be present.
+The operation can configure service recovery/create the container via ARM,
+but **cannot establish data-plane readiness** while no private route exists.
 
 Credential-free unit tests mirror native first-plan shapes and reject malformed
 targets/payloads, foreign parent chains, roles/extra resources, prior state,

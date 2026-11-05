@@ -73,7 +73,7 @@ def plan():
             "allowBlobPublicAccess": False,
             "allowCrossTenantReplication": False,
             "defaultToOAuthAuthentication": True,
-            "publicNetworkAccess": "Enabled",
+            "publicNetworkAccess": "Disabled",
             "networkAcls": {"bypass": "None", "defaultAction": "Allow"},
             "encryption": {
                 "keySource": "Microsoft.Storage",
@@ -221,6 +221,15 @@ def account_recovery_plan():
     return data
 
 
+def policy_recovery_plan():
+    data = account_recovery_plan()
+    account = copy.deepcopy(data["resource_changes"][0])
+    account["change"]["actions"] = ["update"]
+    account["change"]["before"]["body"]["properties"]["publicNetworkAccess"] = "Enabled"
+    data["resource_drift"] = [account]
+    return data
+
+
 class BootstrapPlanTests(unittest.TestCase):
     def reject(self, data, expected=None):
         with self.assertRaises(guard.PlanRejected):
@@ -236,6 +245,109 @@ class BootstrapPlanTests(unittest.TestCase):
         self.reject(data)
         with self.assertRaises(guard.PlanRejected):
             guard.validate_plan(plan(), target(), recover_account_only=True)
+
+    def test_explicit_policy_disable_refresh_with_noop_account(self):
+        data = policy_recovery_plan()
+        guard.validate_plan(
+            data,
+            target(),
+            recover_account_only=True,
+            accept_policy_network_disable=True,
+        )
+        for recovery, policy in ((False, False), (True, False), (False, True)):
+            with self.assertRaises(guard.PlanRejected):
+                guard.validate_plan(
+                    data,
+                    target(),
+                    recover_account_only=recovery,
+                    accept_policy_network_disable=policy,
+                )
+        data["resource_drift"][0]["change"]["before"]["output"] = {}
+        data["resource_drift"][0]["change"]["after"]["output"] = None
+        account = data["resource_changes"][0]["change"]
+        account["before"]["output"] = None
+        account["after"]["output"] = None
+        data["prior_state"]["values"]["root_module"]["resources"][-1]["values"][
+            "output"
+        ] = None
+        data["planned_values"]["root_module"]["resources"][0]["values"]["output"] = None
+        guard.validate_plan(
+            data,
+            target(),
+            recover_account_only=True,
+            accept_policy_network_disable=True,
+        )
+
+    def test_policy_refresh_rejects_unrelated_or_unknown_changes(self):
+        for field, value in (
+            ("id", "foreign"),
+            ("tags", {}),
+            ("output", {"unexpected": True}),
+            ("parent_id", "foreign"),
+            ("location", "eastus"),
+        ):
+            data = policy_recovery_plan()
+            data["resource_drift"][0]["change"]["after"][field] = value
+            with self.assertRaises(guard.PlanRejected):
+                guard.validate_plan(
+                    data,
+                    target(),
+                    recover_account_only=True,
+                    accept_policy_network_disable=True,
+                )
+        for section in ("before", "after"):
+            for value in ("Enabled", None, True):
+                data = policy_recovery_plan()
+                data["resource_drift"][0]["change"][section]["body"]["properties"][
+                    "publicNetworkAccess"
+                ] = value
+                if section == "before" and value == "Enabled":
+                    continue
+                with self.assertRaises(guard.PlanRejected):
+                    guard.validate_plan(
+                        data,
+                        target(),
+                        recover_account_only=True,
+                        accept_policy_network_disable=True,
+                    )
+        for actions in (["create"], ["delete"], ["delete", "create"]):
+            data = policy_recovery_plan()
+            data["resource_drift"][0]["change"]["actions"] = actions
+            with self.assertRaises(guard.PlanRejected):
+                guard.validate_plan(
+                    data,
+                    target(),
+                    recover_account_only=True,
+                    accept_policy_network_disable=True,
+                )
+        for drift in ([], [None], [*policy_recovery_plan()["resource_drift"]] * 2):
+            data = policy_recovery_plan()
+            data["resource_drift"] = drift
+            with self.assertRaises(guard.PlanRejected):
+                guard.validate_plan(
+                    data,
+                    target(),
+                    recover_account_only=True,
+                    accept_policy_network_disable=True,
+                )
+        data = policy_recovery_plan()
+        data["resource_drift"][0]["change"]["after_unknown"] = {"body": True}
+        with self.assertRaises(guard.PlanRejected):
+            guard.validate_plan(
+                data,
+                target(),
+                recover_account_only=True,
+                accept_policy_network_disable=True,
+            )
+        data = policy_recovery_plan()
+        data["resource_changes"][0]["change"]["actions"] = ["update"]
+        with self.assertRaises(guard.PlanRejected):
+            guard.validate_plan(
+                data,
+                target(),
+                recover_account_only=True,
+                accept_policy_network_disable=True,
+            )
 
     def test_recovery_rejects_foreign_changed_unknown_or_missing_account(self):
         for section in ("before", "after"):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -37,7 +38,7 @@ ACCOUNT_BODY = {
         "allowBlobPublicAccess": False,
         "allowCrossTenantReplication": False,
         "defaultToOAuthAuthentication": True,
-        "publicNetworkAccess": "Enabled",
+        "publicNetworkAccess": "Disabled",
         "networkAcls": {"bypass": "None", "defaultAction": "Allow"},
         "encryption": {
             "keySource": "Microsoft.Storage",
@@ -145,7 +146,11 @@ def _references(expression: object, target: str) -> None:
 
 
 def validate_plan(
-    plan: object, expected: dict, *, recover_account_only: bool = False
+    plan: object,
+    expected: dict,
+    *,
+    recover_account_only: bool = False,
+    accept_policy_network_disable: bool = False,
 ) -> None:
     """Validate reviewed bootstrap source only, not arbitrary Terraform expressions."""
     expected = _object(expected)
@@ -227,10 +232,66 @@ def validate_plan(
         and plan.get("applyable", True) is True,
         "Incomplete, errored or non-applyable bootstrap plan.",
     )
-    for key in ("deferred_changes", "resource_drift", "action_invocations"):
+    _require(
+        not accept_policy_network_disable or recover_account_only,
+        "Policy baseline acceptance requires explicit account-only recovery.",
+    )
+    for key in ("deferred_changes", "action_invocations"):
         _require(
             plan.get(key, []) == [],
             "Deferred, drift or action changes are not initial bootstrap.",
+        )
+    drift_records = _list(plan.get("resource_drift", []))
+    if accept_policy_network_disable:
+        _require(
+            len(drift_records) == 1,
+            "Exactly one policy network-disable drift is required.",
+        )
+        drift = _records({"resources": drift_records})
+        _require(
+            set(drift) == {"azapi_resource.state"},
+            "Only the owned account policy drift is allowed.",
+        )
+        record = drift["azapi_resource.state"]
+        _require(
+            record.get("provider_name") == PROVIDER
+            and not any(key in record for key in ("previous_address", "deposed")),
+            "Unexpected policy drift record.",
+        )
+        change = _object(record.get("change"))
+        _require(
+            change.get("actions") == ["update"]
+            and "importing" not in change
+            and not _unknown(change.get("after_unknown", {})),
+            "Policy drift must be a fully known refresh update.",
+        )
+        before_drift = _object(change.get("before"))
+        after_drift = _object(change.get("after"))
+        _require(
+            before_drift.get("id") == account_id
+            and after_drift.get("id") == account_id,
+            "Policy drift must bind the exact owned account.",
+        )
+        expected_before_body = copy.deepcopy(ACCOUNT_BODY)
+        expected_before_body["properties"]["publicNetworkAccess"] = "Enabled"
+        _require(
+            _equal(before_drift.get("body"), expected_before_body)
+            and _equal(after_drift.get("body"), ACCOUNT_BODY),
+            "Only the exact Enabled-to-Disabled policy network transition is permitted.",
+        )
+        normalized = copy.deepcopy(before_drift)
+        normalized["body"] = copy.deepcopy(ACCOUNT_BODY)
+        # AzAPI may stop exporting its empty default output during refresh.
+        if normalized.get("output") == {} and after_drift.get("output") is None:
+            normalized["output"] = None
+        _require(
+            _equal(normalized, after_drift),
+            "Unrelated drift cannot be accepted with the policy baseline.",
+        )
+    else:
+        _require(
+            drift_records == [],
+            "Drift requires separately reviewed explicit acceptance.",
         )
     variables = _object(plan.get("variables"))
     _require(
@@ -333,6 +394,11 @@ def validate_plan(
         not recover_account_only or prior_managed,
         "Account recovery requires preserved partial state.",
     )
+    if accept_policy_network_disable:
+        _require(
+            _equal(after_drift, prior_managed["azapi_resource.state"].get("values")),
+            "Refreshed prior account must match the verified policy drift result.",
+        )
     planned = _records(_object(plan.get("planned_values")).get("root_module"))
     _require(
         set(TYPES) <= set(planned),
@@ -574,6 +640,7 @@ def run_saved_plan(
     terraform: str,
     apply: bool,
     recover_account_only: bool = False,
+    accept_policy_network_disable: bool = False,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="bootstrap-plan-") as directory:
         saved = Path(directory) / "approved.tfplan"
@@ -599,7 +666,10 @@ def run_saved_plan(
                 shown.returncode == 0, "Terraform show failed; inspect the private log."
             )
             validate_plan(
-                _json(shown.stdout), expected, recover_account_only=recover_account_only
+                _json(shown.stdout),
+                expected,
+                recover_account_only=recover_account_only,
+                accept_policy_network_disable=accept_policy_network_disable,
             )
             if apply:
                 result = subprocess.run(
@@ -632,6 +702,11 @@ def main() -> int:
         action="store_true",
         help="Explicit recovery of preserved account-only partial state: require exact account no-op and only missing service/container creates.",
     )
+    parser.add_argument(
+        "--accept-policy-network-disable",
+        action="store_true",
+        help="With account-only recovery, accept only the independently verified Enabled-to-Disabled account refresh; account action must still be no-op.",
+    )
     args = parser.parse_args()
     try:
         run_saved_plan(
@@ -641,6 +716,7 @@ def main() -> int:
             terraform=args.terraform_bin,
             apply=args.apply,
             recover_account_only=args.recover_account_only,
+            accept_policy_network_disable=args.accept_policy_network_disable,
         )
     except PlanRejected as error:
         print(str(error), file=sys.stderr)

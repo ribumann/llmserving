@@ -41,7 +41,7 @@ resource "azapi_resource" "state" {
       allowBlobPublicAccess        = false
       allowCrossTenantReplication  = false
       defaultToOAuthAuthentication = true
-      publicNetworkAccess          = "Enabled"
+      publicNetworkAccess          = "Disabled"
       networkAcls                  = { bypass = "None", defaultAction = "Allow" }
       encryption = {
         keySource = "Microsoft.Storage"

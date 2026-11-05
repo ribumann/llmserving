@@ -62,8 +62,8 @@ run "keyless_security_and_ownership" {
     error_message = "No anonymous/nested public access or cross-tenant replication."
   }
   assert {
-    condition     = azapi_resource.state.body.properties.publicNetworkAccess == "Enabled" && azapi_resource.state.body.properties.networkAcls.defaultAction == "Allow" && azapi_resource.state.body.properties.networkAcls.bypass == "None"
-    error_message = "The public TLS OAuth endpoint must not require private networking or a trusted-service bypass."
+    condition     = azapi_resource.state.body.properties.publicNetworkAccess == "Disabled" && azapi_resource.state.body.properties.networkAcls.defaultAction == "Allow" && azapi_resource.state.body.properties.networkAcls.bypass == "None"
+    error_message = "Public networking must remain disabled; no trusted-service bypass is allowed."
   }
   assert {
     condition     = azapi_resource.state.body.properties.encryption.keySource == "Microsoft.Storage" && azapi_resource.state.body.properties.encryption.services.blob.enabled && azapi_resource.state.body.properties.encryption.services.blob.keyType == "Account"
