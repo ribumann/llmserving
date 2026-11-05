@@ -193,7 +193,7 @@ def main() -> None:
                 native = directory / "backend"
                 native.mkdir()
                 (native / "main.tf").write_text(
-                    'terraform { backend "azurerm" {\n'
+                    'terraform {\nbackend "azurerm" {\n'
                     f'storage_account_name = "{HOST.split(".")[0]}"\n'
                     'container_name = "tfstate"\nkey = "fixture.tfstate"\n'
                     'sas_token = "sv=2023-11-03&sig=synthetic-fixture"\n'
