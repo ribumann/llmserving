@@ -2,6 +2,12 @@
 
 This frontend is a Vite + React + TypeScript shell for the Azure LLM Serving Demo operator UI.
 
+Local Vite, the self-hosted Nginx image and Azure Container Apps use the same
+application. Container Apps is currently the only implemented cloud UI host;
+a second cloud host and standalone local-to-cloud Entra login are not supplied.
+Public API reachability is supported without removing operator authentication.
+See [hosting and authentication options](../docs/UI_DEPLOYMENT.md).
+
 ## Prerequisites
 
 - Node.js 18+
