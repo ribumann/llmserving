@@ -94,8 +94,8 @@ mode. Rejected pre-mutation attempts do not complete successfully.
 This guard checks the worker's downloaded state, **not arbitrary CLI use**.
 Never switch ownership using bare `terraform apply`/`destroy`, remove group
 records to evade the guard, or adopt original deployment state. A raw CLI
-conversion can plan deletion of the previously managed group. Control
-group ownership and guarded all-layer bootstrap remain separate requirements;
+conversion can plan deletion of the previously managed group. Guarded
+all-layer bootstrap remains a separate requirement;
 this option alone does not make protected-group deployment safe or enabled.
 
 ## Retained shared group and private plan guard
@@ -111,6 +111,22 @@ managed-state address. Credential-free native contracts run on Terraform 1.9.8;
 the exact old-singleton-state upgrade uses Terraform 1.14.0's `state_key`
 to share real mocked state across legacy and current module configurations.
 These are not Azure apply or cleanup evidence.
+
+`infra/control.existing_resource_group_name` follows the same fresh-state
+data-only ownership contract. Its original group moves to `[0]` in default
+managed mode; the three original subscription role assignments move to
+`["subscription"]`. Actual legacy mocked-state upgrade tests verify all four
+IDs survive without replacement. This does **not** make changing group-owning
+state into retained mode safe: such a raw plan can delete the old group or
+revoke old grants. The ownership guard rejects that state rather than
+permitting migration by deleting records. Never remove state records, import
+the original deployment, or use `-target` to evade full-plan checks.
+
+Retained control mode also narrows runtime role scopes and requires explicit
+external SSO/demo/platform inputs; see [the scope contract](AZURE.md). Saved
+control plans can contain credentials and therefore remain private. Provider
+auto-registration is disabled in all three retained-group modes, but a plan
+is not an arbitrary-code sandbox or an approval to use new role scopes.
 
 After all independent deployment gates have passed, generate a native saved
 plan in a mode-0700 private directory from the reviewed module. Keep plan/state,
@@ -137,8 +153,8 @@ This is an **ownership-only guard for reviewed module plans**, not a sandbox for
 arbitrary Terraform code. It does not establish foreign parent-ID/RBAC scope,
 hidden platform resources, tags, cost, auth, private remote-backend locking,
 pre-init state safety or independent cleanup. Raw CLI bypasses it. Never remove
-state records or use raw apply/destroy to convert group ownership. Control
-group/scoped-role support and safe all-layer deployment remain unfinished.
+state records or use raw apply/destroy to convert group ownership. Safe
+all-layer deployment and independent actual-resource cleanup remain unfinished.
 
 ## Explicit remaining limitations
 

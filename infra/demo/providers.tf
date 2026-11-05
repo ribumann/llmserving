@@ -24,5 +24,6 @@ terraform {
 provider "azurerm" {
   features {}
 
-  subscription_id = var.subscription_id
+  subscription_id                 = var.subscription_id
+  resource_provider_registrations = var.existing_resource_group_name == null ? null : "none"
 }

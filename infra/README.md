@@ -37,6 +37,15 @@ use local cross-module state and default placeholder images. Do not apply them
 against an original deployment or protected existing test groups. First satisfy
 [remote-state, immutable-artifact, SSO, ownership, cleanup and budget gates](../docs/AZURE.md).
 
+Each module has an opt-in `existing_resource_group_name` for **fresh data-only
+group state**, never an automatic migration of group-owning state. Control
+mode requires explicit external SSO/demo/platform inputs and replaces its
+legacy subscription grants with the documented resource-scoped runtime
+assignments. Retained groups and existing grants are not cleanup targets.
+The ACA infrastructure group remains platform-created, not another retained
+group. Its ownership/deletion/permission verification is still a live-apply
+gate. See [state ownership and the private plan guard](../docs/TERRAFORM_STATE.md).
+
 1. `infra/shared` — first dependency layer; creates billable resources. An independent
    reviewed plan and cleanup are required, not just `subscription_id`.
 2. `infra/control` — reads `infra/shared`'s outputs via a local `terraform_remote_state` data

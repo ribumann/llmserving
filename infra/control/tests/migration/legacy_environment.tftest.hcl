@@ -1,4 +1,16 @@
 mock_provider "azurerm" {
+  mock_resource "azurerm_resource_group" {
+    defaults = {
+      id = "/subscriptions/44444444-4444-4444-4444-444444444444/resourceGroups/rg-llm-control-dev"
+    }
+  }
+  mock_resource "azurerm_user_assigned_identity" {
+    defaults = {
+      id           = "/subscriptions/44444444-4444-4444-4444-444444444444/resourceGroups/rg-llm-control-dev/providers/Microsoft.ManagedIdentity/userAssignedIdentities/test-identity"
+      principal_id = "77777777-7777-7777-7777-777777777777"
+      client_id    = "88888888-8888-8888-8888-888888888888"
+    }
+  }
   mock_resource "azurerm_container_app_environment" {
     defaults = {
       id = "/subscriptions/44444444-4444-4444-4444-444444444444/resourceGroups/rg-llm-control-dev/providers/Microsoft.App/managedEnvironments/llm-cae"
@@ -64,6 +76,15 @@ run "matching_name_preserves_environment" {
   assert {
     condition     = azurerm_container_app_environment.control.id == run.existing_environment.environment_id && azurerm_container_app_environment.control.infrastructure_resource_group_name == "rg-existing-platform"
     error_message = "Matching names must preserve the existing environment, including Azure case-insensitivity."
+  }
+  assert {
+    condition = (
+      azurerm_resource_group.control[0].id == run.existing_environment.group_id
+      && azurerm_role_assignment.backend_contributor["subscription"].id == run.existing_environment.role_ids.backend
+      && azurerm_role_assignment.terraform_runner_contributor["subscription"].id == run.existing_environment.role_ids.terraform_runner
+      && azurerm_role_assignment.model_deployment_vm_contributor["subscription"].id == run.existing_environment.role_ids.model_deployment
+    )
+    error_message = "The original singleton group and all three subscription assignments must survive their address moves without replacement."
   }
 }
 
