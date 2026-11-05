@@ -9,10 +9,13 @@ from src.engines.ollama.adapter import OllamaEngineAdapter
 
 
 def test_ollama_engine_satisfies_contract() -> None:
+    payloads = []
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/models":
             return httpx.Response(200, json={"data": [{"id": "qwen2.5:0.5b-instruct"}]})
         if request.url.path == "/v1/chat/completions":
+            payloads.append(json.loads(request.content))
             sse_events = [
                 {"choices": [{"delta": {"content": "echo:hello"}}]},
                 {
@@ -31,6 +34,7 @@ def test_ollama_engine_satisfies_contract() -> None:
         deployment_locator=lambda revision_id: {
             "deploymentRevisionId": revision_id,
             "resolvedCheckpointRef": "qwen2.5:0.5b-instruct",
+            "huggingFaceRepoId": "Qwen/Qwen2.5-0.5B-Instruct",
             "providerState": {"inferenceApiUrl": "http://ollama.local"},
         },
     )
@@ -39,9 +43,22 @@ def test_ollama_engine_satisfies_contract() -> None:
     prompt = adapter.submitPrompt("rev-1", "hello")
     assert prompt.responseText == "echo:hello"
     assert prompt.ttftMs >= 0.0
+    assert payloads[-1]["model"] == "qwen2.5:0.5b-instruct"
+    adapter.submitPromptWithParameters("rev-1", "hello", {"num_predict": 8, "temperature": 0.0})
+    assert payloads[-1]["max_tokens"] == 8
+    assert payloads[-1]["temperature"] == 0.0
+    assert "options" not in payloads[-1]
 
     performance = adapter.runPerformanceWorkload(
         "rev-1",
-        {"concurrency": 1, "durationOrRequestCount": {"requestCount": 2}, "inputProfile": {}},
+        {
+            "concurrency": 1,
+            "warmup": {"requestCount": 1},
+            "durationOrRequestCount": {"requestCount": 2},
+            "inputProfile": {"meanOutputTokens": 8},
+        },
     )
     assert performance.acceleratorUtilizationAvailable is False
+    assert all(payload["max_tokens"] == 8 for payload in payloads[-2:])
+    assert len(payloads) == 5  # Two prompts, one warmup, two measured requests.
+    assert performance.samples[0]["requestFailures"]["total"] == 2

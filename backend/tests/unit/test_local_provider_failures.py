@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import httpx
+import pytest
 from src.config import Settings
 from src.domain.deployment_revision import DeploymentRevision
 from src.domain.enums import (
@@ -171,3 +172,36 @@ def test_local_deployment_fails_when_checkpoint_pull_fails_without_marking_ready
     assert "retry deployment" in handle.diagnostics[0].lower()
     assert revision.lifecycleState == DeploymentRevisionState.DEPLOYMENT_FAILED
     assert environment.activeDeploymentRevisionId is None
+
+
+@pytest.mark.parametrize(
+    "lifecycle",
+    [
+        DemoEnvironmentState.TORN_DOWN,
+        DemoEnvironmentState.TEARING_DOWN,
+        DemoEnvironmentState.TEARDOWN_FAILED,
+    ],
+)
+def test_reading_live_runtime_does_not_resurrect_removed_environment(lifecycle) -> None:
+    environment = DemoEnvironment(
+        environmentId="env-local",
+        profileId="local-ollama",
+        provider=ProviderType.LOCAL,
+        region="local",
+        lifecycleState=lifecycle,
+        activeOperationId="teardown-env-local",
+        providerState={},
+        createdBy="presenter@example.com",
+        lastModifiedBy="presenter@example.com",
+    )
+    session = FakeSession(environment, _profile())
+    adapter = LocalProviderAdapter(
+        session_factory=lambda: session,
+        settings=Settings(ollama_base_url="http://ollama.local"),
+        http_client=httpx.Client(
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"models": []}))
+        ),
+    )
+    result = adapter.getEnvironmentState("env-local")
+    assert result.lifecycleState == lifecycle.value
+    assert environment.activeOperationId == "teardown-env-local"
