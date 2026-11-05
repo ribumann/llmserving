@@ -4,9 +4,8 @@ Orchestration Workflow Durable Functions app (T134/T135).
 Registers:
 - `http_start`: HTTP starter FastAPI's `AzureProviderAdapter` (T140) calls to
   begin a new Orchestration Workflow.
-- `generic_orchestrator`: the single Durable Functions orchestrator used for
-  every `workflowType` (data-model.md) - all type-specific decisions are
-  delegated to `orchestration_lib`/the Container Apps Job itself.
+- `generic_orchestrator_v2`: the monitor for new instances of every workflow
+  type; `generic_orchestrator` remains registered for legacy history replay.
 - One `activity_trigger` per function in `activities.activities`.
 - `raise_cancel_event`: HTTP endpoint FastAPI's cancel handler calls to
   deliver the `cancel` external event this orchestrator waits on.
@@ -25,12 +24,13 @@ import azure.functions as func
 from activities.activities import (
     acknowledge_cancellation,
     dispatch_job,
+    finalize_workflow,
     poll_job_status,
     report_terminal_failure,
     stop_job,
 )
 from orchestration_lib.workflow_jobs import resolve_job_name
-from orchestrators.generic_orchestrator import generic_orchestrator
+from orchestrators.generic_orchestrator import generic_orchestrator, generic_orchestrator_v2
 
 app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
 
@@ -76,7 +76,9 @@ async def http_start(
         "jobInput": body.get("jobInput") or {},
         "preDispatchedExecutionName": body.get("preDispatchedExecutionName"),
     }
-    instance_id = await client.start_new("generic_orchestrator", client_input=orchestration_input)
+    instance_id = await client.start_new(
+        "generic_orchestrator_v2", client_input=orchestration_input
+    )
     # workflowId (FR-086) is the correlation ID shared with FastAPI
     # (backend/src/api/correlation.py) and the dispatched job
     # (jobs/common/telemetry.py) - stamped via `extra` so Azure Functions'
@@ -104,8 +106,10 @@ async def raise_cancel_event(
 
 
 app.orchestration_trigger(context_name="context")(generic_orchestrator)
+app.orchestration_trigger(context_name="context")(generic_orchestrator_v2)
 app.activity_trigger(input_name="job_input")(dispatch_job)
 app.activity_trigger(input_name="job_input")(poll_job_status)
 app.activity_trigger(input_name="job_input")(stop_job)
 app.activity_trigger(input_name="job_input")(acknowledge_cancellation)
 app.activity_trigger(input_name="job_input")(report_terminal_failure)
+app.activity_trigger(input_name="job_input")(finalize_workflow)

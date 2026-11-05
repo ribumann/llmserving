@@ -132,6 +132,22 @@ definition. Deferred API tests cover this selection boundary with mocked
 execution, not genuine tool performance, process-restart recovery or durable
 worker/report parity. Durable routing remains unchanged.
 
+### Versioned workflow monitor
+
+New Functions instances use `generic_orchestrator_v2`; the original named
+orchestrator and activity sequence remain registered for existing history replay.
+The new monitor finalizes terminal jobs through the authenticated API rather than
+assuming a successful container exit produced a report. A worker's already-terminal
+outcome is preserved only on the exact structured terminal-conflict response.
+Cancellation/timeout wait for the SDK stop operation before finalization; stop,
+authorization, stale-owner and unexpected callback failures remain visible rather
+than forcibly releasing a lock. Existing v1 instances require drain/recovery
+assessment before upgrading; versioning does not repair their stored outcomes.
+
+Generator/HTTP-mocked tests and actual SDK registration/starter tests are source
+and package evidence, not a live Durable task-hub/replay, Azure stop/cleanup,
+exactly-once dispatch or complete durable-runner parity claim.
+
 ### Azure target boundary
 
 Both original primary canary/cleanup workflows remain disabled. The user

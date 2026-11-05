@@ -19,6 +19,7 @@ jobs/*/Dockerfile already bundles its own copy of jobs/common/.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
@@ -35,6 +36,13 @@ ARM_SCOPE = "https://management.azure.com/.default"
 
 class CallbackClientError(RuntimeError):
     """Raised when the internal callback API rejects a request or cannot be reached."""
+
+
+class WorkflowAlreadyTerminal(CallbackClientError):
+    def __init__(self, workflow_id: str, status: str) -> None:
+        super().__init__(f"Workflow '{workflow_id}' is already '{status}'.")
+        self.workflow_id = workflow_id
+        self.status = status
 
 
 class TokenCredential:
@@ -126,6 +134,21 @@ class WorkflowCallbackClient:
     @staticmethod
     def _parse(response: httpx.Response) -> dict[str, Any]:
         if response.status_code >= 400:
+            if response.status_code == 409:
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = None
+                error = payload.get("error") if isinstance(payload, Mapping) else None
+                details = error.get("details") if isinstance(error, Mapping) else None
+                if (
+                    isinstance(details, Mapping)
+                    and error.get("code") == "workflow_not_running"
+                    and isinstance(details.get("workflowId"), str)
+                    and isinstance(details.get("status"), str)
+                    and details.get("status") in {"completed", "failed", "cancelled"}
+                ):
+                    raise WorkflowAlreadyTerminal(details["workflowId"], details["status"])
             raise CallbackClientError(
                 f"Internal callback API returned {response.status_code}: {response.text}"
             )

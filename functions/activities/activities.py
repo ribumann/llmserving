@@ -12,7 +12,11 @@ import logging
 import os
 from typing import Any
 
-from orchestration_lib.callback_client import WorkflowCallbackClient
+from orchestration_lib.callback_client import (
+    CallbackClientError,
+    WorkflowAlreadyTerminal,
+    WorkflowCallbackClient,
+)
 from orchestration_lib.container_jobs import (
     dispatch_job as _dispatch_job,
 )
@@ -111,3 +115,35 @@ def report_terminal_failure(job_input: dict) -> None:
         job_input.get("reason", "unknown"),
         extra={"workflowId": job_input["workflowId"]},
     )
+
+
+def finalize_workflow(job_input: dict) -> dict[str, str]:
+    """Version-two safety net: preserve a worker's authoritative terminal outcome."""
+    workflow_id = job_input["workflowId"]
+    status = job_input["status"]
+    if status not in {"failed", "cancelled"}:
+        raise ValueError("Monitor finalization may only fail or cancel a running workflow.")
+    diagnostics = {"reason": job_input["reason"]}
+    if "jobStatus" in job_input:
+        diagnostics["jobStatus"] = job_input["jobStatus"]
+    with WorkflowCallbackClient() as client:
+        try:
+            result = client.complete_workflow(workflow_id, status=status, diagnostics=diagnostics)
+        except WorkflowAlreadyTerminal as exc:
+            if exc.workflow_id != workflow_id:
+                raise
+            LOGGER.info(
+                "Preserved terminal workflow status=%s",
+                exc.status,
+                extra={"workflowId": workflow_id},
+            )
+            return {"status": exc.status}
+    if result.get("workflowId") != workflow_id or result.get("status") != status:
+        raise CallbackClientError("Finalization callback returned an unexpected workflow outcome.")
+    LOGGER.warning(
+        "Finalized workflow status=%s reason=%s",
+        status,
+        diagnostics["reason"],
+        extra={"workflowId": workflow_id},
+    )
+    return {"status": status}

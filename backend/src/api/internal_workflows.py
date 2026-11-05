@@ -203,7 +203,7 @@ def complete_workflow(
                 status_code=409,
                 code="workflow_not_running",
                 message=str(exc),
-                details={"workflowId": workflow_id},
+                details={"workflowId": workflow_id, "status": exc.status.value},
             ) from exc
 
         # Translates this workflow's now-terminal outcome into the DemoEnvironment/
