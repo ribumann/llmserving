@@ -143,7 +143,11 @@ def run_llmperf(base_url: str) -> dict[str, Any]:
             assert math.isfinite(metric) and metric > 0
     throughput = result["metrics"]["throughputTokensPerSec"]
     assert math.isfinite(throughput) and throughput > 0
-    return {"provenance": provenance, "report": result}
+    return {
+        "provenance": provenance,
+        "upstreamTokenizer": "hf-internal-testing/llama-tokenizer",
+        "report": result,
+    }
 
 
 def main() -> None:

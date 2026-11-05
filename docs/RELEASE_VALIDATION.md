@@ -1,9 +1,9 @@
 # Public validation evidence and blocked gates
 
 This is a pre-release evidence record, not full Azure acceptance. Source
-baseline `c165562db0b1a57a5dd96597727d048b3b54c679` includes reviewed PRs
+baseline `e30d0e043947a66d023ec3236f476d44d3d5f627` includes reviewed PRs
 [1](https://github.com/ribumann/llmserving/pull/1) through
-[15](https://github.com/ribumann/llmserving/pull/15). Each implementation PR
+[16](https://github.com/ribumann/llmserving/pull/16). Each implementation PR
 received independent agentic review and passing checks before merge.
 Named test runs below retain their exact original source SHA; merged code is
 not a claim that an earlier measurement came from a newer combined revision.
@@ -25,6 +25,8 @@ browser gate in [PR 15](https://github.com/ribumann/llmserving/pull/15).
 | Fail-closed Terraform state persistence | [Merged PR 8](https://github.com/ribumann/llmserving/pull/8), `ab68d71b235c0a1bed3225356b656f60ed34c363`; tested SHA `a931e2238bdbb061358bb7809c70e7129f4dcc8a`, [Runtime](https://github.com/ribumann/llmserving/actions/runs/41974553102), [Terraform](https://github.com/ribumann/llmserving/actions/runs/41974555984) | 110 worker tests; manual transfer is not distributed locking or independent cancel recovery |
 | Separate operator SSO tenant | [Merged PR 9](https://github.com/ribumann/llmserving/pull/9), `0acbe3d330b1a11fe2b6f79dc60d80fe9a0fe50f`; tested SHA `593b56331878d882cd5ed0084f6db94df2a7e669`, [Backend](https://github.com/ribumann/llmserving/actions/runs/41975399550), [Terraform](https://github.com/ribumann/llmserving/actions/runs/41975402414), [Runtime](https://github.com/ribumann/llmserving/actions/runs/41975405361) | 226 PostgreSQL tests, five native mocked plans; not live cross-tenant browser consent/injection |
 | Real local browser/API inference | Merged `c165562db0b1a57a5dd96597727d048b3b54c679`; [fresh combined-main Runtime](https://github.com/ribumann/llmserving/actions/runs/41978810510), downloadable `real-local-api-evidence` | Actual Chromium renders a real CPU Ollama response/revision/timing; anonymous 401 and reload-history behavior verified, plus API golden/perf/cancel/teardown; local-demo/dev, not production proxy, Azure SSO or every UI journey |
+| Ownership-safe worker state lease | Merged PR 16, `e30d0e043947a66d023ec3236f476d44d3d5f627`; reviewed source `0593a15987506463e6cb4b0e7dd2816ec8c3a03b`, [Runtime](https://github.com/ribumann/llmserving/actions/runs/41980021433) | 151 worker tests, private recovery capability before acquisition, concurrent/failure/owner-release checks; not actual Azure lease acceptance or all-layer native backend recovery |
+| Genuine packaged CPU toolkit smoke | PR 17 source `bba9d867c0b26b8722b53822901065dfe8960c90`, tested synthetic merge `17a005336c0c817ad5301135ece105c9bedc902a`; [Runtime/evidence](https://github.com/ribumann/llmserving/actions/runs/41981822309), `genuine-local-toolkit-evidence` | Real lm-eval 0.4.13, one GSM8K document; real pinned ray-project LLMPerf two-request run; not durable routing, every benchmark/API journey or Azure acceptance |
 
 The local flow exercised prompt, immutable versioned configuration/report
 snapshots, two golden cases, single-stream and concurrency-10 performance,
@@ -67,6 +69,34 @@ reported completion tokens over measured wall time. GPU utilization is
 explicitly unavailable, not zero. No compatible lm-eval benchmark subset was
 run in this flow.
 
+## Genuine CPU toolkit smoke
+
+The separate packaged-runner gate above uses the same model manifest in an
+owned two-CPU/two-GiB Ollama container. Evaluators run sequentially in separate
+two-CPU/four-GiB containers. The compatible GSM8K chat-generation subset has
+one effective document, zero few-shot examples, seed 42 and an eight-token
+output cap. The two scoring-filter log records refer to that one document.
+The actual output is nonempty; its strict score is **0/100**, honestly flagged
+as a regression against a configured 75-point reference. That reference is
+not a measured tiny-model baseline or a new calibration.
+
+Actual ray-project LLMPerf commit
+`f1d6bed47e4501b0e371082b41601b59ab55269f` completed two concurrency-one requests
+with zero errors. Requested mean input/output lengths are 128/8 with zero
+standard deviation and no explicit warmup. The model was already used by the
+preceding benchmark. Its upstream sonnet prompt builder and
+`hf-internal-testing/llama-tokenizer` accounting differ from the earlier native
+Ollama smoke; these numbers are **not** an optimization comparison.
+
+| Requests / errors | E2E p50 / p95 ms | TTFT p50 / p95 ms | ITL p50 / p95 ms | Upstream tokens/s |
+| --- | --- | --- | --- | --- |
+| 2 / 0 | 1038.63 / 1081.98 | 790.96 / 833.39 | 115.39 / 120.20 | 6.5582 |
+
+These values belong only to source/run `17a0053...` / `41981822309`, not a
+later combined revision. They establish genuine tool execution/result mapping,
+not representative performance, model-quality success, production memory sizing,
+GPU streams or authenticated Azure acceptance.
+
 ## Blocked or not yet demonstrated
 
 Both primary canary/cleanup workflows are currently disabled pending exact
@@ -85,7 +115,7 @@ additional fallback resources.
 | Independent billable-resource cleanup | Pending: actual failure/cancellation cleanup plus fallback and absence checks before provisioning |
 | Small-model Azure GPU acceptance | Not run; gated on auth, cleanup and bounded aggregate exposure |
 | Complete durable run parity | Pending: proven golden/benchmark/genuine pinned LLMPerf/report semantics plus immutable snapshots, restart/duplicate/cancellation/stale/failure/owner-lock tests; routing remains disabled |
-| Additional real browser journeys and small benchmark subset | Real local inference UI passed above; remaining real UI journeys and compatible lm-eval subset not run; mocked scenarios remain distinct |
+| Additional real browser/API benchmark journeys and calibration | Real local inference UI and one compatible packaged benchmark subset passed above; remaining real UI/API benchmark journeys and representative benchmark/LLMPerf calibration are pending; mocks remain distinct |
 | Immutable full release/optimized API image | Not complete; do not remove proven API runners or call commit tags immutable |
 
 No new billable Azure resource was created by this validation execution.
