@@ -710,6 +710,10 @@ resource "azurerm_container_app" "frontend" {
 
   lifecycle {
     ignore_changes = [template[0].container[0].image]
+    precondition {
+      condition     = length(toset(values(local.job_names))) == length(local.jobs)
+      error_message = "Computed ACA job names must remain unique; refuse any shortened-name collision."
+    }
   }
 }
 
@@ -806,7 +810,12 @@ locals {
   # azurerm_container_app_job.jobs[...] itself - that resource already depends on
   # azurerm_container_app.backend (via BACKEND_INTERNAL_CALLBACK_URL, below), so a reference
   # the other direction would create the same kind of cycle avoided by local.functions_fqdn.
-  job_names = { for key in keys(local.jobs) : key => "${var.name_prefix}-job-${replace(key, "_", "-")}" }
+  full_job_names = { for key in keys(local.jobs) : key => "${var.name_prefix}-job-${replace(key, "_", "-")}" }
+  job_names = {
+    for key, name in local.full_job_names : key => (
+      length(name) <= 32 ? name : "${trimsuffix(substr(name, 0, 23), "-")}-${substr(sha256(name), 0, 8)}"
+    )
+  }
 }
 
 resource "azurerm_user_assigned_identity" "jobs" {
@@ -985,8 +994,18 @@ data "azurerm_role_definition" "subnet_vm" {
   scope              = local.shared.gpu_subnet_id
 }
 
+data "azurerm_role_definition" "subnet_reader" {
+  count              = local.retained_group ? 1 : 0
+  role_definition_id = "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+  scope              = local.shared.gpu_subnet_id
+}
+
 locals {
-  subnet_permissions = local.retained_group ? data.azurerm_role_definition.subnet_vm[0].permissions : []
+  subnet_role_permissions = local.retained_group ? [
+    data.azurerm_role_definition.subnet_vm[0].permissions,
+    data.azurerm_role_definition.subnet_reader[0].permissions
+  ] : []
+  subnet_permissions = flatten(local.subnet_role_permissions)
   subnet_actions     = flatten([for permission in local.subnet_permissions : permission.actions])
   subnet_operations = {
     read   = "microsoft.network/virtualnetworks/subnets/read"
@@ -1002,7 +1021,8 @@ locals {
     ])
   }
   safe_subnet_permissions = (
-    length(local.subnet_permissions) > 0
+    length(local.subnet_role_permissions) == 2
+    && alltrue([for permissions in local.subnet_role_permissions : length(permissions) > 0])
     && alltrue([for action in local.subnet_actions : can(regex("^[a-z0-9./*-]+$", lower(action)))])
     && alltrue([for permission in local.subnet_permissions :
       length(permission.not_actions) == 0 &&
@@ -1014,8 +1034,8 @@ locals {
   )
 }
 
-# VM Contributor can join/read this exact subnet, not edit/delete it. Validate the actual
-# definition before assigning it; unknown, conditional or denial-bearing metadata is not proof.
+# VM Contributor supplies join but not subnet read. Reader supplies read at the same
+# exact subnet; validate their combined definitions before assigning either role.
 resource "azurerm_role_assignment" "runtime_gpu_subnet" {
   for_each = local.retained_group ? {
     backend          = azurerm_user_assigned_identity.backend.principal_id
@@ -1030,6 +1050,24 @@ resource "azurerm_role_assignment" "runtime_gpu_subnet" {
     precondition {
       condition     = local.safe_subnet_permissions
       error_message = "The subnet role must unconditionally allow read/join, with no possible subnet write/delete or not_actions; no automatic broad-role fallback is allowed."
+    }
+  }
+}
+
+resource "azurerm_role_assignment" "runtime_gpu_subnet_reader" {
+  for_each = local.retained_group ? {
+    backend          = azurerm_user_assigned_identity.backend.principal_id
+    terraform_runner = azurerm_user_assigned_identity.jobs["terraform_runner"].principal_id
+  } : {}
+
+  scope              = local.shared.gpu_subnet_id
+  role_definition_id = data.azurerm_role_definition.subnet_reader[0].id
+  principal_id       = each.value
+
+  lifecycle {
+    precondition {
+      condition     = local.safe_subnet_permissions
+      error_message = "The composed subnet roles must unconditionally allow read/join without subnet write/delete, conditions or not_actions."
     }
   }
 }

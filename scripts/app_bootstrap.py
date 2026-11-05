@@ -10,8 +10,10 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import ssl
 import subprocess
+from urllib.parse import urlsplit
 import zipfile
 
 from release_bundle import IMAGES, file_hash
@@ -27,6 +29,8 @@ ENVIRONMENT = (
 )
 APP_PATH = f"/v1.0/applications(appId='{CLIENT}')"
 SECRET_NAME = "sso-client-secret"
+GRAPH_HOST = "graph.microsoft.com"
+VAULT_HOST_PATTERN = re.compile(r"[a-z][a-z0-9-]{1,22}[a-z0-9]\.vault\.azure\.net")
 
 
 class BootstrapError(ValueError):
@@ -124,11 +128,20 @@ def control_inputs(contract: dict) -> dict:
 
 
 def az_json(*arguments: str) -> object:
+    executable = "az"
+    if os.name == "nt":
+        executable = shutil.which(executable)
+        if executable is None:
+            raise BootstrapError("Azure CLI unavailable, timed out or returned invalid JSON.")
+    environment = os.environ.copy()
+    for name in tuple(environment):
+        if name.lower() in {"http_proxy", "https_proxy", "all_proxy"}:
+            environment.pop(name)
     try:
         result = subprocess.run(
-            ["az", *arguments, "--subscription", SUBSCRIPTION,
+            [executable, *arguments, "--subscription", SUBSCRIPTION,
              "--only-show-errors", "--output", "json"],
-            capture_output=True, check=False, timeout=90,
+            capture_output=True, check=False, timeout=90, env=environment,
         )
         require(result.returncode == 0,
                 "Azure CLI operation failed; inspect permissions/connectivity privately. Raw diagnostics suppressed.")
@@ -244,12 +257,76 @@ def azure_token(resource: str) -> str:
     return token["accessToken"]
 
 
+def loopback_vault_proxy() -> tuple[str, int] | None:
+    configured = [
+        os.environ.get(name)
+        for name in ("HTTPS_PROXY", "https_proxy")
+        if os.environ.get(name)
+    ]
+    if not configured:
+        return None
+    require(
+        len(set(configured)) == 1,
+        "Private vault access requires one unambiguous HTTPS_PROXY loopback endpoint.",
+    )
+    try:
+        proxy = urlsplit(configured[0])
+        hostname = proxy.hostname
+        port = proxy.port
+    except ValueError:
+        raise BootstrapError("HTTPS_PROXY must be a plain loopback HTTP CONNECT endpoint.") from None
+    require(
+        proxy.scheme == "http"
+        and hostname in {"127.0.0.1", "::1"}
+        and port is not None
+        and 1 <= port <= 65535
+        and proxy.username is None
+        and proxy.password is None
+        and proxy.path in {"", "/"}
+        and not proxy.query
+        and not proxy.fragment,
+        "HTTPS_PROXY must be a plain loopback HTTP CONNECT endpoint without credentials.",
+    )
+    return hostname, port
+
+
+def https_connection(host: str) -> http.client.HTTPSConnection:
+    context = ssl.create_default_context()
+    if host == GRAPH_HOST:
+        return http.client.HTTPSConnection(host, timeout=30, context=context)
+    require(
+        VAULT_HOST_PATTERN.fullmatch(host) is not None,
+        "Only Microsoft Graph and the approved Azure Key Vault host are supported.",
+    )
+    proxy = loopback_vault_proxy()
+    if proxy is None:
+        return http.client.HTTPSConnection(host, timeout=30, context=context)
+    proxy_host, proxy_port = proxy
+    connection = http.client.HTTPSConnection(
+        proxy_host, proxy_port, timeout=30, context=context,
+    )
+    connection.set_tunnel(host, 443)
+    return connection
+
+
+def check_vault_connectivity(host: str) -> None:
+    connection = https_connection(host)
+    try:
+        connection.connect()
+    except (OSError, http.client.HTTPException):
+        raise BootstrapError(
+            "Private vault CONNECT/TLS preflight failed; no app credential was created."
+        ) from None
+    finally:
+        connection.close()
+
+
 def request_json(
     host: str, path: str, method: str, token: str, payload: dict,
     *, read_response: bool = False,
 ) -> object:
-    # No redirect following, proxy subprocess, HTTP diagnostics or response-body logging.
-    connection = http.client.HTTPSConnection(host, timeout=30, context=ssl.create_default_context())
+    # Graph stays direct; only the private vault uses an explicit loopback CONNECT tunnel.
+    connection = https_connection(host)
     try:
         connection.request(method, path, body=json.dumps(payload).encode(),
                            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
@@ -287,6 +364,8 @@ def mutate(operation: str, contract: dict, plan: dict, secret_fd: int | None) ->
     if operation == "create-secret":
         require(plan["existing_credential_key_ids"] == [],
                 "Initial credential creation requires no existing passwords; inspect rather than rotating blindly.")
+        vault_host = f"{contract['vault_name']}.vault.azure.net"
+        check_vault_connectivity(vault_host)
         # Acquire both scoped tokens before creating any one-time credential.
         vault_token = azure_token("https://vault.azure.net")
         graph_token = azure_token("https://graph.microsoft.com")
@@ -302,7 +381,7 @@ def mutate(operation: str, contract: dict, plan: dict, secret_fd: int | None) ->
         )
         try:
             request_json(
-                f"{contract['vault_name']}.vault.azure.net",
+                vault_host,
                 f"/secrets/{SECRET_NAME}?api-version=7.4", "PUT", vault_token,
                 {"value": credential["secretText"], "contentType": "Entra application client secret"},
             )

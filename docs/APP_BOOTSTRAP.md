@@ -111,6 +111,25 @@ python scripts/app_bootstrap.py create-secret --inputs /protected/app-inputs.jso
   --approve-preview-sha256 <reviewed-secret-preview-sha256>
 ```
 
+On the Windows private-network operator, set `HTTPS_PROXY` only to the
+approved local Squid listener (for example
+`http://127.0.0.1:3128`) before `create-secret`. The helper requires a
+credential-free loopback endpoint when configured and uses it only for the private Key Vault
+HTTPS `CONNECT` tunnel; TLS still validates the vault hostname end to end.
+Microsoft Graph requests and Azure CLI subprocesses are direct. The helper
+performs a CONNECT/TLS preflight before creating the one-time app credential
+and never falls back to direct vault access if a proxy is configured, or accepts
+a remote proxy. With both `HTTPS_PROXY` and `https_proxy` unset, the existing
+direct private-network/VPN path is preserved.
+
+The control module preserves ACA job names that already fit Azure's 32-character
+limit; only overlong names receive a shortened prefix and stable full-name hash
+suffix. Dispatch, outputs and role scopes all use the same computed names.
+Retained control assigns VM Contributor (join) plus Reader (read) to the backend
+and Terraform-runner identities at the **exact GPU subnet**. Both live role
+definitions must jointly prove unconditional subnet read/join with no subnet
+write/delete, conditions or `not_actions`; no Network Contributor fallback is used.
+
 The hash binds current live app redirects/token settings, target, images,
 ZIP hash, explicit operator UPN, domain policy, current credential key IDs and
 the new credential's display name/expiry; callback previews also bind
