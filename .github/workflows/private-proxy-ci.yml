@@ -37,9 +37,12 @@ jobs:
             llmserving-private-proxy:network sh -ec '
               openvpn --version >/dev/null
               squid -k parse -f /etc/llmserving/squid.conf
-              ! command -v az
-              ! command -v terraform
-              ! command -v gh
+              for tool in az terraform gh; do
+                if command -v "$tool"; then
+                  echo "Network-only target unexpectedly includes $tool" >&2
+                  exit 1
+                fi
+              done
               test ! -e /opt/llmserving/infra
             '
       - name: Compile the actual AzureRM 3.117.1 Key Vault SDK fixture
