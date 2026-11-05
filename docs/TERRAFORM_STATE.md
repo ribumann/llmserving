@@ -41,8 +41,17 @@ Leases are intentionally infinite rather than automatically expiring into an
 untracked retry. Initialization failures release the lease, but failed mutations,
 timeouts, persistence/output failures and force-killed workers retain it for
 operator recovery. This sacrifices automatic retry availability to preserve
-ownership while resource/state changes may be uncertain. The workflow ID is
-stored privately in the lock blob; lease IDs are not published in diagnostics.
+ownership while resource/state changes may be uncertain.
+
+Before acquisition, every attempt durably writes its proposed lease UUID,
+workflow/environment IDs and recovery-record name to a new private
+`locks/<environmentId>/attempts/<random-attempt-id>.json` blob, using conditional
+creation. Acquisition cannot proceed without acknowledgment. The lock's
+ownership metadata points to that recovery record after acquisition. Attempt
+records cover termination before that metadata update and ambiguous acquisition
+responses; they are retained, not automatically deleted. Lease IDs never appear
+in logs, public diagnostics, Terraform state or public artifacts. Treat these
+private records as sensitive lease capabilities, not an outputs manifest.
 
 Outside Azure hosting, with **both** storage variables unset, existing local
 development/test behavior remains local-only. This is not a cloud opt-out:
@@ -80,8 +89,12 @@ state by guessing resource names or adopting original deployment resources.
 
 For a retained lease, first prove the named worker and its child processes have
 terminated, recover the latest private state and independently inventory owned
-resources. An authorized operator may then release the exact held lease through
-the storage lease API and review the next plan. Never blindly break a lease,
+resources. Read the private per-attempt recovery record for that execution to
+obtain its proposed lease UUID. If acquisition or metadata acknowledgment was
+lost, inspect the private attempt records instead of assuming the lock's older
+workflow label is current. An authorized operator may then release the exact
+held lease through the storage lease API and review the next plan. A mismatched
+lease UUID must fail, never trigger a break or takeover. Never blindly break a lease,
 delete the lock blob, automatically expire it, or retry against an active or
 unverified owner. No automated unlock/recovery command is provided.
 

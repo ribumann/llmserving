@@ -33,6 +33,8 @@ class Storage:
     def __init__(self) -> None:
         self.owner = None
         self.metadata = None
+        self.recovery = {}
+        self.recovery_status = 201
         self.actions = []
         self.uploaded = None
         self.upload_status = 201
@@ -47,6 +49,12 @@ class Storage:
         return httpx.Response(200, json=self.metadata)
 
     def put(self, url, *, headers, content, **_kwargs):
+        if "/attempts/" in url:
+            assert headers["If-None-Match"] == "*"
+            assert url not in self.recovery
+            if self.recovery_status == 201:
+                self.recovery[url] = json.loads(content)
+            return httpx.Response(self.recovery_status)
         action = headers.get("x-ms-lease-action")
         if action:
             self.actions.append(action)
@@ -57,9 +65,15 @@ class Storage:
                         409, headers={"x-ms-error-code": "LeaseAlreadyPresent"}
                     )
                 self.owner = headers["x-ms-proposed-lease-id"]
+                assert any(
+                    record["leaseId"] == self.owner for record in self.recovery.values()
+                )
                 return httpx.Response(201, headers={"x-ms-lease-id": self.owner})
             assert action == "release"
-            assert headers["x-ms-lease-id"] == self.owner
+            if headers["x-ms-lease-id"] != self.owner:
+                return httpx.Response(
+                    412, headers={"x-ms-error-code": "LeaseIdMismatch"}
+                )
             if self.release_status == 200:
                 self.owner = None
             return httpx.Response(self.release_status)
@@ -151,12 +165,102 @@ def test_failed_mutation_keeps_lock_and_persists_partial_state(
     assert b"partially-created-test-resource" in storage.uploaded
     assert storage.actions == ["acquire"]
     assert "lock retained" in caplog.text
+    recorded = [
+        record
+        for record in storage.recovery.values()
+        if record["leaseId"] == storage.owner
+    ]
+    assert len(recorded) == 1
+    assert recorded[0]["workflowId"] == "wf-1"
+    assert storage.metadata["recoveryBlob"] == recorded[0]["recoveryBlob"]
+    assert recorded[0]["leaseId"] not in caplog.text
     callback.complete_workflow.assert_not_called()
     command = MagicMock()
     monkeypatch.setattr(entrypoint, "_run_terraform", command)
     with pytest.raises(entrypoint.TerraformRunError, match="acquisition"):
         invoke(tmp_path, workflow_id="wf-retry")
     command.assert_not_called()
+
+
+@pytest.mark.parametrize("status", [403, 412, 500])
+def test_recovery_record_failure_prevents_acquisition(
+    tmp_path, monkeypatch, storage, status
+):
+    storage.recovery_status = status
+    command = MagicMock()
+    monkeypatch.setattr(entrypoint, "_run_terraform", command)
+    with pytest.raises(entrypoint.TerraformRunError, match="recovery record"):
+        invoke(tmp_path)
+    assert storage.owner is None
+    assert storage.recovery == {}
+    assert storage.actions == []
+    command.assert_not_called()
+
+
+def test_termination_after_acquire_before_metadata_update_is_recoverable(
+    monkeypatch, storage
+):
+    put = storage.put
+
+    def terminate(url, *, headers, content, **kwargs):
+        if "/attempts/" not in url and headers.get("x-ms-blob-type") == "BlockBlob":
+            if headers.get("x-ms-lease-id"):
+                raise SystemExit("simulated termination")
+        return put(url, headers=headers, content=content, **kwargs)
+
+    monkeypatch.setattr(entrypoint.httpx, "put", terminate)
+    storage.release_status = 500
+    with pytest.raises(entrypoint.TerraformRunError, match="release"):
+        with entrypoint._remote_state_lock("demo123", "wf-terminated"):
+            pytest.fail("Termination must precede mutation.")
+    assert storage.owner is not None
+    record = next(iter(storage.recovery.values()))
+    assert record["leaseId"] == storage.owner
+    assert record["workflowId"] == "wf-terminated"
+
+
+def test_ambiguous_acquisition_has_durable_private_lease_id(monkeypatch, storage):
+    put = storage.put
+
+    def ambiguous(url, *, headers, content, **kwargs):
+        response = put(url, headers=headers, content=content, **kwargs)
+        if headers.get("x-ms-lease-action") == "acquire":
+            raise httpx.ReadTimeout("simulated lost acquisition response")
+        return response
+
+    monkeypatch.setattr(entrypoint.httpx, "put", ambiguous)
+    with pytest.raises(entrypoint.TerraformRunError, match="ownership"):
+        with entrypoint._remote_state_lock("demo123", "wf-ambiguous"):
+            pytest.fail("Unacknowledged acquisition must not permit mutation.")
+    assert storage.owner is not None
+    record = next(iter(storage.recovery.values()))
+    assert record["leaseId"] == storage.owner
+    assert record["workflowId"] == "wf-ambiguous"
+    assert storage.actions == ["acquire"]
+
+
+def test_retained_lease_recovery_requires_exact_private_owner(storage):
+    with pytest.raises(RuntimeError, match="failed mutation"):
+        with entrypoint._remote_state_lock("demo123", "wf-owner") as marker:
+            marker.mutation_started = True
+            raise RuntimeError("failed mutation")
+    recorded = next(iter(storage.recovery.values()))
+    url = (
+        "https://teststate.blob.core.windows.net/tfstate/locks/demo123.json?comp=lease"
+    )
+    denied = entrypoint._lock_put(
+        url, {"x-ms-lease-action": "release", "x-ms-lease-id": "wrong-owner"}
+    )
+    assert denied.status_code == 412
+    assert storage.owner == recorded["leaseId"]
+    released = entrypoint._lock_put(
+        url, {"x-ms-lease-action": "release", "x-ms-lease-id": recorded["leaseId"]}
+    )
+    assert released.status_code == 200
+    assert storage.owner is None
+    with entrypoint._remote_state_lock("demo123", "wf-recovered"):
+        assert storage.metadata["workflowId"] == "wf-recovered"
+    assert "break" not in storage.actions
 
 
 @pytest.mark.parametrize("release_status", [200, 403, 500])

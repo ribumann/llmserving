@@ -298,9 +298,14 @@ def _remote_state_lock(environment_id: str, workflow_id: str) -> Iterator[_State
     if not url:
         yield marker
         return
-    owner = json.dumps(
-        {"environmentId": environment_id, "workflowId": workflow_id}
-    ).encode("utf-8")
+    lease_id = str(uuid4())
+    recovery_blob = f"locks/{environment_id}/attempts/{uuid4()}.json"
+    ownership = {
+        "environmentId": environment_id,
+        "workflowId": workflow_id,
+        "recoveryBlob": recovery_blob,
+    }
+    owner = json.dumps(ownership).encode("utf-8")
     try:
         existing = httpx.get(url, headers=_storage_bearer_headers(), timeout=30.0)
     except httpx.RequestError as exc:
@@ -350,7 +355,29 @@ def _remote_state_lock(environment_id: str, workflow_id: str) -> Iterator[_State
             stdout="",
             stderr="",
         )
-    lease_id = str(uuid4())
+    recovery_url = _blob_url(recovery_blob)
+    if not recovery_url:
+        raise TerraformRunError(
+            "Remote state configuration changed before acquisition.",
+            stdout="",
+            stderr="",
+        )
+    recovered = _lock_put(
+        recovery_url,
+        {
+            "If-None-Match": "*",
+            "x-ms-blob-type": "BlockBlob",
+            "Content-Type": "application/json",
+        },
+        json.dumps({**ownership, "leaseId": lease_id}).encode("utf-8"),
+    )
+    if recovered.status_code != 201:
+        raise TerraformRunError(
+            f"Remote state lease recovery record returned HTTP {recovered.status_code}; "
+            "refusing acquisition without durable ownership recovery.",
+            stdout="",
+            stderr="",
+        )
     acquired = _lock_put(
         f"{url}?comp=lease",
         {
