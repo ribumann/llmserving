@@ -9,7 +9,7 @@ mock_provider "azurerm" {
     defaults = {
       id = "/subscriptions/44444444-4444-4444-4444-444444444444/providers/Microsoft.Authorization/roleDefinitions/9980e02c-c2be-4d73-94e8-173b1dc7cf3c"
       permissions = [{
-        actions           = ["Microsoft.Network/*/read", "Microsoft.Network/virtualNetworks/subnets/join/action", "Microsoft.Network/networkInterfaces/*", "Microsoft.Compute/virtualMachines/*"]
+        actions           = ["Microsoft.Network/virtualNetworks/read", "Microsoft.Network/virtualNetworks/subnets/join/action", "Microsoft.Network/networkInterfaces/*", "Microsoft.Compute/virtualMachines/*"]
         not_actions       = []
         data_actions      = []
         not_data_actions  = []
@@ -39,6 +39,21 @@ mock_provider "azuread" {
 mock_provider "azapi" {}
 mock_provider "random" {}
 mock_provider "time" {}
+
+override_data {
+  target = data.azurerm_role_definition.subnet_reader[0]
+  values = {
+    id = "/subscriptions/44444444-4444-4444-4444-444444444444/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7"
+    permissions = [{
+      actions           = ["*/read"]
+      not_actions       = []
+      data_actions      = []
+      not_data_actions  = []
+      condition         = ""
+      condition_version = ""
+    }]
+  }
+}
 
 override_data {
   target = data.terraform_remote_state.shared
@@ -85,6 +100,7 @@ run "external_same_tenant_default" {
         azurerm_role_assignment.model_deployment_vm_contributor["subscription"]
       ] : role.scope == "/subscriptions/44444444-4444-4444-4444-444444444444"])
       && length(azurerm_role_assignment.runtime_gpu_subnet) == 0
+      && length(azurerm_role_assignment.runtime_gpu_subnet_reader) == 0
       && length(azurerm_role_assignment.backend_functions_keys) == 0
       && length(azurerm_role_assignment.backend_model_job) == 0
     )
@@ -322,6 +338,12 @@ run "retained_control_scopes" {
         role.scope == local.shared.gpu_subnet_id
         && role.role_definition_id == data.azurerm_role_definition.subnet_vm[0].id
       ])
+      && length(azurerm_role_assignment.runtime_gpu_subnet_reader) == 2
+      && keys(azurerm_role_assignment.runtime_gpu_subnet_reader) == keys(azurerm_role_assignment.runtime_gpu_subnet)
+      && alltrue([for role in azurerm_role_assignment.runtime_gpu_subnet_reader :
+        role.scope == local.shared.gpu_subnet_id
+        && role.role_definition_id == data.azurerm_role_definition.subnet_reader[0].id
+      ])
       && azurerm_role_assignment.backend_tfstate_blob.scope == local.storage_scope_ids.tfstate
       && azurerm_role_assignment.terraform_runner_tfstate_blob.scope == local.storage_scope_ids.tfstate
       && azurerm_role_assignment.backend_artifacts_blob.scope == local.storage_scope_ids.artifacts
@@ -418,7 +440,9 @@ run "retained_rejects_broad_subnet_role" {
   }
   expect_failures = [
     azurerm_role_assignment.runtime_gpu_subnet["backend"],
-    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"]
+    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["backend"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["terraform_runner"]
   ]
 }
 
@@ -444,7 +468,9 @@ run "retained_rejects_insufficient_subnet_role" {
   }
   expect_failures = [
     azurerm_role_assignment.runtime_gpu_subnet["backend"],
-    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"]
+    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["backend"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["terraform_runner"]
   ]
 }
 
@@ -470,7 +496,9 @@ run "retained_rejects_conditional_subnet_role" {
   }
   expect_failures = [
     azurerm_role_assignment.runtime_gpu_subnet["backend"],
-    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"]
+    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["backend"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["terraform_runner"]
   ]
 }
 
@@ -496,7 +524,9 @@ run "retained_rejects_subnet_denial_metadata" {
   }
   expect_failures = [
     azurerm_role_assignment.runtime_gpu_subnet["backend"],
-    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"]
+    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["backend"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["terraform_runner"]
   ]
 }
 
@@ -515,7 +545,9 @@ run "retained_rejects_missing_subnet_metadata" {
   }
   expect_failures = [
     azurerm_role_assignment.runtime_gpu_subnet["backend"],
-    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"]
+    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["backend"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["terraform_runner"]
   ]
 }
 
@@ -525,4 +557,86 @@ run "rejects_blank_retained_group" {
     existing_resource_group_name = ""
   }
   expect_failures = [var.existing_resource_group_name]
+}
+
+run "release_job_names_preserve_valid_names_and_shorten_only_overlong_names" {
+  command = plan
+  variables {
+    name_prefix = "llmrelease"
+  }
+  assert {
+    condition = (
+      alltrue([for name in values(local.job_names) :
+        length(name) <= 32 && can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", name))
+      ])
+      && length(toset(values(local.job_names))) == length(local.jobs)
+      && local.job_names["performance_worker"] == "llmrelease-job-performa-${substr(sha256("llmrelease-job-performance-worker"), 0, 8)}"
+      && alltrue([for key, name in local.full_job_names :
+        key == "performance_worker" || local.job_names[key] == name
+      ])
+      && azurerm_container_app.backend.name == "llmrelease-backend"
+      && azurerm_container_app.frontend.name == "llmrelease-frontend"
+      && alltrue([for key, job in azurerm_container_app_job.jobs : job.name == local.job_names[key]])
+      && alltrue([for key, scope in local.job_scope_ids :
+        scope == "${local.control_scope_id}/providers/Microsoft.App/jobs/${local.job_names[key]}"
+      ])
+    )
+    error_message = "ACA jobs must fit 32 characters with a stable full-name hash, preserving all valid names, app callbacks and shared dispatch/RBAC references."
+  }
+}
+
+run "retained_rejects_reader_with_subnet_write" {
+  command = plan
+  variables {
+    existing_resource_group_name                      = "rg-retained-control"
+    demo_resource_group_name                          = "rg-retained-demo"
+    container_apps_infrastructure_resource_group_name = "rg-approved-platform"
+  }
+  override_data {
+    target = data.azurerm_role_definition.subnet_reader[0]
+    values = {
+      permissions = [{
+        actions           = ["*/read", "Microsoft.Network/virtualNetworks/subnets/write"]
+        not_actions       = []
+        data_actions      = []
+        not_data_actions  = []
+        condition         = ""
+        condition_version = ""
+      }]
+    }
+  }
+  expect_failures = [
+    azurerm_role_assignment.runtime_gpu_subnet["backend"],
+    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["backend"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["terraform_runner"]
+  ]
+}
+
+run "retained_requires_subnet_read_from_reader" {
+  command = plan
+  variables {
+    existing_resource_group_name                      = "rg-retained-control"
+    demo_resource_group_name                          = "rg-retained-demo"
+    container_apps_infrastructure_resource_group_name = "rg-approved-platform"
+  }
+  override_data {
+    target = data.azurerm_role_definition.subnet_reader[0]
+    values = {
+      permissions = [{
+        actions           = ["Microsoft.Network/virtualNetworks/read"]
+        not_actions       = []
+        data_actions      = []
+        not_data_actions  = []
+        condition         = ""
+        condition_version = ""
+      }]
+    }
+  }
+  expect_failures = [
+    azurerm_role_assignment.runtime_gpu_subnet["backend"],
+    azurerm_role_assignment.runtime_gpu_subnet["terraform_runner"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["backend"],
+    azurerm_role_assignment.runtime_gpu_subnet_reader["terraform_runner"]
+  ]
 }

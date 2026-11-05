@@ -1,12 +1,19 @@
 import copy
 import hashlib
+import http.server
 import importlib.util
 import json
 import os
 from pathlib import Path
+import select
+import shutil
+import socket
+import socketserver
+import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock, patch
 import zipfile
@@ -18,12 +25,57 @@ spec = importlib.util.spec_from_file_location("app_bootstrap", SCRIPTS / "app_bo
 bootstrap = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bootstrap)
 
+class TunnelProxyHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        stream = self.request.makefile("rb")
+        request_line = stream.readline().decode("ascii").rstrip("\r\n")
+        headers = []
+        while True:
+            line = stream.readline()
+            if line in {b"", b"\r\n", b"\n"}:
+                break
+            headers.append(line.decode("ascii").rstrip("\r\n"))
+        stream.close()
+        self.server.tunnel_requests.append((request_line, headers))
+        if not request_line.startswith("CONNECT synthetic-vault.vault.azure.net:443 HTTP/1.") or any(
+            header.lower().startswith("proxy-authorization:") for header in headers
+        ):
+            self.request.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+            return
+        with socket.create_connection(("127.0.0.1", self.server.target_port)) as upstream:
+            self.request.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            while True:
+                readable, _, _ = select.select([self.request, upstream], [], [], 5)
+                if not readable:
+                    return
+                for source in readable:
+                    data = source.recv(65536)
+                    if not data:
+                        return
+                    destination = upstream if source is self.request else self.request
+                    destination.sendall(data)
+
+
+class ThreadedTunnelProxy(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+class ThreadedHttpServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
 
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
+        proxy_env = patch.dict(os.environ, {
+            "HTTPS_PROXY": "http://127.0.0.1:3128",
+            "https_proxy": "http://127.0.0.1:3128",
+        })
+        proxy_env.start()
+        self.addCleanup(proxy_env.stop)
         package = self.root / "functions.zip"
         with zipfile.ZipFile(package, "w") as archive:
             archive.writestr("host.json", "{}")
@@ -220,9 +272,11 @@ class BootstrapTests(unittest.TestCase):
             return credential if args[0] == "graph.microsoft.com" else None
         with patch.object(bootstrap, "azure_token", side_effect=token), \
              patch.object(bootstrap, "request_json", side_effect=request), \
+             patch.object(bootstrap, "check_vault_connectivity") as preflight, \
              patch.object(bootstrap.subprocess, "run") as process:
             bootstrap.mutate("create-secret", self.load(), plan, None)
         process.assert_not_called()
+        preflight.assert_called_once_with("synthetic-vault.vault.azure.net")
         self.assertEqual([event[0] for event in events], ["token", "token", "request", "request"])
         self.assertEqual(events[2][1][:3], (
             "graph.microsoft.com", bootstrap.APP_PATH + "/addPassword", "POST",
@@ -241,7 +295,7 @@ class BootstrapTests(unittest.TestCase):
              patch.object(bootstrap, "request_json", side_effect=[
                  {"keyId": key, "secretText": "synthetic-generated-secret"},
                  bootstrap.BootstrapError("private vault unavailable"),
-             ]):
+             ]), patch.object(bootstrap, "check_vault_connectivity"):
             with self.assertRaises(bootstrap.BootstrapError) as error:
                 bootstrap.mutate("create-secret", self.load(), plan, None)
         self.assertIn(key, str(error.exception))
@@ -258,6 +312,20 @@ class BootstrapTests(unittest.TestCase):
         token.assert_not_called()
         request.assert_not_called()
 
+    def test_create_secret_requires_vault_connect_before_creating_credential(self):
+        with patch.object(
+            bootstrap, "check_vault_connectivity",
+            side_effect=bootstrap.BootstrapError("private vault unavailable"),
+        ), patch.object(bootstrap, "azure_token") as token, \
+             patch.object(bootstrap, "request_json") as request:
+            with self.assertRaises(bootstrap.BootstrapError):
+                bootstrap.mutate("create-secret", self.load(), {
+                    "existing_credential_key_ids": [],
+                    "new_credential": {"displayName": "main"},
+                }, None)
+        token.assert_not_called()
+        request.assert_not_called()
+
     def test_http_success_reads_sensitive_json_only_when_requested(self):
         connection = Mock()
         connection.getresponse.return_value.status = 200
@@ -267,6 +335,116 @@ class BootstrapTests(unittest.TestCase):
                                             "POST", "synthetic-token", {}, read_response=True)
         self.assertEqual(result["secretText"], "synthetic")
         connection.getresponse.return_value.read.assert_called_once_with(65537)
+
+    def test_graph_request_is_direct_even_with_vault_proxy_configured(self):
+        connection = Mock()
+        connection.getresponse.return_value.status = 204
+        with patch.object(bootstrap.http.client, "HTTPSConnection", return_value=connection) as create:
+            bootstrap.request_json(bootstrap.GRAPH_HOST, bootstrap.APP_PATH, "PATCH",
+                                   "synthetic-token", {})
+        create.assert_called_once()
+        self.assertEqual(create.call_args.args[0], bootstrap.GRAPH_HOST)
+        connection.set_tunnel.assert_not_called()
+
+    def test_vault_proxy_rejects_non_loopback_and_embedded_credentials(self):
+        for endpoint in ("http://proxy.example:3128", "http://user:pass@127.0.0.1:3128",
+                         "https://127.0.0.1:3128", "http://127.0.0.1/path",
+                         "http://localhost:3128", "http://127.0.0.1:65536",
+                         "http://127.0.0.1:3128?ignored"):
+            with self.subTest(endpoint=endpoint), patch.dict(os.environ, {
+                "HTTPS_PROXY": endpoint, "https_proxy": endpoint,
+            }):
+                with self.assertRaises(bootstrap.BootstrapError):
+                    bootstrap.loopback_vault_proxy()
+
+    def test_conflicting_proxy_settings_fail_without_a_direct_fallback(self):
+        with patch.dict(os.environ, {
+            "HTTPS_PROXY": "http://127.0.0.1:3128",
+            "https_proxy": "http://127.0.0.1:3129",
+        }), patch.object(bootstrap.http.client, "HTTPSConnection") as create:
+            with self.assertRaises(bootstrap.BootstrapError):
+                bootstrap.https_connection("synthetic-vault.vault.azure.net")
+        create.assert_not_called()
+
+    def test_unset_proxy_preserves_direct_private_network_transport(self):
+        with patch.dict(os.environ, {"HTTPS_PROXY": "", "https_proxy": ""}), patch.object(
+            bootstrap.http.client, "HTTPSConnection",
+        ) as create:
+            bootstrap.https_connection("synthetic-vault.vault.azure.net")
+        self.assertEqual(create.call_args.args, ("synthetic-vault.vault.azure.net",))
+        create.return_value.set_tunnel.assert_not_called()
+
+    def test_vault_request_uses_real_loopback_connect_and_verified_tls(self):
+        openssl = shutil.which("openssl")
+        if openssl is None:
+            self.skipTest("OpenSSL is required to generate the temporary TLS fixture.")
+        certificate = self.root / "certificate.pem"
+        private_key = self.root / "private-key.pem"
+        subprocess.run([
+            openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(private_key), "-out", str(certificate),
+            "-days", "1", "-subj", "/CN=synthetic-vault.vault.azure.net",
+            "-addext", "subjectAltName=DNS:synthetic-vault.vault.azure.net",
+        ], check=True, capture_output=True, timeout=30)
+        received = []
+
+        class VaultHandler(http.server.BaseHTTPRequestHandler):
+            def do_PUT(self):
+                received.append((
+                    self.path,
+                    self.headers.get("Authorization"),
+                    self.rfile.read(int(self.headers["Content-Length"])),
+                ))
+                self.send_response(204)
+                self.end_headers()
+
+            def log_message(self, *_args):
+                pass
+
+        tls_server = ThreadedHttpServer(("127.0.0.1", 0), VaultHandler)
+        server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server_context.load_cert_chain(certificate, private_key)
+        tls_server.socket = server_context.wrap_socket(tls_server.socket, server_side=True)
+        server_thread = threading.Thread(target=tls_server.serve_forever, daemon=True)
+        server_thread.start()
+        proxy = ThreadedTunnelProxy(("127.0.0.1", 0), TunnelProxyHandler)
+        proxy.target_port = tls_server.server_address[1]
+        proxy.tunnel_requests = []
+        proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+        proxy_thread.start()
+        self.addCleanup(proxy.server_close)
+        self.addCleanup(proxy.shutdown)
+        self.addCleanup(tls_server.server_close)
+        self.addCleanup(tls_server.shutdown)
+        proxy_url = f"http://127.0.0.1:{proxy.server_address[1]}"
+        real_create_default_context = ssl.create_default_context
+        with patch.dict(os.environ, {"HTTPS_PROXY": proxy_url, "https_proxy": proxy_url}):
+            with patch.object(
+                bootstrap.ssl, "create_default_context",
+                side_effect=lambda: real_create_default_context(cafile=str(certificate)),
+            ):
+                bootstrap.request_json(
+                    "synthetic-vault.vault.azure.net", "/secrets/name?api-version=7.4",
+                    "PUT", "synthetic-token", {"value": "synthetic-secret"},
+                )
+            # The same tunnel must reject an untrusted certificate before sending credentials.
+            with self.assertRaises(bootstrap.BootstrapError):
+                bootstrap.request_json(
+                    "synthetic-vault.vault.azure.net", "/secrets/name?api-version=7.4",
+                    "PUT", "synthetic-token", {"value": "synthetic-secret"},
+                )
+        self.assertEqual(len(proxy.tunnel_requests), 2)
+        self.assertTrue(proxy.tunnel_requests[0][0].startswith(
+            "CONNECT synthetic-vault.vault.azure.net:443 HTTP/1."
+        ))
+        self.assertFalse(any(
+            header.lower().startswith("proxy-authorization:")
+            for header in proxy.tunnel_requests[0][1]
+        ))
+        self.assertEqual(received, [(
+            "/secrets/name?api-version=7.4", "Bearer synthetic-token",
+            b'{"value": "synthetic-secret"}',
+        )])
 
     def test_http_failure_never_reads_or_prints_secret_response(self):
         connection = Mock()
@@ -278,6 +456,17 @@ class BootstrapTests(unittest.TestCase):
         connection.getresponse.return_value.read.assert_not_called()
         connection.close.assert_called_once()
 
+    def test_redirect_is_rejected_without_forwarding_credentials(self):
+        connection = Mock()
+        connection.getresponse.return_value.status = 307
+        with patch.object(bootstrap.http.client, "HTTPSConnection", return_value=connection) as create:
+            with self.assertRaisesRegex(bootstrap.BootstrapError, "HTTP 307"):
+                bootstrap.request_json("synthetic-vault.vault.azure.net", "/secrets/name", "PUT",
+                                       "synthetic-token", {"value": "synthetic-secret"})
+        self.assertEqual(create.call_count, 1)
+        self.assertEqual(connection.request.call_count, 1)
+        connection.getresponse.return_value.read.assert_not_called()
+
     def test_cli_failure_suppresses_diagnostics_and_binds_subscription(self):
         result = subprocess.CompletedProcess([], 1, b"", b"SENSITIVE diagnostic")
         with patch.object(bootstrap.subprocess, "run", return_value=result) as run:
@@ -285,6 +474,27 @@ class BootstrapTests(unittest.TestCase):
                 bootstrap.az_json("account", "show")
         self.assertNotIn("SENSITIVE", str(error.exception))
         self.assertIn(bootstrap.SUBSCRIPTION, run.call_args.args[0])
+
+    def test_windows_azure_cli_resolution_uses_path_and_suppresses_diagnostics(self):
+        with patch.object(bootstrap.os, "name", "nt"), patch.object(
+            bootstrap.shutil, "which", return_value=r"C:\Azure CLI\az.cmd"
+        ), patch.object(
+            bootstrap.subprocess, "run",
+            return_value=subprocess.CompletedProcess([], 0, '{"id":"expected"}', ""),
+        ) as run:
+            self.assertEqual(bootstrap.az_json("account", "show"), {"id": "expected"})
+            self.assertEqual(run.call_args.args[0][0], r"C:\Azure CLI\az.cmd")
+            self.assertNotIn("shell", run.call_args.kwargs)
+            self.assertFalse(any(
+                name.lower() in {"http_proxy", "https_proxy", "all_proxy"}
+                for name in run.call_args.kwargs["env"]
+            ))
+        with patch.object(bootstrap.os, "name", "nt"), patch.object(
+            bootstrap.shutil, "which", return_value=None
+        ), patch.object(bootstrap.subprocess, "run") as run:
+            with self.assertRaises(bootstrap.BootstrapError):
+                bootstrap.az_json("account", "show")
+            run.assert_not_called()
 
     def test_https_request_carries_bearer_token_and_exact_body(self):
         connection = Mock()
