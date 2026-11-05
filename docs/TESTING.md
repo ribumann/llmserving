@@ -60,6 +60,16 @@ python -m pytest -q -o addopts=""
 ```
 
 Without `TEST_DATABASE_URL`, the seven real database tests explicitly skip.
+
+The live CPU workflow also runs `e2e/live` through the separate
+`playwright.live.config.ts` against its actual deployed local model. No HTTP
+routes are intercepted. The browser submits a prompt, verifies the rendered
+response and revision, confirms history clears on reload, and checks anonymous
+API access is rejected. It uses explicit loopback-only `local-demo` test auth
+and dev-mode frontend configuration, not Azure SSO or the production proxy.
+Browser failure propagates to the API test while its teardown still runs;
+browser evidence and failure traces accompany `real-local-api-evidence`.
+The existing nine API-mocked scenarios remain a separate regression suite.
 Hosted Backend CI always sets it. An invalid configured URL, failed connection,
 missing migration/seed, or unexpected SQLSTATE fails rather than falling back to
 SQLite or an in-memory session.

@@ -30,6 +30,7 @@ jobs:
       OLLAMA_BASE_URL: http://127.0.0.1:11434
       OLLAMA_EXPECTED_DIGEST: a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67
       LIVE_API_URL: http://127.0.0.1:8000
+      CORS_ALLOWED_ORIGINS: http://127.0.0.1:4173
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -43,6 +44,19 @@ jobs:
           python -m pip install -e ".[dev]"
           python -m alembic upgrade head
           python -m src.persistence.seed_catalog
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+      - name: Install real-browser clients
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix e2e
+          cd e2e
+          npx playwright install --with-deps chromium
       - name: Start bounded real CPU model
         shell: bash
         run: |
@@ -63,6 +77,9 @@ jobs:
         shell: bash
         env:
           FULLSTACK_EVIDENCE_FILE: ${{ runner.temp }}/live-api-evidence.json
+          LIVE_BROWSER_ENABLED: "1"
+          LIVE_BROWSER_EVIDENCE_FILE: ${{ runner.temp }}/live-browser-evidence.json
+          LIVE_BROWSER_TRACE_DIR: ${{ runner.temp }}/live-browser-traces
         run: |
           set -euo pipefail
           python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000 \
@@ -86,6 +103,8 @@ jobs:
             ${{ runner.temp }}/live-api-evidence.json
             ${{ runner.temp }}/ollama-models.json
             ${{ runner.temp }}/live-api.log
+            ${{ runner.temp }}/live-browser-evidence.json
+            ${{ runner.temp }}/live-browser-traces/
           retention-days: 7
       - name: Remove only this job's Ollama container
         if: always()
