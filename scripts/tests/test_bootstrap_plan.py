@@ -173,7 +173,7 @@ def plan():
         "applyable": True,
         "errored": False,
         "variables": {k: {"value": v} for k, v in target().items() if k != "tenant_id"},
-        "planned_values": {"root_module": {"resources": records}},
+        "planned_values": {"root_module": {"resources": records[2:]}},
         "prior_state": {
             "values": {"root_module": {"resources": copy.deepcopy(records[:2])}}
         },
@@ -229,6 +229,9 @@ class BootstrapPlanTests(unittest.TestCase):
 
     def test_known_exact_parent_chain_and_absent_prior(self):
         data = plan()
+        data["planned_values"]["root_module"]["resources"].extend(
+            data["prior_state"]["values"]["root_module"]["resources"]
+        )
         del data["prior_state"]
         for item, parent in zip(
             data["resource_changes"][1:], (ACCOUNT, f"{ACCOUNT}/blobServices/default")
@@ -242,6 +245,24 @@ class BootstrapPlanTests(unittest.TestCase):
             )
             resource["values"]["parent_id"] = parent
         guard.validate_plan(data, target())
+
+    def test_resolved_data_must_be_present_consistent_and_match_target(self):
+        data = plan()
+        del data["prior_state"]
+        self.reject(data)
+        for field in ("tenant_id", "subscription_id"):
+            data = plan()
+            data["prior_state"]["values"]["root_module"]["resources"][0]["values"][
+                field
+            ] = "foreign"
+            self.reject(data)
+        data = plan()
+        duplicate = copy.deepcopy(
+            data["prior_state"]["values"]["root_module"]["resources"][0]
+        )
+        duplicate["values"]["tenant_id"] = "foreign"
+        data["planned_values"]["root_module"]["resources"].append(duplicate)
+        self.reject(data)
 
     def test_foreign_or_missing_parent_dependency(self):
         for index in range(3):

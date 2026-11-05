@@ -314,24 +314,38 @@ def validate_plan(plan: object, expected: dict) -> None:
             _object(item.get("expressions"))
 
     prior = plan.get("prior_state")
+    resolved_data = {}
     if prior is not None:
         records = _records(_object(_object(prior).get("values")).get("root_module"))
         _require(
             not (set(records) & set(TYPES)),
             "Prior managed state is not fresh bootstrap.",
         )
+        resolved_data.update(records)
     planned = _records(_object(plan.get("planned_values")).get("root_module"))
     _require(
-        set(planned) == set(TYPES) | set(DATA),
+        set(TYPES) <= set(planned),
         "Planned records differ from reviewed bootstrap.",
     )
-    current = _object(planned["data.azapi_client_config.current"].get("values"))
+    for address in set(planned) & set(DATA):
+        if address in resolved_data:
+            _require(
+                _equal(
+                    resolved_data[address].get("values"), planned[address].get("values")
+                ),
+                "Conflicting resolved data records.",
+            )
+        resolved_data[address] = planned[address]
+    _require(
+        set(resolved_data) == set(DATA), "Both approved data lookups must be resolved."
+    )
+    current = _object(resolved_data["data.azapi_client_config.current"].get("values"))
     _require(
         current.get("tenant_id") == expected["tenant_id"]
         and current.get("subscription_id") == expected["subscription_id"],
         "Authenticated tenant/subscription differs from approved target.",
     )
-    group = _object(planned["data.azapi_resource.shared"].get("values"))
+    group = _object(resolved_data["data.azapi_resource.shared"].get("values"))
     _require(
         group.get("id") == group_id
         and group.get("name") == expected["existing_resource_group_name"]
@@ -360,7 +374,7 @@ def validate_plan(plan: object, expected: dict) -> None:
                 "Data lookups must be resolved before approval.",
             )
             _require(
-                _equal(change.get("after"), planned[address].get("values")),
+                _equal(change.get("after"), resolved_data[address].get("values")),
                 "Inconsistent data lookup.",
             )
             _require(not _unknown(change.get("after_unknown")), "Unknown data lookup.")
