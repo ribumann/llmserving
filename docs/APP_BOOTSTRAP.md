@@ -2,8 +2,10 @@
 
 This is the existing frontend ACA + backend ACA + private PostgreSQL/GPU +
 Durable Functions architecture, not a second API. No deployment has been
-established by these commands. The helper creates no app, credential, service
-principal, permission/consent grant, role, DNS record or Azure resource.
+established by these commands. The explicitly approved `create-secret` operation
+adds one credential to the fixed existing app and writes it privately to Key
+Vault. The helper creates no app, service principal, permission/consent grant,
+role, DNS record or infrastructure resource.
 
 The fixed target is subscription `86677b6e-28fc-48e4-8988-5ab9e568eece`,
 tenant `ecd6dfda-d2ce-47a8-9901-e35f31fe18dd` and the explicitly approved isolated
@@ -57,17 +59,22 @@ dependencies, state availability, permissions or authentication.
 1. The operator first establishes approved state/locking/recovery and shared
    infrastructure, immutable registry imports, independent cleanup and budget
    gates. Existing lifecycle/plan guards remain mandatory and are not bypassed.
-2. Separately create the approved app's first credential using an approved
-   secure operator procedure. **Callbacks are not needed to create a credential
-   or provision an Easy Auth-protected app.** This helper deliberately cannot
-   create credentials or grant Graph/RBAC access. Narrow existing-app ownership
-   and any required tenant user assignment/consent remain explicit prerequisites.
+2. Obtain narrow existing-app credential/configuration access and private-vault
+   secret-write access using the approved local operator identity. The helper
+   grants no Graph/RBAC access. **Callbacks are not needed to create a credential
+   or provision an Easy Auth-protected app.** Any required tenant user
+   assignment/consent remains an explicit prerequisite.
 3. Use `preview-secret` to read the shared ACR/private vault and the isolated
    app, without requiring a CAE or any callbacks. It refuses existing callbacks
    in this initial-secret phase; it is not a general credential-rotation tool.
-   From an approved private-network operator process, store that credential in
-   the shared vault. The caller needs separately approved secret-write access;
-   never open the public vault firewall or grant subscription-wide privileges.
+   From an approved private-network operator process, run `create-secret` with
+   the reviewed preview hash: Graph `addPassword` returns the one-time value
+   directly into this process, which writes it to the shared vault via HTTPS.
+   It never passes through stdout, an argument, a subprocess or a file. The
+   initial-creation route refuses any existing app passwords and sets a previewed
+   90-day expiry. Never open the public vault firewall or grant subscription-wide
+   privileges. An already securely created credential may instead use
+   `store-secret` with an operator-owned FD.
 4. Merge the emitted application tfvars with the reviewed retained-control
    inputs, preserving ownership tags, shared state path, demo/platform groups
    and the explicit SSO tenant. Prepare/review/apply the **full native control
@@ -85,7 +92,7 @@ dependencies, state availability, permissions or authentication.
    Terraform module does not deploy its Python package.
 
 Shared/state absence is a real stop, not successful bootstrap. The next
-operator action is phase 1, then initial credential approval/private delivery.
+operator action is phase 1, then preview and the approved `create-secret` command.
 
 ## Preview and separately approved writes
 
@@ -95,15 +102,45 @@ errors fail closed without copying raw diagnostics into logs.
 
 ```sh
 python scripts/app_bootstrap.py preview-secret --inputs /protected/app-inputs.json
+python scripts/app_bootstrap.py create-secret --inputs /protected/app-inputs.json \
+  --approve-preview-sha256 <reviewed-secret-preview-sha256>
 ```
 
 The hash binds current live app redirects/token settings, target, images,
-ZIP hash, explicit operator UPN and domain policy; callback previews also bind
+ZIP hash, explicit operator UPN, domain policy, current credential key IDs and
+the new credential's display name/expiry; callback previews also bind
 the real CAE domain. It is an operator confirmation, **not an
 authorization grant or signed attestation**. Mutations require independently
 approved access. Each write recomputes the live preview; changed inputs fail.
 Foreign existing callbacks stop the helper instead of adopting another app.
-No Graph permissions or API access-token issuance are added. Supply
+No Graph permissions or API access-token issuance are added. `create-secret`
+obtains both tokens before calling Graph and sends the generated secret directly
+to the private vault. Run from a process with existing private connectivity.
+Do not enable HTTP tracing, shell tracing, process/core dumps or record operator
+process memory.
+
+If vault delivery fails after credential creation, the command fails and prints
+only the new credential's **nonsecret key ID** for recovery. No automatic retry
+or deletion occurs: a failed/interrupted vault request may have succeeded.
+Inspect vault secret **metadata** privately and determine whether delivery
+succeeded. If the one-time value is lost and a fresh credential is necessary,
+explicitly revoke only that new credential before previewing/creating again:
+
+```sh
+az rest --method POST \
+  --url "https://graph.microsoft.com/v1.0/applications(appId='962740a1-be3e-454f-87c3-537ed1f02b78')/removePassword" \
+  --body '{"keyId":"<only-the-new-recovery-key-id>"}' \
+  --subscription 86677b6e-28fc-48e4-8988-5ab9e568eece \
+  --only-show-errors --output none
+```
+
+After an uncertain Graph response, inspect the existing app's password metadata
+before any retry; the helper will refuse a second initial credential when the
+first is visible. This is not a transactional two-service operation. Use the
+explicit expiry in rotation monitoring; never let a 90-day credential expire
+without a separately approved rotation.
+
+Alternatively, supply
 the separately approved credential over an already-open, operator-owned pipe
 or protected FD (FD 3 below), never a shell literal, argument, environment
 variable, echoed terminal or chat. Do not enable HTTP tracing, shell tracing,
@@ -111,7 +148,7 @@ process/core dumps or record the secret-producing operator process.
 
 ```sh
 python scripts/app_bootstrap.py store-secret --inputs /protected/app-inputs.json \
-  --approve-preview-sha256 <new-reviewed-preview-sha256> --secret-fd 3
+  --approve-preview-sha256 <reviewed-secret-preview-sha256> --secret-fd 3
 ```
 
 The caller opens FD 3 and closes the writer after supplying the credential.
@@ -132,7 +169,7 @@ python scripts/app_bootstrap.py set-callbacks --inputs /protected/app-inputs.jso
   --approve-preview-sha256 <reviewed-callback-preview-sha256>
 ```
 
-The helper cannot verify that a supplied credential belongs to the application.
+The FD-only route cannot verify that a supplied credential belongs to the application.
 The operator must establish that provenance and validity in its approved
 credential procedure. The helper does not retrieve the secret afterwards.
 Do not delete the previous version/credential until real sign-in is verified.

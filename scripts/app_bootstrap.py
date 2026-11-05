@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import hashlib
 import http.client
 import json
@@ -183,7 +184,7 @@ def preview(contract: dict, *, callbacks: bool = True) -> dict:
     )
     app = az_json(
         "rest", "--method", "GET", "--url",
-        f"https://graph.microsoft.com{APP_PATH}?$select=appId,signInAudience,web",
+        f"https://graph.microsoft.com{APP_PATH}?$select=appId,signInAudience,web,passwordCredentials",
     )
     require(
         type(app) is dict and app.get("appId") == CLIENT
@@ -199,6 +200,15 @@ def preview(contract: dict, *, callbacks: bool = True) -> dict:
     )
     grant = web.get("implicitGrantSettings", {})
     require(type(grant) is dict, "Malformed application token configuration.")
+    credentials = app.get("passwordCredentials")
+    require(
+        type(credentials) is list and all(
+            type(item) is dict and type(item.get("keyId")) is str
+            and re.fullmatch(r"[0-9a-fA-F-]{36}", item["keyId"]) is not None
+            for item in credentials
+        ),
+        "Application credential metadata unavailable or malformed.",
+    )
     return {
         "subscription_id": SUBSCRIPTION, "tenant_id": TENANT, "client_id": CLIENT,
         "phase": "callbacks" if callbacks else "initial-secret",
@@ -211,6 +221,13 @@ def preview(contract: dict, *, callbacks: bool = True) -> dict:
         "functions_zip": contract["functions_zip"],
         "functions_sha256": contract["functions_sha256"],
         "operator_upn": contract["operator_upn"],
+        "existing_credential_key_ids": sorted(item["keyId"] for item in credentials),
+        "new_credential": {
+            "displayName": "main-container-apps-easy-auth",
+            "endDateTime": (
+                datetime.now(timezone.utc).date() + timedelta(days=90)
+            ).isoformat() + "T00:00:00Z",
+        },
     }
 
 
@@ -225,7 +242,10 @@ def azure_token(resource: str) -> str:
     return token["accessToken"]
 
 
-def request_json(host: str, path: str, method: str, token: str, payload: dict) -> None:
+def request_json(
+    host: str, path: str, method: str, token: str, payload: dict,
+    *, read_response: bool = False,
+) -> object:
     # No redirect following, proxy subprocess, HTTP diagnostics or response-body logging.
     connection = http.client.HTTPSConnection(host, timeout=30, context=ssl.create_default_context())
     try:
@@ -234,6 +254,14 @@ def request_json(host: str, path: str, method: str, token: str, payload: dict) -
         response = connection.getresponse()
         require(200 <= response.status < 300,
                 f"Azure {method} failed (HTTP {response.status}); response suppressed. Mutation outcome may be partial.")
+        if read_response:
+            raw = response.read(65537)
+            require(len(raw) <= 65536, "Azure response too large; inspect app credential metadata before retrying.")
+            try:
+                return json.loads(raw)
+            except (ValueError, UnicodeDecodeError):
+                raise BootstrapError("Azure response malformed; inspect app credential metadata before retrying.") from None
+        return None
     except (OSError, http.client.HTTPException):
         raise BootstrapError("Azure request failed; response suppressed. Inspect remote state before retrying.") from None
     finally:
@@ -253,6 +281,35 @@ def mutate(operation: str, contract: dict, plan: dict, secret_fd: int | None) ->
                 },
             }},
         )
+        return
+    if operation == "create-secret":
+        require(plan["existing_credential_key_ids"] == [],
+                "Initial credential creation requires no existing passwords; inspect rather than rotating blindly.")
+        # Acquire both scoped tokens before creating any one-time credential.
+        vault_token = azure_token("https://vault.azure.net")
+        graph_token = azure_token("https://graph.microsoft.com")
+        credential = request_json(
+            "graph.microsoft.com", APP_PATH + "/addPassword", "POST", graph_token,
+            {"passwordCredential": plan["new_credential"]}, read_response=True,
+        )
+        require(
+            type(credential) is dict and type(credential.get("keyId")) is str
+            and re.fullmatch(r"[0-9a-fA-F-]{36}", credential["keyId"]) is not None
+            and type(credential.get("secretText")) is str and bool(credential["secretText"]),
+            "Credential response malformed; inspect app password metadata before retrying. No secret has been logged.",
+        )
+        try:
+            request_json(
+                f"{contract['vault_name']}.vault.azure.net",
+                f"/secrets/{SECRET_NAME}?api-version=7.4", "PUT", vault_token,
+                {"value": credential["secretText"], "contentType": "Entra application client secret"},
+            )
+        except BootstrapError:
+            raise BootstrapError(
+                "Credential created but vault write unverified. Do not retry creation. "
+                f"Inspect vault privately and remove only new app credential key ID {credential['keyId']} "
+                "if recovery requires a fresh credential. Secret suppressed."
+            ) from None
         return
     require(secret_fd is not None and secret_fd >= 0,
             "Supply an already approved application's credential over --secret-fd, never argv/env.")
@@ -278,7 +335,7 @@ def mutate(operation: str, contract: dict, plan: dict, secret_fd: int | None) ->
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=(
-        "validate", "preview-secret", "store-secret", "preview-callbacks", "set-callbacks",
+        "validate", "preview-secret", "create-secret", "store-secret", "preview-callbacks", "set-callbacks",
     ))
     parser.add_argument("--inputs", type=Path, required=True)
     parser.add_argument("--approve-preview-sha256")

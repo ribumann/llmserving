@@ -61,7 +61,7 @@ class BootstrapTests(unittest.TestCase):
                  "publicNetworkAccess": "Disabled", "enableRbacAuthorization": True,
                  "vaultUri": "https://synthetic-vault.vault.azure.net/",
              }},
-            {"appId": bootstrap.CLIENT, "signInAudience": "AzureADMyOrg",
+            {"appId": bootstrap.CLIENT, "signInAudience": "AzureADMyOrg", "passwordCredentials": [],
              "web": {"redirectUris": [], "implicitGrantSettings": {
                  "enableIdTokenIssuance": False, "enableAccessTokenIssuance": False,
              }}},
@@ -202,6 +202,69 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(request.call_args.args[4]["value"], "synthetic-credential")
         with self.assertRaises(bootstrap.BootstrapError):
             bootstrap.mutate("store-secret", self.load(), {}, None)
+
+    def test_create_secret_moves_graph_response_directly_to_private_vault(self):
+        key = "11111111-2222-3333-4444-555555555555"
+        plan = {"existing_credential_key_ids": [], "new_credential": {
+            "displayName": "main-container-apps-easy-auth", "endDateTime": "2027-01-01T00:00:00Z",
+        }}
+        credential = {"keyId": key, "secretText": "synthetic-generated-secret"}
+        events = []
+        def token(resource):
+            events.append(("token", resource))
+            return "synthetic-token"
+        def request(*args, **kwargs):
+            events.append(("request", args, kwargs))
+            return credential if args[0] == "graph.microsoft.com" else None
+        with patch.object(bootstrap, "azure_token", side_effect=token), \
+             patch.object(bootstrap, "request_json", side_effect=request), \
+             patch.object(bootstrap.subprocess, "run") as process:
+            bootstrap.mutate("create-secret", self.load(), plan, None)
+        process.assert_not_called()
+        self.assertEqual([event[0] for event in events], ["token", "token", "request", "request"])
+        self.assertEqual(events[2][1][:3], (
+            "graph.microsoft.com", bootstrap.APP_PATH + "/addPassword", "POST",
+        ))
+        self.assertEqual(events[2][1][4], {"passwordCredential": plan["new_credential"]})
+        self.assertEqual(events[2][2], {"read_response": True})
+        self.assertEqual(events[3][1][:3], (
+            "synthetic-vault.vault.azure.net", "/secrets/sso-client-secret?api-version=7.4", "PUT",
+        ))
+        self.assertEqual(events[3][1][4]["value"], credential["secretText"])
+
+    def test_create_secret_partial_failure_names_only_recovery_key(self):
+        key = "11111111-2222-3333-4444-555555555555"
+        plan = {"existing_credential_key_ids": [], "new_credential": {}}
+        with patch.object(bootstrap, "azure_token", return_value="synthetic-token"), \
+             patch.object(bootstrap, "request_json", side_effect=[
+                 {"keyId": key, "secretText": "synthetic-generated-secret"},
+                 bootstrap.BootstrapError("private vault unavailable"),
+             ]):
+            with self.assertRaises(bootstrap.BootstrapError) as error:
+                bootstrap.mutate("create-secret", self.load(), plan, None)
+        self.assertIn(key, str(error.exception))
+        self.assertNotIn("synthetic-generated-secret", str(error.exception))
+        self.assertIn("Do not retry", str(error.exception))
+
+    def test_create_secret_rejects_existing_credentials_before_token_or_mutation(self):
+        with patch.object(bootstrap, "azure_token") as token, \
+             patch.object(bootstrap, "request_json") as request:
+            with self.assertRaises(bootstrap.BootstrapError):
+                bootstrap.mutate("create-secret", self.load(), {
+                    "existing_credential_key_ids": ["11111111-2222-3333-4444-555555555555"],
+                }, None)
+        token.assert_not_called()
+        request.assert_not_called()
+
+    def test_http_success_reads_sensitive_json_only_when_requested(self):
+        connection = Mock()
+        connection.getresponse.return_value.status = 200
+        connection.getresponse.return_value.read.return_value = b'{"secretText":"synthetic"}'
+        with patch.object(bootstrap.http.client, "HTTPSConnection", return_value=connection):
+            result = bootstrap.request_json("graph.microsoft.com", bootstrap.APP_PATH + "/addPassword",
+                                            "POST", "synthetic-token", {}, read_response=True)
+        self.assertEqual(result["secretText"], "synthetic")
+        connection.getresponse.return_value.read.assert_called_once_with(65537)
 
     def test_http_failure_never_reads_or_prints_secret_response(self):
         connection = Mock()
