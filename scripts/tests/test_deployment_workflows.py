@@ -113,6 +113,14 @@ class DeploymentWorkflowTests(unittest.TestCase):
                 )
                 self.assertEqual(len(result.stdout.splitlines()), len(keys))
 
+    def test_resolved_backend_hostname_is_masked_before_later_step_environment(self):
+        frontend = next(
+            deployment for name, _, deployment, _ in self.deployments() if name == "frontend"
+        )
+        self.assertLess(
+            frontend.index('echo "::add-mask::$fqdn"'), frontend.index('echo "fqdn=$fqdn"')
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

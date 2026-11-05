@@ -20,6 +20,7 @@ from types import ModuleType
 JOBS_ROOT = Path(__file__).resolve().parent.parent
 if str(JOBS_ROOT) not in sys.path:
     sys.path.insert(0, str(JOBS_ROOT))
+sys.path.insert(0, str(JOBS_ROOT.parent / "backend"))
 
 
 def load_worker_entrypoint(worker_name: str) -> ModuleType:

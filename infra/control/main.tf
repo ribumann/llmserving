@@ -25,6 +25,7 @@ locals {
   manage_sso          = var.enable_sso && var.existing_sso_client_id == null
   sso_client_id       = local.manage_sso ? azuread_application.sso[0].client_id : var.existing_sso_client_id
   sso_secret_id       = local.manage_sso ? azurerm_key_vault_secret.sso_client_secret[0].versionless_id : var.existing_sso_secret_id
+  sso_tenant_id       = var.existing_sso_tenant_id == null ? data.azurerm_client_config.current.tenant_id : lower(var.existing_sso_tenant_id)
 
   common_tags = merge(var.tags, {
     feature   = "azure-llm-serving-demo"
@@ -434,6 +435,10 @@ resource "azurerm_container_app" "backend" {
         value = local.sso_client_id
       }
       env {
+        name  = "AUTH_TENANT_ID"
+        value = local.sso_tenant_id
+      }
+      env {
         name  = "AZURE_SUBSCRIPTION_ID"
         value = var.subscription_id
       }
@@ -541,6 +546,10 @@ resource "azurerm_container_app" "backend" {
       error_message = "Supply both existing_sso_client_id and existing_sso_secret_id, or neither."
     }
     precondition {
+      condition     = var.existing_sso_tenant_id == null || var.existing_sso_client_id != null
+      error_message = "An explicit SSO tenant requires an externally approved application; managed SSO uses the deployment tenant."
+    }
+    precondition {
       condition     = var.enable_sso || var.existing_sso_client_id != null
       error_message = "Cloud operator authentication requires managed SSO or an external application; disabling SSO is not an authentication bypass."
     }
@@ -620,7 +629,7 @@ resource "azurerm_container_app" "frontend" {
       memory = var.frontend_memory
 
       env {
-        name  = "VITE_API_BASE_URL"
+        name  = "BACKEND_URL"
         value = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
       }
     }
@@ -1140,7 +1149,7 @@ resource "azapi_resource" "backend_auth_config" {
           registration = {
             clientId                = local.sso_client_id
             clientSecretSettingName = "sso-client-secret"
-            openIdIssuer            = "https://login.microsoftonline.com/${data.azurerm_client_config.current.tenant_id}/v2.0"
+            openIdIssuer            = "https://login.microsoftonline.com/${local.sso_tenant_id}/v2.0"
           }
           validation = {
             allowedAudiences = [local.sso_client_id]
@@ -1173,7 +1182,7 @@ resource "azapi_resource" "frontend_auth_config" {
           registration = {
             clientId                = local.sso_client_id
             clientSecretSettingName = "sso-client-secret"
-            openIdIssuer            = "https://login.microsoftonline.com/${data.azurerm_client_config.current.tenant_id}/v2.0"
+            openIdIssuer            = "https://login.microsoftonline.com/${local.sso_tenant_id}/v2.0"
           }
           validation = {
             allowedAudiences = [local.sso_client_id]

@@ -1,12 +1,5 @@
-# Static frontend for the Azure LLM Serving Demo, served as an Azure App Service (Linux
-# container) via nginx. Build from the repository root so the build context matches
-# `backend/Dockerfile`'s convention, e.g.:
-#   docker build -f frontend/Dockerfile -t llmserving-frontend:latest \
-#     --build-arg VITE_API_BASE_URL=https://<backend-app>.azurewebsites.net .
-#
-# Vite bakes VITE_* env vars into the compiled JS at build time (not runtime), so the backend's
-# URL must be supplied as a build ARG matching the actual backend App Service hostname for this
-# environment — it can't be changed later without rebuilding the image.
+# Build from the repository root. Set BACKEND_URL at runtime for the same-origin
+# signed-token proxy; cloud images do not need an environment-specific Vite build.
 FROM node:20-slim AS build
 
 ARG VITE_API_BASE_URL=""
@@ -21,7 +14,9 @@ RUN npx tsc --noEmit && npx vite build
 
 FROM nginx:1.27-alpine AS runtime
 
-COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+ENV BACKEND_URL=http://127.0.0.1:8000
+ENV NGINX_ENVSUBST_FILTER=^BACKEND_URL$
+COPY frontend/nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80

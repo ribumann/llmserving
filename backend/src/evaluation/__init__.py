@@ -1,1 +1,1 @@
-"""Evaluation layer placeholder for later phases."""
+"""Evaluation helpers used by the API and isolated workers."""

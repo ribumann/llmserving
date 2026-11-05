@@ -105,6 +105,7 @@ jobs:
         id: backend
         run: |
           fqdn=$(az containerapp show --resource-group "$RESOURCE_GROUP" --name "$BACKEND_CONTAINER_APP_NAME" --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "::add-mask::$fqdn"
           echo "fqdn=$fqdn" >> "$GITHUB_OUTPUT"
 
       - name: Build and push image (ACR Tasks)
@@ -113,15 +114,17 @@ jobs:
             --registry "$ACR_NAME" \
             --image "$IMAGE_NAME:${{ github.sha }}" \
             -f frontend/Dockerfile \
-            --build-arg VITE_API_BASE_URL="https://${{ steps.backend.outputs.fqdn }}" \
             .
 
       - name: Point Container App at new image
+        env:
+          BACKEND_URL: https://${{ steps.backend.outputs.fqdn }}
         run: |
           az containerapp update \
             --resource-group "$RESOURCE_GROUP" \
             --name "$CONTAINER_APP_NAME" \
-            --image "${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${{ github.sha }}"
+            --image "${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${{ github.sha }}" \
+            --set-env-vars "BACKEND_URL=$BACKEND_URL"
 
       - name: Wait for frontend to come up
         run: |

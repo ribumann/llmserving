@@ -53,3 +53,14 @@ def test_evaluate_case_exact_match_ignores_reasoning_trace() -> None:
         "expectedOutput": "96",
     }
     assert QualityRunOrchestrator._evaluate_case(case, observed) is True
+
+
+def test_reasoning_only_does_not_pass_without_a_final_answer() -> None:
+    case = {"evaluationRule": "contains", "expectedSubstring": "Nile"}
+    assert QualityRunOrchestrator._evaluate_case(case, "<think>Nile</think>") is False
+
+
+def test_regex_preserves_pattern_case() -> None:
+    case = {"evaluationRule": "regex:^Au$"}
+    assert QualityRunOrchestrator._evaluate_case(case, "Au") is True
+    assert QualityRunOrchestrator._evaluate_case(case, "au") is False

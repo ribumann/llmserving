@@ -15,6 +15,7 @@ from src.domain.environment import DemoEnvironment
 from src.domain.environment_lock import EnvironmentLockedError, EnvironmentLockService
 from src.domain.profile import CloudDeploymentProfile
 from src.persistence.db import create_engine_from_settings
+from src.providers.local.adapter import LocalProviderAdapter
 
 pytestmark = pytest.mark.integration
 
@@ -119,3 +120,45 @@ def test_postgres_serializes_concurrent_lock_acquisition(environment) -> None:
         with pytest.raises(EnvironmentLockedError):
             locks.acquire(session, environment_id=environment_id, operation_id="contender")
         session.rollback()
+
+
+@pytest.mark.parametrize(
+    "concurrent_state,owner,expected",
+    [
+        (DemoEnvironmentState.TORN_DOWN, None, DemoEnvironmentState.TORN_DOWN),
+        (DemoEnvironmentState.TEARING_DOWN, "teardown-owner", DemoEnvironmentState.TEARING_DOWN),
+        (
+            DemoEnvironmentState.PROVISIONING_FAILED,
+            "new-owner",
+            DemoEnvironmentState.PROVISIONING_FAILED,
+        ),
+        (DemoEnvironmentState.PROVISIONING_FAILED, None, DemoEnvironmentState.READY),
+    ],
+)
+def test_local_runtime_recovery_rechecks_state_and_lock_owner(
+    environment, monkeypatch, concurrent_state, owner, expected
+) -> None:
+    session_factory, environment_id = environment
+    with session_factory() as session:
+        saved = session.get(DemoEnvironment, environment_id)
+        saved.lifecycleState = DemoEnvironmentState.PROVISIONING_FAILED
+        session.commit()
+
+    def probe_after_initial_read():
+        with session_factory() as concurrent:
+            saved = concurrent.get(DemoEnvironment, environment_id)
+            saved.lifecycleState = concurrent_state
+            saved.activeOperationId = owner
+            saved.providerState = {"fresh": True}
+            concurrent.commit()
+        return None
+
+    adapter = LocalProviderAdapter(session_factory=session_factory, settings=Settings())
+    monkeypatch.setattr(adapter, "_probe_runtime", probe_after_initial_read)
+    state = adapter.getEnvironmentState(environment_id)
+    assert state.lifecycleState == expected.value
+    with session_factory() as session:
+        saved = session.get(DemoEnvironment, environment_id)
+        assert saved.lifecycleState == expected
+        assert saved.activeOperationId == owner
+        assert saved.providerState["fresh"] is True

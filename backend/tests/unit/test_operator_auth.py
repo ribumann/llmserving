@@ -12,7 +12,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from src.api.app import create_app
-from src.api.auth import AuthenticatedUser, OperatorTokenValidator
+from src.api.auth import AuthenticatedUser, OperatorTokenValidator, build_operator_token_validator
+from src.api.errors import ApiError
+from src.api.internal_auth import build_internal_token_validator
 from src.config import Settings
 
 TENANT = "11111111-1111-1111-1111-111111111111"
@@ -190,3 +192,97 @@ def test_key_discovery_failure_is_explicit_unavailable(keypair) -> None:
         response = client.get("/providers", headers={"Authorization": "Bearer token"})
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "identity_provider_unavailable"
+
+
+def test_separate_sso_tenant_keeps_arm_and_internal_auth_independent(keypair, monkeypatch) -> None:
+    sso_tenant = "33333333-3333-3333-3333-333333333333"
+    internal_audience = "api://internal-test"
+    key_urls = []
+
+    def keys(url, **_kwargs):
+        key_urls.append(url)
+        return SimpleNamespace(get_signing_key_from_jwt=lambda _: SimpleNamespace(key=keypair[1]))
+
+    monkeypatch.setattr("src.api.internal_auth.PyJWKClient", keys)
+    settings = Settings(
+        auth_mode="entra-jwt",
+        app_env="production",
+        azure_subscription_id="44444444-4444-4444-4444-444444444444",
+        azure_tenant_id=TENANT,
+        auth_tenant_id=sso_tenant,
+        auth_audience=AUDIENCE,
+        internal_api_audience=internal_audience,
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+
+        def request(**claims):
+            token = signed(
+                keypair[0],
+                **{
+                    "iss": f"https://login.microsoftonline.com/{sso_tenant}/v2.0",
+                    "tid": sso_tenant,
+                    **claims,
+                },
+            )
+            return client.get("/providers", headers={"Authorization": f"Bearer {token}"})
+
+        assert request().status_code == 200
+        assert request(preferred_username="user@outside.test").status_code == 403
+        assert request(aud="wrong-audience").status_code == 401
+        assert request(tid=TENANT).status_code == 401
+        deployment_token = signed(keypair[0])
+        assert (
+            client.get(
+                "/providers", headers={"Authorization": f"Bearer {deployment_token}"}
+            ).status_code
+            == 401
+        )
+
+    internal = app.state.internal_token_validator
+    service_token = signed(keypair[0], aud=internal_audience, appid="test-managed-identity")
+    assert internal.validate(service_token).app_id == "test-managed-identity"
+    with pytest.raises(ApiError) as error:
+        internal.validate(
+            signed(
+                keypair[0],
+                aud=internal_audience,
+                tid=sso_tenant,
+                iss=f"https://login.microsoftonline.com/{sso_tenant}/v2.0",
+            )
+        )
+    assert error.value.status_code == 401
+    assert settings.azure_tenant_id == TENANT
+    assert settings.azure_subscription_id == "44444444-4444-4444-4444-444444444444"
+    assert f"https://login.microsoftonline.com/{sso_tenant}/discovery/v2.0/keys" in key_urls
+    assert f"https://login.microsoftonline.com/{TENANT}/discovery/v2.0/keys" in key_urls
+
+
+def test_unset_sso_tenant_preserves_deployment_tenant(monkeypatch) -> None:
+    monkeypatch.delenv("AUTH_TENANT_ID", raising=False)
+    settings = Settings(auth_mode="entra-jwt", azure_tenant_id=TENANT, auth_audience=AUDIENCE)
+    assert build_operator_token_validator(settings)._tenant_id == TENANT
+
+
+def test_operator_tenant_does_not_configure_internal_identity() -> None:
+    settings = Settings(
+        auth_mode="entra-jwt",
+        auth_tenant_id=TENANT,
+        auth_audience=AUDIENCE,
+        azure_tenant_id=None,
+        internal_api_audience="api://internal",
+    )
+    assert build_operator_token_validator(settings)._tenant_id == TENANT
+    assert build_internal_token_validator(settings) is None
+
+
+@pytest.mark.parametrize("value", ["", " ", "common", "organizations", "not-a-uuid"])
+def test_explicit_invalid_sso_tenant_fails_instead_of_falling_back(value) -> None:
+    with pytest.raises(ValidationError, match="tenant UUID"):
+        Settings(azure_tenant_id=TENANT, auth_tenant_id=value)
+
+
+def test_sso_tenant_environment_setting_is_canonical(monkeypatch) -> None:
+    tenant = "abcdefab-abcd-abcd-abcd-abcdefabcdef"
+    monkeypatch.setenv("AUTH_TENANT_ID", tenant.upper())
+    assert Settings().auth_tenant_id == tenant
