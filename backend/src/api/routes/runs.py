@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -416,37 +417,41 @@ def create_run(
         runType=run_type,
         testDefinitionRef=payload.testDefinitionRef,
         status=ExperimentRunStatus.QUEUED,
-        environmentContextSnapshot={
-            "environmentId": environment.environmentId,
-            "profileId": environment.profileId,
-            "region": environment.region,
-            "provider": environment.provider.value,
-            "providerState": dict(environment.providerState or {}),
-            "deploymentRevision": {
-                "deploymentRevisionId": revision.deploymentRevisionId,
-                "engineId": revision.engineId,
-                "modelConfigId": revision.modelConfigId,
-                "inferenceConfigId": revision.inferenceConfigId,
-            },
-            "modelConfiguration": {
-                "modelConfigId": getattr(model_configuration, "modelConfigId", None),
-                "catalogEntryId": getattr(model_configuration, "catalogEntryId", None),
-                "resolvedCheckpointRef": getattr(
-                    model_configuration, "resolvedCheckpointRef", None
-                ),
-                "modelSettings": dict(getattr(model_configuration, "modelSettings", {}) or {}),
-            },
-            "inferenceConfiguration": {
-                "inferenceConfigId": getattr(inference_configuration, "inferenceConfigId", None),
-                "servingSettings": dict(
-                    getattr(inference_configuration, "servingSettings", {}) or {}
-                ),
-                "generationSettings": dict(
-                    getattr(inference_configuration, "generationSettings", {}) or {}
-                ),
-            },
-            "testDefinition": _serialize_definition_snapshot(definition),
-        },
+        environmentContextSnapshot=deepcopy(
+            {
+                "environmentId": environment.environmentId,
+                "profileId": environment.profileId,
+                "region": environment.region,
+                "provider": environment.provider.value,
+                "providerState": dict(environment.providerState or {}),
+                "deploymentRevision": {
+                    "deploymentRevisionId": revision.deploymentRevisionId,
+                    "engineId": revision.engineId,
+                    "modelConfigId": revision.modelConfigId,
+                    "inferenceConfigId": revision.inferenceConfigId,
+                },
+                "modelConfiguration": {
+                    "modelConfigId": getattr(model_configuration, "modelConfigId", None),
+                    "catalogEntryId": getattr(model_configuration, "catalogEntryId", None),
+                    "resolvedCheckpointRef": getattr(
+                        model_configuration, "resolvedCheckpointRef", None
+                    ),
+                    "modelSettings": dict(getattr(model_configuration, "modelSettings", {}) or {}),
+                },
+                "inferenceConfiguration": {
+                    "inferenceConfigId": getattr(
+                        inference_configuration, "inferenceConfigId", None
+                    ),
+                    "servingSettings": dict(
+                        getattr(inference_configuration, "servingSettings", {}) or {}
+                    ),
+                    "generationSettings": dict(
+                        getattr(inference_configuration, "generationSettings", {}) or {}
+                    ),
+                },
+                "testDefinition": _serialize_definition_snapshot(definition),
+            }
+        ),
         diagnostics=[],
         cancellationRequests=[],
         retentionClass=RetentionClass.PERSISTED,

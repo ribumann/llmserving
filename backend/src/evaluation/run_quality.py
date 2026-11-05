@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import Event, Lock
@@ -23,9 +24,6 @@ from src.domain.environment_lock import (
     EnvironmentNotFoundError,
 )
 from src.domain.experiment_run import ExperimentRun
-from src.domain.golden_dataset import GoldenDataset
-from src.domain.model_configuration import ModelConfiguration
-from src.domain.performance_workload import PerformanceWorkload
 from src.domain.result_report_repo import ResultReportRepository, build_quality_aggregate
 from src.evaluation.lm_eval_runner import LmEvalRunner
 from src.evaluation.scoring import evaluate_golden_case, strip_reasoning_trace
@@ -222,12 +220,36 @@ class QualityRunOrchestrator:
                 self._cancel_events.pop(context.runId, None)
                 self._futures.pop(context.runId, None)
 
+    @staticmethod
+    def _run_snapshot(session: Session, context: QualityRunContext) -> dict[str, Any]:
+        run = session.get(ExperimentRun, context.runId)
+        if (
+            run is None
+            or run.runType != context.runType
+            or run.deploymentRevisionId != context.deploymentRevisionId
+            or run.testDefinitionRef != context.testDefinitionRef
+        ):
+            raise RuntimeError("Run snapshot does not match the execution context.")
+        snapshot = deepcopy(dict(run.environmentContextSnapshot or {}))
+        definition = snapshot.get("testDefinition")
+        identity_key = {
+            ExperimentRunType.QUALITY_GOLDEN: "goldenDatasetId",
+            ExperimentRunType.QUALITY_BENCHMARK: "benchmarkId",
+            ExperimentRunType.PERFORMANCE: "workloadId",
+        }[context.runType]
+        if (
+            not isinstance(definition, Mapping)
+            or definition.get(identity_key) != context.testDefinitionRef
+        ):
+            raise RuntimeError(
+                "Run definition snapshot is missing or does not match its reference."
+            )
+        return snapshot
+
     def _run_golden(self, context: QualityRunContext) -> None:
         with self._session_factory() as session:
-            dataset = session.get(GoldenDataset, context.testDefinitionRef)
-            if dataset is None:
-                raise RuntimeError("Golden dataset run context was not persisted.")
-            cases = [dict(case) for case in list(dataset.cases or [])]
+            snapshot = self._run_snapshot(session, context)
+            cases = [dict(case) for case in list(snapshot["testDefinition"].get("cases") or [])]
 
         engine = self._provider.get_engine_adapter(context.engineId)
         for index, case in enumerate(cases):
@@ -265,21 +287,20 @@ class QualityRunOrchestrator:
             return
 
         with self._session_factory() as session:
-            definition = session.get(BenchmarkDefinition, context.testDefinitionRef)
+            snapshot = self._run_snapshot(session, context)
+            saved_definition = snapshot["testDefinition"]
+            definition = BenchmarkDefinition(
+                benchmarkId=saved_definition["benchmarkId"],
+                version=saved_definition["version"],
+                presentationSubset=deepcopy(saved_definition.get("presentationSubset") or {}),
+                passFailThreshold=deepcopy(saved_definition.get("passFailThreshold") or {}),
+            )
             report = self._report_repo.get_by_run_id(session, context.runId)
-            if definition is None or report is None:
+            if report is None:
                 raise RuntimeError("Benchmark run context was not persisted.")
-            revision = session.get(DeploymentRevision, context.deploymentRevisionId)
-            model_configuration = (
-                session.get(ModelConfiguration, revision.modelConfigId)
-                if revision is not None
-                else None
-            )
-            model_id = (
-                model_configuration.resolvedCheckpointRef
-                if model_configuration is not None
-                else context.deploymentRevisionId
-            )
+            model_id = dict(snapshot.get("modelConfiguration") or {}).get("resolvedCheckpointRef")
+            if not isinstance(model_id, str) or not model_id:
+                raise RuntimeError("Benchmark model snapshot was not persisted.")
 
         result = self._benchmark_runner.evaluate(
             base_url=context.inferenceApiUrl,
@@ -298,25 +319,16 @@ class QualityRunOrchestrator:
             return
 
         with self._session_factory() as session:
-            workload = session.get(PerformanceWorkload, context.testDefinitionRef)
+            snapshot = self._run_snapshot(session, context)
             report = self._report_repo.get_by_run_id(session, context.runId)
-            if workload is None or report is None:
+            if report is None:
                 raise RuntimeError("Performance run context was not persisted.")
 
         engine = self._provider.get_engine_adapter(context.engineId)
         result = self._performance_runner.run(
             engine=engine,
             deployment_revision_id=context.deploymentRevisionId,
-            workload={
-                "workloadId": workload.workloadId,
-                "version": workload.version,
-                "warmup": dict(workload.warmup or {}),
-                "inputProfile": dict(workload.inputProfile or {}),
-                "concurrency": workload.concurrency,
-                "durationOrRequestCount": dict(workload.durationOrRequestCount or {}),
-                "safetyLimits": dict(workload.safetyLimits or {}),
-                "completionCriteria": dict(workload.completionCriteria or {}),
-            },
+            workload=dict(snapshot["testDefinition"]),
         )
         self._persist_performance_update(context=context, result=result)
         if self._should_cancel(context.runId):

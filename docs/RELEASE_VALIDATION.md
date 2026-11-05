@@ -120,6 +120,18 @@ TTFT/ITL remain unavailable there. API execution/routing and its image are
 unchanged. Complete lifecycle/report parity is required before switching
 durable routing or removing proven API runners.
 
+### Accepted run inputs
+
+The API deep-copies accepted environment/configuration/definition data, and its
+in-process golden, benchmark and performance execution reads the persisted
+definition snapshot rather than reopening the mutable catalog. Benchmark model
+selection also uses the accepted model snapshot. Editing or deleting a catalog
+definition after acceptance must not change that run's inputs or report identity;
+missing/mismatched snapshots fail explicitly rather than silently using today's
+definition. Deferred API tests cover this selection boundary with mocked
+execution, not genuine tool performance, process-restart recovery or durable
+worker/report parity. Durable routing remains unchanged.
+
 ### Azure target boundary
 
 Both original primary canary/cleanup workflows remain disabled. The user
