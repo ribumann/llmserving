@@ -23,3 +23,6 @@ jobs:
         run: python -m unittest discover -s scripts/tests -v
       - name: Validate workflow syntax without Azure credentials
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Inspect fixed public disk pricing without Azure credentials or resource mutation
+        if: github.event_name == 'workflow_dispatch'
+        run: python scripts/azure_disk_probe.py quote

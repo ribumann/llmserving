@@ -16,6 +16,57 @@ import azure_disk_probe as probe
 
 
 class DiskProbeTests(unittest.TestCase):
+    def price(self):
+        return {
+            "Currency": "USD",
+            "NextPageLink": None,
+            "Items": [
+                {
+                    "armRegionName": probe.REGION,
+                    "productName": "Standard HDD Managed Disks",
+                    "skuName": "S4 LRS",
+                    "type": "Consumption",
+                    "currencyCode": "USD",
+                    "unitOfMeasure": "1/Month",
+                    "isPrimaryMeterRegion": True,
+                    "effectiveStartDate": "2025-01-01T00:00:00Z",
+                    "retailPrice": 1.75,
+                }
+            ],
+        }
+
+    def test_exact_live_price_and_current_monthly_ceiling(self):
+        self.assertEqual(probe.validate_price(self.price()), 1.75)
+        for key in self.price()["Items"][0]:
+            value = copy.deepcopy(self.price())
+            value["Items"][0][key] = "unexpected"
+            with self.subTest(key=key), self.assertRaises(probe.ProbeError):
+                probe.validate_price(value)
+        for price in (None, True, 0, -1, 10.01, float("nan"), float("inf")):
+            value = self.price()
+            value["Items"][0]["retailPrice"] = price
+            with self.subTest(price=price), self.assertRaises(probe.ProbeError):
+                probe.validate_price(value)
+        for changed in (
+            {"Currency": "EUR"},
+            {"NextPageLink": "https://next.example"},
+            {"Items": []},
+            {"Items": self.price()["Items"] * 2},
+        ):
+            with self.subTest(changed=changed), self.assertRaises(probe.ProbeError):
+                probe.validate_price({**self.price(), **changed})
+        value = self.price()
+        value["Items"][0]["effectiveStartDate"] = "9999-01-01T00:00:00Z"
+        with self.assertRaises(probe.ProbeError):
+            probe.validate_price(value)
+
+    def test_price_failure_prevents_all_azure_calls(self):
+        with patch.dict(os.environ, self.environment(), clear=True), patch.object(
+            probe, "quote", side_effect=probe.ProbeError("Price unavailable.")
+        ), patch.object(probe, "az") as azure, self.assertRaises(probe.ProbeError):
+            probe.create()
+        azure.assert_not_called()
+
     def environment(self, cleanup=False):
         return {
             "AZURE_CLIENT_ID": probe.FALLBACK_TARGET.client,
@@ -155,7 +206,9 @@ class DiskProbeTests(unittest.TestCase):
     def test_create_does_not_adopt_an_existing_owned_disk(self):
         with patch.dict(os.environ, self.environment(), clear=True), patch.object(
             probe, "az", side_effect=self.azure
-        ) as azure, self.assertRaises(probe.ProbeError):
+        ) as azure, patch.object(probe, "quote", return_value=1.75), self.assertRaises(
+            probe.ProbeError
+        ):
             probe.create()
         self.assertNotIn(
             ("disk", "create"), [call.args[:2] for call in azure.call_args_list]
@@ -186,7 +239,11 @@ class DiskProbeTests(unittest.TestCase):
 
         with patch.dict(os.environ, self.environment(), clear=True), patch.object(
             probe, "az", side_effect=azure
-        ) as calls, contextlib.redirect_stdout(io.StringIO()):
+        ) as calls, patch.object(
+            probe, "quote", return_value=1.75
+        ), contextlib.redirect_stdout(
+            io.StringIO()
+        ):
             probe.create()
         self.assertEqual(
             sum(call.args[:2] == ("disk", "create") for call in calls.call_args_list), 1

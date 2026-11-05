@@ -163,10 +163,18 @@ is completed before deleting. Rerunning a creator cannot adopt an existing disk.
 | Ownership | Exact campaign, purpose, repository, source SHA, run ID and attempt tags |
 | Other mutations | None: no group, role, identity, VM, NIC, public IP, model or app creation |
 
-Before any dispatch, confirm current regional S4 disk pricing (the billing tier
-can exceed the requested 4 GiB), a conservative delayed-cleanup exposure bound,
-passing fresh-main guards and independent exact-source review. Source/tests alone
-are **not** live cleanup evidence or a price quote. The expiry tag is advisory,
+Before any dispatch, require passing fresh-main guards and independent
+exact-source review. Every creation queries the fixed public Azure Retail Prices
+API and requires exactly one current primary Italy North S4 LRS consumption
+price in USD/month, greater than zero and at most USD 10/month. An unavailable,
+ambiguous or differently shaped quote refuses **before any Azure command**.
+The billing tier can exceed the requested 4 GiB. One month of delayed-cleanup
+contingency for this disk is therefore at most USD 10, excluding taxes/contract
+adjustments; this is not a hard lifetime spending limit.
+Manual Cloud safety CI dispatch also queries this public price without Azure
+credentials or resource mutations, so its real response can be checked before
+the probe. Source/tests alone are **not** live cleanup evidence or a price quote.
+The expiry tag is advisory,
 not an Azure TTL or hard spending cap. GitHub/Azure outages can delay cleanup;
 inspect the exact owned disk and use the separately reviewed cleanup workflow,
 never a group deletion or wildcard sweep. A foreign/malformed disk, changed

@@ -8,6 +8,9 @@ import os
 import re
 import subprocess
 from datetime import UTC, datetime, timedelta
+from urllib.error import URLError
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 from azure_canary import FALLBACK_TARGET
 
@@ -17,10 +20,82 @@ REGION = "italynorth"
 CREATE_WORKFLOW = ".github/workflows/azure-fallback-disk-probe.yml"
 CLEANUP_WORKFLOW = ".github/workflows/azure-fallback-disk-cleanup.yml"
 REPOSITORY = "ribumann/llmserving"
+MAX_MONTHLY_USD = 10
 
 
 class ProbeError(RuntimeError):
     pass
+
+
+def validate_price(payload: object) -> float:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("Currency") != "USD"
+        or payload.get("NextPageLink")
+        or not isinstance(payload.get("Items"), list)
+    ):
+        raise ProbeError("Public disk-price response is malformed or incomplete.")
+    matches = [
+        item
+        for item in payload["Items"]
+        if isinstance(item, dict)
+        and item.get("armRegionName") == REGION
+        and item.get("productName") == "Standard HDD Managed Disks"
+        and item.get("skuName") == "S4 LRS"
+        and item.get("type") == "Consumption"
+        and item.get("currencyCode") == "USD"
+        and item.get("unitOfMeasure") == "1/Month"
+        and item.get("isPrimaryMeterRegion") is True
+    ]
+    if len(matches) != 1:
+        raise ProbeError(
+            "Exactly one current Italy North S4 LRS monthly price is required."
+        )
+    item = matches[0]
+    price = item.get("retailPrice")
+    if type(price) not in {int, float} or not 0 < price <= MAX_MONTHLY_USD:
+        raise ProbeError(
+            "Disk monthly retail price is unknown or above the USD 10 ceiling."
+        )
+    try:
+        effective = datetime.fromisoformat(item["effectiveStartDate"])
+        if effective.tzinfo is None or effective > datetime.now(UTC):
+            raise ValueError("Future/unspecified price.")
+    except (KeyError, TypeError, AttributeError, ValueError):
+        raise ProbeError(
+            "Disk price effective date is missing or not current."
+        ) from None
+    return float(price)
+
+
+def quote() -> float:
+    query = urlencode(
+        {
+            "$filter": (
+                f"armRegionName eq '{REGION}' and "
+                "productName eq 'Standard HDD Managed Disks' and skuName eq 'S4 LRS'"
+            ),
+        }
+    )
+    try:
+        with urlopen(
+            f"https://prices.azure.com/api/retail/prices?{query}", timeout=20
+        ) as response:
+            data = response.read(1024 * 1024 + 1)
+        if len(data) > 1024 * 1024:
+            raise ProbeError("Public disk-price response exceeds the fixed size bound.")
+        price = validate_price(json.loads(data))
+    except (URLError, TimeoutError, OSError, ValueError):
+        raise ProbeError(
+            "Public disk-price query failed; no price fallback or creation."
+        ) from None
+    print(
+        f"Current public S4 LRS price: USD {price:.6f}/month, "
+        "excluding tax/contract discounts; requested 4 GiB bills at the S4 tier. "
+        "One-month delayed-cleanup contingency is below USD 10. "
+        "This is not an Azure hard spending cap."
+    )
+    return price
 
 
 def command(arguments: list[str]) -> object:
@@ -192,6 +267,7 @@ def create() -> None:
         or not re.fullmatch(r"[0-9a-f]{40}", sha)
     ):
         raise ProbeError("Invalid trusted disk-probe run identity.")
+    quote()
     validate_scope()
     if disk() is not None:
         raise ProbeError("Fixed disk exists; independent cleanup must finish first.")
@@ -277,11 +353,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "operation",
-        choices=("create", "cleanup", "validate-create", "validate-cleanup"),
+        choices=("create", "cleanup", "validate-create", "validate-cleanup", "quote"),
     )
     operation = parser.parse_args().operation
     try:
-        if operation.startswith("validate-"):
+        if operation == "quote":
+            quote()
+        elif operation.startswith("validate-"):
             validate_config(operation.removeprefix("validate-"))
             mask_subject()
             print(
