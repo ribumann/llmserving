@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
-from src.providers.azure.preflight import AzureCapacityPreflight
+from azure.core.exceptions import (
+    ClientAuthenticationError,
+    HttpResponseError,
+    ServiceRequestError,
+)
+from azure.identity import CredentialUnavailableError
+from src.providers.azure.preflight import (
+    AzureCapacityPreflight,
+    AzurePreflightAuthorizationError,
+)
 
 
 def test_preflight_reports_quota_and_sku_availability() -> None:
@@ -137,3 +147,92 @@ def test_integer_sku_capability_is_supported() -> None:
 def test_usage_matching_never_selects_an_unrelated_family() -> None:
     unrelated = SimpleNamespace(name=SimpleNamespace(value="standardUnrelatedFamily"))
     assert AzureCapacityPreflight._match_usage([unrelated], ("t4",)) is None
+
+
+def _read_client():
+    return SimpleNamespace(
+        usage=SimpleNamespace(
+            list=Mock(
+                return_value=[
+                    SimpleNamespace(
+                        name=SimpleNamespace(value="lowPriorityCores"),
+                        current_value=0,
+                        limit=100,
+                    )
+                ]
+            )
+        ),
+        resource_skus=SimpleNamespace(
+            list=Mock(
+                return_value=[
+                    SimpleNamespace(
+                        name="Standard_NC16as_T4_v3",
+                        locations=["eastus2"],
+                        restrictions=[],
+                        capabilities=[SimpleNamespace(name="vCPUs", value="16")],
+                        family="standardNCT4Family",
+                    )
+                ]
+            )
+        ),
+    )
+
+
+@pytest.mark.parametrize("operation", ["sku", "quota"])
+@pytest.mark.parametrize("kind", [401, 403, "authentication", "unavailable"])
+@pytest.mark.parametrize("paginated", [False, True])
+def test_authorization_failure_is_not_unknown_capacity(operation, kind, paginated, caplog) -> None:
+    private = "PRIVATE SDK token and tenant detail"
+    if kind == "authentication":
+        error = ClientAuthenticationError(message=private)
+    elif kind == "unavailable":
+        error = CredentialUnavailableError(message=private)
+    else:
+        error = HttpResponseError(message=private)
+        error.status_code = kind
+    client = _read_client()
+    reader = client.resource_skus.list if operation == "sku" else client.usage.list
+    if paginated:
+        original = reader.return_value
+
+        def partial_page():
+            yield from original
+            raise error
+
+        reader.return_value = partial_page()
+    else:
+        reader.side_effect = error
+
+    with pytest.raises(AzurePreflightAuthorizationError) as raised:
+        AzureCapacityPreflight(subscription_id="test", compute_client=client).evaluate_region(
+            region="eastus2", vm_size="Standard_NC16as_T4_v3"
+        )
+    assert raised.value.operation == operation
+    assert raised.value.__suppress_context__ is True
+    assert private not in str(raised.value)
+    assert private not in caplog.text
+    assert "authorization failed" in caplog.text
+    reader.assert_called_once()
+    if operation == "sku":
+        client.usage.list.assert_not_called()
+
+
+@pytest.mark.parametrize("operation", ["sku", "quota"])
+@pytest.mark.parametrize("kind", ["server", "network"])
+def test_non_auth_read_failure_remains_explicitly_unknown(operation, kind, caplog) -> None:
+    error = (
+        ServiceRequestError("PRIVATE transport detail")
+        if kind == "network"
+        else HttpResponseError(message="PRIVATE server detail")
+    )
+    if kind == "server":
+        error.status_code = 500
+    client = _read_client()
+    reader = client.resource_skus.list if operation == "sku" else client.usage.list
+    reader.side_effect = error
+    result = AzureCapacityPreflight(subscription_id="test", compute_client=client).evaluate_region(
+        region="eastus2", vm_size="Standard_NC16as_T4_v3"
+    )
+    assert result.available is None
+    assert "lookup unavailable" in caplog.text
+    assert "PRIVATE" not in caplog.text

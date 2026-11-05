@@ -6,6 +6,7 @@ import pytest
 from src.domain.enums import ModelSizeClass, ProviderType
 from src.domain.profile import CloudDeploymentProfile
 from src.providers.azure.preflight import (
+    AzurePreflightAuthorizationError,
     CapacityPreflightResult,
     QuotaCheckResult,
     SkuAvailabilityResult,
@@ -129,3 +130,27 @@ def test_invalid_size_class_is_explicit(size_class) -> None:
     profile = CloudDeploymentProfile(configurableInputs={})
     with pytest.raises(InvalidVmSizeError, match="profileSizeClass"):
         resolve_vm_size(profile, {"profileSizeClass": size_class})
+
+
+@pytest.mark.parametrize("override", [None, "westus3"])
+def test_authorization_denial_cannot_be_a_fallback_or_override(override) -> None:
+    attempted = []
+
+    class DeniedPreflight(FakePreflight):
+        def evaluate_region(self, *, region: str, vm_size: str):
+            attempted.append(region)
+            if region == "westus3":
+                raise AzurePreflightAuthorizationError(operation="sku")
+            return super().evaluate_region(region=region, vm_size=vm_size)
+
+    profile = CloudDeploymentProfile(
+        profileId="azure",
+        configurableInputs={},
+        eligibleRegions=["southcentralus", "westus3", "westeurope"],
+    )
+    with pytest.raises(AzurePreflightAuthorizationError):
+        AzurePreviewService(preflight=DeniedPreflight()).preview_environment(
+            profile=profile, region_override=override
+        )
+    # Even an earlier successful region cannot turn denied reads into a recommendation.
+    assert attempted == (["westus3"] if override else ["southcentralus", "westus3"])

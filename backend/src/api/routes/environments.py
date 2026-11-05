@@ -28,6 +28,7 @@ from src.domain.model_configuration import ModelConfiguration
 from src.domain.profile import CloudDeploymentProfile
 from src.persistence.db import get_db_session
 from src.providers.azure.adapter import AzureProviderAdapter
+from src.providers.azure.preflight import AzurePreflightAuthorizationError
 from src.providers.azure.preview import InvalidVmSizeError, resolve_vm_size
 
 router = APIRouter(tags=["environments"])
@@ -198,6 +199,13 @@ def preview_environment(
                 else {}
             ),
         )
+    except AzurePreflightAuthorizationError as exc:
+        raise ApiError(
+            status_code=503,
+            code="azure_preflight_authorization_failed",
+            message=str(exc),
+            details={"operation": exc.operation},
+        ) from exc
     except InvalidVmSizeError as exc:
         raise ApiError(
             status_code=422, code="invalid_vm_size", message=str(exc), details={}
@@ -265,6 +273,13 @@ def create_environment(
                 else {}
             ),
         )
+    except AzurePreflightAuthorizationError as exc:
+        raise ApiError(
+            status_code=503,
+            code="azure_preflight_authorization_failed",
+            message=str(exc),
+            details={"operation": exc.operation},
+        ) from exc
     except InvalidVmSizeError as exc:
         raise ApiError(
             status_code=422, code="invalid_vm_size", message=str(exc), details={}
