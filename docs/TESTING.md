@@ -5,6 +5,13 @@ It does not deploy, push container images, or run Terraform plan/apply/destroy.
 The separately protected Azure canary and opt-in application deployments are not
 pull-request jobs.
 
+Deployment workflow guard tests execute the actual embedded pre-login masking
+Python with synthetic environment values, including every missing field and
+escaped multiline/percent values. They also verify protected manual-main deploy
+gates, absence of deployment credentials in PR checks and fixed privileged
+checkout/login commits. These credential-free tests never invoke Azure login,
+push images, enable deployment or establish current target authorization.
+
 | Surface | CI coverage | What it does not prove |
 | --- | --- | --- |
 | Backend | Ruff, Black, migrations/seeds on disposable PostgreSQL 16, full `python -m pytest -q -o addopts=""` | Live Azure services or an actual inference model |

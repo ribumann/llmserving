@@ -188,10 +188,12 @@ On PRs and relevant pushes:
 
 Only on an explicitly enabled manual deployment dispatch from `main`:
 
-- logs into Azure with `azure/login@v2` (OIDC)
+- logs into Azure with a commit-pinned `azure/login` action (OIDC), after masking
+  required protected infrastructure configuration
 - builds and pushes `llmserving-backend:${github.sha}` with `az acr build`
-- points Container App `llm-backend` at that immutable SHA tag
-- polls `https://<fqdn>/healthz`
+- points Container App `llm-backend` at that commit-labelled tag (tags remain mutable;
+  digest pinning is still required for immutable release claims)
+- polls `https://<fqdn>/readyz`
 
 ### Frontend (`.github/workflows/frontend.yml`)
 
@@ -204,11 +206,11 @@ On PRs and relevant pushes:
 
 Only on an explicitly enabled manual deployment dispatch from `main`:
 
-- logs into Azure with OIDC
+- logs into Azure with the same commit-pinned OIDC action and pre-login masking
 - resolves the live backend Container App FQDN
 - builds and pushes `llmserving-frontend:${github.sha}` with `az acr build`
 - passes `VITE_API_BASE_URL=https://<backend-fqdn>` as a build arg
-- points Container App `llm-frontend` at that immutable SHA tag
+- points Container App `llm-frontend` at that commit-labelled tag (not digest-immutable)
 - polls the frontend root URL
 
 ### Terraform validation (`.github/workflows/infra.yml`)
