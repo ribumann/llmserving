@@ -37,6 +37,15 @@ from orchestration_lib.orchestration_logic import (
 
 
 def generic_orchestrator(context: Any) -> Generator[Any, Any, dict[str, Any]]:
+    # Keep the original activity sequence for existing Durable history replay.
+    return (yield from _orchestrate(context, finalize=False))
+
+
+def generic_orchestrator_v2(context: Any) -> Generator[Any, Any, dict[str, Any]]:
+    return (yield from _orchestrate(context, finalize=True))
+
+
+def _orchestrate(context: Any, *, finalize: bool) -> Generator[Any, Any, dict[str, Any]]:
     orchestration_input = OrchestrationInput.from_raw(context.get_input())
 
     if orchestration_input.pre_dispatched_execution_name:
@@ -62,6 +71,24 @@ def generic_orchestrator(context: Any) -> Generator[Any, Any, dict[str, Any]]:
 
     while True:
         if context.current_utc_datetime >= overall_deadline:
+            if finalize:
+                yield context.call_activity(
+                    "stop_job",
+                    {
+                        "jobName": orchestration_input.job_name,
+                        "executionName": execution_name,
+                        "workflowId": orchestration_input.workflow_id,
+                    },
+                )
+                outcome = yield context.call_activity(
+                    "finalize_workflow",
+                    {
+                        "workflowId": orchestration_input.workflow_id,
+                        "status": "failed",
+                        "reason": "orchestration_timeout",
+                    },
+                )
+                return {"status": outcome["status"], "reason": "orchestration_timeout"}
             yield context.call_activity(
                 "report_terminal_failure",
                 {"workflowId": orchestration_input.workflow_id, "reason": "orchestration_timeout"},
@@ -89,16 +116,36 @@ def generic_orchestrator(context: Any) -> Generator[Any, Any, dict[str, Any]]:
                     "workflowId": orchestration_input.workflow_id,
                 },
             )
+            if finalize:
+                outcome = yield context.call_activity(
+                    "finalize_workflow",
+                    {
+                        "workflowId": orchestration_input.workflow_id,
+                        "status": "cancelled",
+                        "reason": "cancellation_requested",
+                    },
+                )
             yield context.call_activity(
                 "acknowledge_cancellation", {"workflowId": orchestration_input.workflow_id}
             )
-            return {"status": "cancelled"}
+            return {"status": outcome["status"] if finalize else "cancelled"}
 
         if winner is status_task:
             if not timer_task.is_completed:
                 timer_task.cancel()
             status = status_task.result
             if is_terminal_job_status(status):
+                if finalize:
+                    outcome = yield context.call_activity(
+                        "finalize_workflow",
+                        {
+                            "workflowId": orchestration_input.workflow_id,
+                            "status": "failed",
+                            "reason": "job_terminal_without_callback",
+                            "jobStatus": status,
+                        },
+                    )
+                    return {"status": outcome["status"]}
                 return {"status": job_status_to_workflow_outcome(status)}
             continue
 

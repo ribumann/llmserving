@@ -219,6 +219,36 @@ def test_cancel_ack_is_idempotent() -> None:
     assert second.status_code == 200
 
 
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+def test_duplicate_completion_identifies_authoritative_terminal_status(status: str) -> None:
+    client, session = _client()
+    workflow_id = client.post(
+        "/internal/workflows",
+        json={
+            "environmentId": "env-demo",
+            "operationId": "old-operation",
+            "workflowType": "export",
+        },
+    ).json()["workflowId"]
+    assert (
+        client.post(
+            f"/internal/workflows/{workflow_id}/complete", json={"status": status}
+        ).status_code
+        == 200
+    )
+    session.environments["env-demo"].activeOperationId = "new-operation"
+
+    duplicate = client.post(
+        f"/internal/workflows/{workflow_id}/complete", json={"status": "failed"}
+    )
+
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "workflow_not_running"
+    assert duplicate.json()["error"]["details"] == {"workflowId": workflow_id, "status": status}
+    assert session.environments["env-demo"].activeOperationId == "new-operation"
+    assert session.orchestration_workflows[workflow_id].status.value == status
+
+
 def test_internal_endpoints_reject_missing_bearer_auth() -> None:
     app = create_app()
     session = MemorySession()
