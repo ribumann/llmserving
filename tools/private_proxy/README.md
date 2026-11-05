@@ -16,6 +16,7 @@ The bundled configuration permits only **CONNECT on port 443** to exactly:
 ```
 llmreleasestate0ea5e6.blob.core.windows.net
 llmrelease-kv-0ea5e6.vault.azure.net
+llmreleasefunc6ce138.blob.core.windows.net
 ```
 
 No wildcards, suffix subdomains, IP literals, plaintext HTTP, management/login
@@ -26,6 +27,11 @@ container via the private inbound resolver **10.20.31.4**. There is no
 `ssl_bump`, generated interception certificate, TLS termination or token
 handling in Squid. Client TLS verification/SNI stays end-to-end to Azure.
 Access logging is disabled; administrative errors stay in container tmpfs.
+The third exact hostname is the Functions package blob account observed in the
+canonical native control plan. Its OAuth ZIP upload still requires the actual
+private endpoint and private DNS route to exist; allowlisting is not evidence
+of successful upload or Functions startup. Rebuild the network image from the
+reviewed merged source before using that endpoint.
 
 ## Prerequisites and launch boundary
 
@@ -106,9 +112,9 @@ entries or fixture CA may be used for real operations.
 Do **not** export `HTTPS_PROXY` for the whole Terraform apply. AzureRM makes
 ARM and CLI token-refresh requests too, which the exact private allowlist
 intentionally rejects. Go/Python standard proxy selection is per destination,
-but a normal `NO_PROXY` list cannot express "all hosts except these two".
+but a normal `NO_PROXY` list cannot express "all hosts except these three".
 
-The verified narrow mode is for commands that contact only the two private
+The verified narrow mode is for commands that contact only the three private
 endpoints, such as a separate backend connectivity/lease probe or a Key Vault
 data-plane operation using an already-valid host token. Execute each in a
 fresh child process with `HTTPS_PROXY=http://127.0.0.1:ACTUAL_PORT`, and clear
@@ -122,7 +128,7 @@ while the proxy permits only the private endpoints. An initial candidate is
 `management.azure.com,login.microsoftonline.com,graph.microsoft.com`.
 Verify those public destinations already use an authorized direct route:
 do not bypass an existing required organizational proxy. Anything not in that
-public list goes through Squid and fails unless it is one of the two exact
+public list goes through Squid and fails unless it is one of the three exact
 private hosts. `NO_PROXY` must never include `*`, the private hosts, `.azure.net`
 or `.core.windows.net`. Clear conflicting lowercase `no_proxy`/`https_proxy`
 and set both case variants consistently within the child, then restore them
