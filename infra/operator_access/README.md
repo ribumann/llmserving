@@ -99,6 +99,14 @@ This wrapper executes a private copied plan only after the unchanged exact
 seven-create native guard, complete owned shared infrastructure, absent
 operator resources, registered policy-required public-IP feature, default
 workspace/local backend, matching cleanup variables/run and fixed deadline.
+It additionally verifies the **copied saved plan's embedded backend**, not
+only the current module metadata: only Terraform 1.16.6's exact default-local
+backend encoding and default workspace are accepted. Explicit backend paths,
+remote backends, state stores and unknown encodings fail before mutation.
+Shared initial/reconcile execution uses the same embedded-backend gate.
+The cleanup run must contain an actually successful `cleanup` job and
+successful Azure login/ARM verification steps; workflow success with skipped
+jobs is not arming evidence.
 It preserves verified before/after checkpoints even on apply failure.
 Existing local state, partial failure or lost state cannot be retried/adopted
 automatically. Preserve logs/checkpoints for separate reviewed reconciliation.

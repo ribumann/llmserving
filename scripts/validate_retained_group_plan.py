@@ -9,12 +9,71 @@ import re
 import subprocess
 import sys
 import tempfile
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
 
 class PlanRejected(ValueError):
     pass
+
+
+def canonical_saved_backend(path: Path) -> None:
+    # Terraform 1.16.6 internal planproto: Backend field 13, StateStore field 29.
+    # Accept only the exact default-local/default-workspace encoding generated
+    # by the real pinned binary; unknown encodings fail closed.
+    expected = bytes.fromhex(
+        "0a056c6f63616c12180a1682a470617468c0ad776f726b73706163655f646972c0"
+        "1a0764656661756c74"
+    )
+    try:
+        with zipfile.ZipFile(path) as archive:
+            members = [item for item in archive.infolist() if item.filename == "tfplan"]
+            if len(members) != 1 or members[0].file_size > 64 * 1024 * 1024:
+                raise PlanRejected(
+                    "Saved plan protobuf is missing/duplicate/oversized."
+                )
+            data = archive.read(members[0])
+
+        def varint(offset: int) -> tuple[int, int]:
+            value = 0
+            for shift in range(0, 70, 7):
+                byte = data[offset]
+                offset += 1
+                value |= (byte & 127) << shift
+                if byte < 128:
+                    return value, offset
+            raise PlanRejected("Malformed saved plan protobuf integer.")
+
+        offset = 0
+        backends = []
+        while offset < len(data):
+            tag, offset = varint(offset)
+            field, wire = tag >> 3, tag & 7
+            if field == 0 or field == 29:
+                raise PlanRejected("Saved state-store/invalid protobuf is unsupported.")
+            if wire == 0:
+                _, offset = varint(offset)
+            elif wire in (1, 5):
+                offset += 8 if wire == 1 else 4
+            elif wire == 2:
+                size, offset = varint(offset)
+                end = offset + size
+                if field == 13:
+                    backends.append(data[offset:end])
+                offset = end
+            else:
+                raise PlanRejected("Unsupported saved plan protobuf wire type.")
+            if offset > len(data):
+                raise PlanRejected("Truncated saved plan protobuf.")
+        if backends != [expected]:
+            raise PlanRejected(
+                "Saved plan backend is not exact default canonical local state."
+            )
+    except (zipfile.BadZipFile, IndexError, KeyError) as error:
+        raise PlanRejected(
+            "Cannot verify saved plan embedded local backend."
+        ) from error
 
 
 def _object(value: object) -> dict:
@@ -113,6 +172,7 @@ def run_saved_plan(
     terraform: str,
     apply: bool,
     validator: Callable[[object, str], None] = validate_plan,
+    require_canonical_local: bool = False,
 ) -> None:
     # A private copy prevents a caller replacing the original after validation.
     with tempfile.TemporaryDirectory(prefix="retained-group-plan-") as directory:
@@ -120,6 +180,8 @@ def run_saved_plan(
         fd = os.open(saved, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as handle:
             handle.write(plan_path.read_bytes())
+        if require_canonical_local:
+            canonical_saved_backend(saved)
         log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(log_fd, "w") as log:
             env = {

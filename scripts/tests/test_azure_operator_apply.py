@@ -36,14 +36,43 @@ class OperatorApplyTests(unittest.TestCase):
             "head_repository": {"full_name": apply.bridge.shared.REPOSITORY},
             "created_at": now.isoformat(),
         }
+        jobs = {
+            "total_count": 1,
+            "jobs": [
+                {
+                    "name": "cleanup",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "steps": [
+                        {"name": name, "status": "completed", "conclusion": "success"}
+                        for name in (
+                            "Run azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5",
+                            "Verify fixed ARM cleanup and remove only eligible operator resources",
+                        )
+                    ],
+                }
+            ],
+        }
         with patch.object(
             apply, "variable", side_effect=variables.__getitem__
         ), patch.object(
             apply.bridge, "configuration", return_value=now + timedelta(hours=2)
         ), patch.object(
-            apply, "command", return_value=run
+            apply, "command", side_effect=[run, jobs]
         ):
             apply.arming(selected, "123")
+            for changed_jobs in (
+                {"total_count": 0, "jobs": []},
+                {
+                    "total_count": 1,
+                    "jobs": [{**jobs["jobs"][0], "conclusion": "skipped"}],
+                },
+                {"total_count": 1, "jobs": [{**jobs["jobs"][0], "steps": []}]},
+            ):
+                with patch.object(
+                    apply, "command", side_effect=[run, changed_jobs]
+                ), self.assertRaises(apply.bridge.shared.SharedError):
+                    apply.arming(selected, "123")
             for key, value in (
                 ("run_attempt", 2),
                 ("conclusion", "failure"),

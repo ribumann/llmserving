@@ -32,3 +32,7 @@ jobs:
           terraform test -no-color
       - name: Check fixed native plan policy without Azure credentials
         run: python -m unittest discover -s scripts/tests -p 'test*operator*.py' -v
+      - name: Actual saved-plan canonical versus redirected backend contract
+        env:
+          TEST_NATIVE_BACKEND: "true"
+        run: python -m unittest discover -s scripts/tests -p test_saved_backend.py -v

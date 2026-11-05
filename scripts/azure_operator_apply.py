@@ -76,6 +76,52 @@ def arming(selected: dict, run_id: str) -> None:
         raise bridge.shared.SharedError(
             "Operator cleanup run is not a recent trusted successful exact attempt."
         )
+    jobs = command(
+        [
+            "gh",
+            "api",
+            f"repos/{bridge.shared.REPOSITORY}/actions/runs/{run_id}/attempts/1/jobs?per_page=100",
+        ]
+    )
+    if (
+        not isinstance(jobs, dict)
+        or jobs.get("total_count") != 1
+        or not isinstance(jobs.get("jobs"), list)
+        or len(jobs["jobs"]) != 1
+    ):
+        raise bridge.shared.SharedError(
+            "Operator cleanup exact attempt job is unverified."
+        )
+    job = jobs["jobs"][0]
+    required = {
+        "Run azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5",
+        "Verify fixed ARM cleanup and remove only eligible operator resources",
+    }
+    if (
+        not isinstance(job, dict)
+        or job.get("name") != "cleanup"
+        or job.get("status") != "completed"
+        or job.get("conclusion") != "success"
+        or not isinstance(job.get("steps"), list)
+    ):
+        raise bridge.shared.SharedError(
+            "Operator cleanup job did not actually execute successfully."
+        )
+    steps = job["steps"]
+    for name in required:
+        matches = [
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("name") == name
+        ]
+        if (
+            len(matches) != 1
+            or matches[0].get("status") != "completed"
+            or matches[0].get("conclusion") != "success"
+        ):
+            raise bridge.shared.SharedError(
+                "Operator cleanup login/ARM verification was skipped or failed."
+            )
 
 
 def local_context(module: Path) -> None:
@@ -197,6 +243,7 @@ def local_apply(
             terraform="terraform",
             apply=True,
             validator=gate,
+            require_canonical_local=True,
         )
     finally:
         bridge.backup(module, second_backup, f"operator-{stamp}-after")

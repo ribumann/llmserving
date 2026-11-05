@@ -465,6 +465,7 @@ def local_apply(
             terraform="terraform",
             apply=True,
             validator=gate,
+            require_canonical_local=True,
         )
     finally:
         backup(module, second_backup, f"{stamp}-after")
