@@ -109,19 +109,54 @@ def test_record_progress_rejects_already_terminal_workflow(session: MemorySessio
         service.record_progress(session, workflow_id=workflow.workflowId, phase="too-late")
 
 
-def test_complete_workflow_releases_the_environment_lock(session: MemorySession) -> None:
+@pytest.mark.parametrize(
+    "status", [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED]
+)
+def test_complete_workflow_releases_the_environment_lock(
+    session: MemorySession, status: WorkflowStatus
+) -> None:
     service = OrchestrationWorkflowService()
     workflow = service.create_workflow(
         session, environment_id="env-demo", operation_id="op-1", workflow_type=WorkflowType.EXPORT
     )
 
-    completed = service.complete_workflow(
-        session, workflow_id=workflow.workflowId, status=WorkflowStatus.FAILED
-    )
+    completed = service.complete_workflow(session, workflow_id=workflow.workflowId, status=status)
 
-    assert completed.status == WorkflowStatus.FAILED
+    assert completed.status == status
     assert completed.endedAt is not None
     assert session.environments["env-demo"].activeOperationId is None
+
+
+@pytest.mark.parametrize("owner", ["new-operation", None])
+@pytest.mark.parametrize(
+    "status", [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED]
+)
+def test_stale_completion_preserves_lock_and_workflow(
+    session: MemorySession, owner: str | None, status: WorkflowStatus
+) -> None:
+    service = OrchestrationWorkflowService()
+    workflow = service.create_workflow(
+        session,
+        environment_id="env-demo",
+        operation_id="old-operation",
+        workflow_type=WorkflowType.PROVISION,
+    )
+    session.environments["env-demo"].activeOperationId = owner
+
+    with pytest.raises(EnvironmentLockedError):
+        service.complete_workflow(
+            session,
+            workflow_id=workflow.workflowId,
+            status=status,
+            phase="late-completion",
+            diagnostics={"late": True},
+        )
+
+    assert session.environments["env-demo"].activeOperationId == owner
+    assert workflow.status == WorkflowStatus.RUNNING
+    assert workflow.phase == "accepted"
+    assert workflow.diagnostics == {}
+    assert workflow.endedAt is None
 
 
 def test_complete_workflow_rejects_already_terminal_workflow(session: MemorySession) -> None:

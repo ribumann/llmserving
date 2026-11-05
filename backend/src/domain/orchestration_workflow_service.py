@@ -124,6 +124,13 @@ class OrchestrationWorkflowService:
         if workflow.status in _TERMINAL_STATUSES:
             raise WorkflowNotRunningError(workflow_id, workflow.status)
 
+        # Check ownership under the environment row lock before changing the workflow.
+        # The release and terminal write remain atomic until the caller commits.
+        EnvironmentLockService().release(
+            session,
+            environment_id=workflow.environmentId,
+            operation_id=workflow.operationId,
+        )
         workflow.status = status
         if phase is not None:
             workflow.phase = phase
@@ -133,17 +140,6 @@ class OrchestrationWorkflowService:
         session.add(workflow)
         session.flush()
 
-        # Release the single-writer lock atomically in the same transaction as the
-        # workflow's terminal-state write (contracts/api.md: "FastAPI ... releases
-        # the environment lock atomically in the same transaction"). `force=True`
-        # because the lock's operationId is exactly the one this workflow was
-        # created with - there is no other holder to protect against here.
-        EnvironmentLockService().release(
-            session,
-            environment_id=workflow.environmentId,
-            operation_id=workflow.operationId,
-            force=True,
-        )
         return workflow
 
     def acknowledge_cancellation(

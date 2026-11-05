@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 from src.api.app import create_app
 from src.api.internal_auth import InternalCaller, require_internal_identity
+from src.domain.enums import DemoEnvironmentState, WorkflowStatus
 from src.persistence.db import get_db_session
 from tests.support.demo_backend import MemorySession, NoopPersistenceSession
 
@@ -168,6 +170,40 @@ def test_complete_rejects_non_terminal_status() -> None:
     )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_terminal_status"
+
+
+@pytest.mark.parametrize("owner", ["new-operation", None])
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+def test_stale_completion_rejects_before_reconciliation(owner: str | None, status: str) -> None:
+    client, session = _client()
+    workflow_id = client.post(
+        "/internal/workflows",
+        json={
+            "environmentId": "env-demo",
+            "operationId": "old-operation",
+            "workflowType": "teardown",
+        },
+    ).json()["workflowId"]
+    environment = session.environments["env-demo"]
+    environment.activeOperationId = owner
+    environment.lifecycleState = DemoEnvironmentState.READY
+    provider_state = dict(environment.providerState or {})
+
+    response = client.post(
+        f"/internal/workflows/{workflow_id}/complete",
+        json={"status": status, "phase": "late-completion", "diagnostics": {"late": True}},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "environment_locked"
+    assert environment.activeOperationId == owner
+    assert environment.lifecycleState == DemoEnvironmentState.READY
+    assert environment.providerState == provider_state
+    workflow = session.orchestration_workflows[workflow_id]
+    assert workflow.status == WorkflowStatus.RUNNING
+    assert workflow.phase == "accepted"
+    assert workflow.diagnostics == {}
+    assert workflow.endedAt is None
 
 
 def test_cancel_ack_is_idempotent() -> None:

@@ -184,6 +184,13 @@ def complete_workflow(
                 phase=payload.phase,
                 diagnostics=payload.diagnostics,
             )
+        except EnvironmentLockedError as exc:
+            raise ApiError(
+                status_code=409,
+                code="environment_locked",
+                message=str(exc),
+                details={"environmentId": exc.environment_id},
+            ) from exc
         except WorkflowNotFoundError as exc:
             raise ApiError(
                 status_code=404,

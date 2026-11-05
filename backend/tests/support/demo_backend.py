@@ -207,6 +207,10 @@ class MemorySession:
             completionCriteria={"targetCompletedRequests": 10},
         )
 
+    def refresh(self, instance, attribute_names=None):
+        # Stored objects are the database rows; there is no separate identity-map cache.
+        pass
+
     def get(self, model, identifier):
         if model is DemoEnvironment:
             return self.environments.get(identifier)

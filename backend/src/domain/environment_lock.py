@@ -48,6 +48,8 @@ class EnvironmentLockService:
         if environment is None:
             raise EnvironmentNotFoundError(environment_id)
 
+        # FOR UPDATE locks the row but does not refresh an existing identity-map entry.
+        session.refresh(environment, attribute_names=["activeOperationId"])
         if environment.activeOperationId and environment.activeOperationId != operation_id:
             raise EnvironmentLockedError(environment_id, environment.activeOperationId)
 
@@ -74,6 +76,7 @@ class EnvironmentLockService:
         if environment is None:
             raise EnvironmentNotFoundError(environment_id)
 
+        session.refresh(environment, attribute_names=["activeOperationId"])
         if environment.activeOperationId == operation_id or force:
             environment.activeOperationId = None
             session.flush()
