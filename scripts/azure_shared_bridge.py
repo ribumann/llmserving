@@ -20,6 +20,23 @@ from validate_retained_group_plan import PlanRejected, run_saved_plan
 WORKFLOW = ".github/workflows/azure-fallback-shared-bridge-cleanup.yml"
 ARMED = "FALLBACK_SHARED_BRIDGE_CLEANUP_ARMED"
 DEADLINE = "FALLBACK_SHARED_BRIDGE_EXPIRES_AT"
+PROVIDER_OVERRIDE = {
+    "terraform": {
+        "required_providers": {
+            "azurerm": {"source": "hashicorp/azurerm", "version": "= 3.117.1"},
+        }
+    },
+    "provider": {
+        "azurerm": {
+            "features": {
+                "key_vault": {
+                    "purge_soft_delete_on_destroy": False,
+                    "recover_soft_deleted_key_vaults": False,
+                }
+            }
+        }
+    },
+}
 APIS = {
     "Microsoft.Network": "2023-09-01",
     "Microsoft.PrivateDns": "2020-06-01",
@@ -144,6 +161,43 @@ def reject_attached_children(records: dict) -> None:
                 )
 
 
+def verify_dns_records(records: dict) -> None:
+    for address in records:
+        if not address.startswith("azurerm_private_dns_zone."):
+            continue
+        identifier = scope.RESOURCES[address]["id"]
+        response = az(
+            "rest",
+            "--method",
+            "GET",
+            "--url",
+            f"https://management.azure.com{identifier}/ALL?api-version=2020-06-01",
+        )
+        if (
+            not isinstance(response, dict)
+            or not isinstance(response.get("value"), list)
+            or response.get("nextLink")
+        ):
+            raise shared.SharedError(
+                "DNS record inventory is incomplete; refuse zone cascade deletion."
+            )
+        soa = 0
+        for record in response["value"]:
+            if (
+                not isinstance(record, dict)
+                or not scope.equal(record.get("id"), f"{identifier}/SOA/@")
+                or not isinstance(record.get("type"), str)
+                or record["type"].casefold() != "microsoft.network/privatednszones/soa"
+                or record.get("name") != "@"
+            ):
+                raise shared.SharedError(
+                    "DNS zone has non-default records; remove only separately verified endpoint-owned records first."
+                )
+            soa += 1
+        if soa != 1:
+            raise shared.SharedError("DNS zone default SOA is not uniquely verified.")
+
+
 def emergency_cleanup(*, force: bool) -> None:
     deadline = configuration()
     identity(protected=True)
@@ -158,6 +212,8 @@ def emergency_cleanup(*, force: bool) -> None:
     for address in DELETE_ORDER:
         current = shared.inventory(None, bridge=True)
         reject_attached_children(current)
+        if address.startswith("azurerm_private_dns_zone."):
+            verify_dns_records(current)
         shared.dependencies_absent()
         if address not in current:
             continue
@@ -317,12 +373,30 @@ def local_apply(plan: Path, log: Path, second_backup: Path, cleanup_run: str) ->
         )
     module = Path.cwd()
     private_directory(module)
+    override = module / "release_override.tf.json"
+    if (
+        override.is_symlink()
+        or not override.is_file()
+        or json.loads(override.read_text()) != PROVIDER_OVERRIDE
+    ):
+        raise shared.SharedError(
+            "Local bridge requires the exact reviewed no-purge/no-recovery provider override before plan generation."
+        )
     if any(
         os.environ.get(key)
         for key in ("TF_DATA_DIR", "TF_WORKSPACE", "TF_CLI_CONFIG_FILE")
     ):
         raise shared.SharedError(
             "Bridge refuses redirected Terraform data/workspace/config."
+        )
+    workspace = module / ".terraform/environment"
+    if (
+        workspace.is_symlink()
+        or workspace.exists()
+        and workspace.read_text().strip() != "default"
+    ):
+        raise shared.SharedError(
+            "Bridge requires the persisted default workspace before any mutation."
         )
     version = command(["terraform", "version", "-json"])
     if not isinstance(version, dict) or version.get("terraform_version") != "1.16.6":

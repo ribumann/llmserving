@@ -63,6 +63,9 @@ class SharedBridgeTests(unittest.TestCase):
             ).encode()
             (module / "terraform.tfstate").write_bytes(payload)
             (module / "main.tf").write_text("# source\n")
+            (module / "release_override.tf.json").write_text(
+                json.dumps(bridge.PROVIDER_OVERRIDE)
+            )
             before = bridge.backup(module, second, "before")
             self.assertEqual(
                 before["state"],
@@ -253,6 +256,26 @@ class SharedBridgeTests(unittest.TestCase):
             finally:
                 execute.assert_not_called()
 
+    def test_dns_foreign_records_and_incomplete_enumeration_block_zone_delete(self):
+        address = "azurerm_private_dns_zone.vault"
+        identifier = bridge.scope.RESOURCES[address]["id"]
+        soa = {
+            "id": f"{identifier}/SOA/@",
+            "type": "Microsoft.Network/privateDnsZones/SOA",
+            "name": "@",
+        }
+        with patch.object(bridge, "az", return_value={"value": [soa]}):
+            bridge.verify_dns_records({address: {}})
+        for response in (
+            {"value": [soa, {"id": f"{identifier}/A/foreign", "name": "foreign"}]},
+            {"value": [soa], "nextLink": "https://more"},
+            {"value": []},
+        ):
+            with patch.object(bridge, "az", return_value=response), self.assertRaises(
+                bridge.shared.SharedError
+            ):
+                bridge.verify_dns_records({address: {}})
+
     def test_local_apply_checkpoints_success_and_partial_failure_without_retry(self):
         run = {
             "id": 123,
@@ -273,6 +296,9 @@ class SharedBridgeTests(unittest.TestCase):
                 module.mkdir(mode=0o700)
                 second.mkdir(mode=0o700)
                 (module / "main.tf").write_text("# source\n")
+                (module / "release_override.tf.json").write_text(
+                    json.dumps(bridge.PROVIDER_OVERRIDE)
+                )
 
                 def apply(*args, module=module, fail=fail, **kwargs):
                     kwargs["validator"](
@@ -324,6 +350,47 @@ class SharedBridgeTests(unittest.TestCase):
                 self.assertEqual(metadata["state"]["lineage"], "synthetic-only")
                 self.assertEqual(metadata["state"]["serial"], 1)
                 self.assertTrue((after / "terraform.tfstate").is_file())
+
+    def test_persisted_nondefault_workspace_rejected_before_apply(self):
+        run = {
+            "id": 123,
+            "run_attempt": 1,
+            "path": bridge.WORKFLOW,
+            "head_branch": "main",
+            "event": "workflow_dispatch",
+            "status": "completed",
+            "conclusion": "success",
+            "head_repository": {"full_name": bridge.shared.REPOSITORY},
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            module = Path(directory)
+            (module / ".terraform").mkdir()
+            (module / ".terraform/environment").write_text("foreign")
+            (module / "release_override.tf.json").write_text(
+                json.dumps(bridge.PROVIDER_OVERRIDE)
+            )
+            with patch.object(bridge, "configuration"), patch.object(
+                bridge, "command", return_value=run
+            ), patch.object(bridge, "identity"), patch.object(
+                bridge.shared, "dependencies_absent"
+            ), patch.object(
+                bridge.shared, "inventory"
+            ), patch.object(
+                bridge, "az", return_value=[]
+            ), patch.object(
+                Path, "cwd", return_value=module
+            ), patch.object(
+                bridge, "run_saved_plan"
+            ) as execute, self.assertRaisesRegex(
+                bridge.shared.SharedError, "default workspace"
+            ):
+                try:
+                    bridge.local_apply(
+                        module / "plan", module / "log", module / "second", "123"
+                    )
+                finally:
+                    execute.assert_not_called()
 
 
 if __name__ == "__main__":

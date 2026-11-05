@@ -326,6 +326,30 @@ when the operator executes the bridge. From a restricted initialized local
 shared module, use the reviewed exact 29-create native saved plan and an
 existing restricted **second backup directory outside the module**:
 
+Before generating that plan, add this exact private
+`release_override.tf.json` (the wrapper requires it), then initialize/validate
+and regenerate the native plan. This does not change original module defaults:
+
+```json
+{
+  "terraform": {
+    "required_providers": {
+      "azurerm": {"source": "hashicorp/azurerm", "version": "= 3.117.1"}
+    }
+  },
+  "provider": {
+    "azurerm": {
+      "features": {
+        "key_vault": {
+          "purge_soft_delete_on_destroy": false,
+          "recover_soft_deleted_key_vaults": false
+        }
+      }
+    }
+  }
+}
+```
+
 ```sh
 python /approved/reviewed-source/scripts/azure_shared_bridge.py local-apply \
   --plan /protected/shared.tfplan --private-log /protected/NEW-shared-apply.log \
@@ -343,6 +367,11 @@ Windows directories must limit allow ACLs to the caller, SYSTEM and local
 Administrators; POSIX directories must exclude group/other access. Keep the
 primary, second copy, logs and plans private; neither CLI/token caches nor
 state are published.
+Persisted `.terraform/environment` must also select the default workspace.
+Before deleting a DNS zone, ARM cleanup enumerates its record sets and accepts
+only the unique default SOA. The vault endpoint is deleted first so Azure can
+remove its generated records; any remaining record, including a foreign one,
+blocks zone deletion rather than being cascaded away.
 
 The hosted cleanup runs every twenty minutes and at manual dispatch.
 After the fixed deadline (or protected manual `cleanup_now=true`) it deletes
