@@ -254,7 +254,7 @@ def approval_hash(plan: dict) -> str:
 
 
 def azure_token(resource: str) -> str:
-    token = az_json("account", "get-access-token", "--tenant", TENANT, "--resource", resource)
+    token = az_json("account", "get-access-token", "--resource", resource)
     require(type(token) is dict and type(token.get("accessToken")) is str
             and bool(token["accessToken"]), "Azure did not return an access token.")
     return token["accessToken"]
