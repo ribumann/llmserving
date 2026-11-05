@@ -5,7 +5,7 @@ LABEL org.opencontainers.image.revision="${SOURCE_REVISION}"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl unzip openvpn iproute2 openssl gh \
+        ca-certificates curl unzip openvpn iproute2 openssl gh squid \
     && curl --fail --silent --show-error --location \
         https://releases.hashicorp.com/terraform/1.16.6/terraform_1.16.6_linux_amd64.zip \
         --output /tmp/terraform.zip \
@@ -19,6 +19,9 @@ RUN apt-get update \
 COPY infra /opt/llmserving/infra
 COPY scripts /opt/llmserving/scripts
 COPY tools/private_operator/smoke.py /opt/llmserving/operator-smoke.py
+COPY tools/private_proxy/squid.conf /etc/llmserving/squid.conf
+COPY tools/private_proxy/hosts.txt /etc/llmserving/hosts.txt
+COPY tools/private_proxy/smoke.py /opt/llmserving/proxy-smoke.py
 ENV AZURE_CONFIG_DIR=/run/azure \
     CHECKPOINT_DISABLE=1 \
     TF_IN_AUTOMATION=true
