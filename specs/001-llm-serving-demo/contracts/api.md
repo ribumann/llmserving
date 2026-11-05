@@ -121,6 +121,8 @@ as the sole writer of domain state while orchestration/execution happen outside 
   owns the environment (including an already-cleared lock), it returns
   `409 environment_locked` without changing the workflow, environment/revision state,
   or current lock. A late callback must never force-release another operation's lock.
+  Dispatch-failure recovery uses the same ownership gate before changing environment
+  or revision state; a missing/terminal workflow does not authorize fallback cleanup.
 - `POST /internal/workflows/{workflowId}/cancel-ack` -> a Container Apps Job acknowledges an
   idempotent cancellation request propagated from `POST /environments/{environmentId}/runs/{runId}/
   cancel` (FR-054); repeat acknowledgements are no-ops.

@@ -15,6 +15,7 @@ the job calls back through Durable Functions.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -26,8 +27,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.config import Settings
 from src.domain.enums import DemoEnvironmentState, WorkflowStatus, WorkflowType
 from src.domain.environment import DemoEnvironment
-from src.domain.environment_lock import EnvironmentLockService
-from src.domain.orchestration_workflow_service import OrchestrationWorkflowService
+from src.domain.environment_lock import (
+    EnvironmentLockedError,
+    EnvironmentLockService,
+    EnvironmentNotFoundError,
+)
+from src.domain.orchestration_workflow_service import (
+    OrchestrationWorkflowService,
+    WorkflowNotFoundError,
+    WorkflowNotRunningError,
+)
 from src.providers.azure.functions_client import OrchestrationFunctionsClient
 from src.providers.base import ProvisioningHandle, TeardownHandle
 
@@ -267,15 +276,13 @@ class AzureProvisioner:
         telemetry_phase: str,
         error: Exception,
     ) -> None:
-        """Nothing will ever call back for a workflow whose dispatch itself
-        failed, so this is the only place that marks it FAILED and releases
-        the single-writer lock - both `OrchestrationWorkflowService
-        .complete_workflow` (when a workflow row was created) and a direct
-        `EnvironmentLockService.release` (when it wasn't, e.g. the lock/
-        workflow-creation step itself raised) are handled here."""
+        """Fail an owned dispatch and release its lock in the same transaction.
+
+        A racing terminal callback or replacement operation must not be overwritten.
+        """
         with self._session_factory() as session:
-            if workflow_id is not None:
-                try:
+            try:
+                if workflow_id is not None:
                     self._workflow_service.complete_workflow(
                         session,
                         workflow_id=workflow_id,
@@ -283,8 +290,27 @@ class AzureProvisioner:
                         phase="failed",
                         diagnostics={"error": str(error)},
                     )
-                except Exception:
-                    pass  # workflow may already be terminal (e.g. a racing callback)
+                else:
+                    EnvironmentLockService().release(
+                        session,
+                        environment_id=environment_id,
+                        operation_id=operation_id,
+                    )
+            except (
+                EnvironmentLockedError,
+                EnvironmentNotFoundError,
+                WorkflowNotFoundError,
+                WorkflowNotRunningError,
+            ) as exc:
+                logging.getLogger(__name__).warning(
+                    "Rejected dispatch-failure cleanup environment=%s operation=%s "
+                    "workflow=%s reason=%s",
+                    environment_id,
+                    operation_id,
+                    workflow_id,
+                    type(exc).__name__,
+                )
+                return
 
             environment = session.get(DemoEnvironment, environment_id)
             if environment is not None:
@@ -298,16 +324,6 @@ class AzureProvisioner:
                 environment.providerState = provider_state
                 environment.lifecycleState = lifecycle_state
                 environment.lastModifiedBy = actor_email
-                if workflow_id is None:
-                    try:
-                        EnvironmentLockService().release(
-                            session,
-                            environment_id=environment_id,
-                            operation_id=operation_id,
-                            force=True,
-                        )
-                    except Exception:
-                        environment.activeOperationId = None
                 session.add(environment)
             session.commit()
 
