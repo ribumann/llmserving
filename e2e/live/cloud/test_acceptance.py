@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 SPEC = importlib.util.spec_from_file_location("acceptance", Path(__file__).with_name("acceptance.py"))
 live = importlib.util.module_from_spec(SPEC)
@@ -87,7 +87,13 @@ class AcceptanceContracts(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "403.*forbidden_domain"):
                 api.call("GET", "/providers")
         request = opened.call_args.args[0]
-        self.assertEqual(request.get_header("Authorization"), "Bearer actual-token")
+        self.assertEqual(request.get_header("Authorization").split(), ["Bearer", api.token])
+        api.token = "different-configured-operator-token"
+        with patch.object(api.opener, "open", side_effect=URLError("offline")) as opened_again:
+            with self.assertRaises(URLError):
+                api.call("GET", "/providers")
+        second_request = opened_again.call_args.args[0]
+        self.assertEqual(second_request.get_header("Authorization").split(), ["Bearer", api.token])
         self.assertIsNone(request.get_header("X-demo-user"))
         self.assertEqual(exchanges[0]["status"], 403)
         self.assertEqual(exchanges[0]["requestId"], "actual-request")

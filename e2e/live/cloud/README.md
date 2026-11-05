@@ -142,3 +142,6 @@ python3 -m unittest discover -s e2e/live/cloud -p 'test_*.py'
 
 These use explicit offline stubs to verify the harness contract, failure handling,
 threshold boundaries, cancellation and evidence. They never claim a live run.
+Runtime CI runs these contracts in its existing `jobs` job on every pull request
+and push to main, without credentials or path filters. Live cloud/browser checks
+remain opt-in and are not represented by that CI success.
