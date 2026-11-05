@@ -13,7 +13,7 @@ Several later-stage UI areas are still scaffolded rather than fully productized 
 
 **Status:** exploratory, not production-ready or a certified unattended Azure
 release. Read-only CI, scoped OIDC and independent canary cleanup have passed.
-Fresh CPU/Ollama API acceptance and its reviewed implementation are now merged;
+Fresh CPU/Ollama API and real-browser inference gates are now merged;
 authenticated Azure browser acceptance and GPU deployment remain blocked.
 See [exact commits, runs, measurements and limitations](docs/RELEASE_VALIDATION.md).
 Canary cleanup does not establish cleanup of billable application resources.
@@ -257,7 +257,7 @@ It also asserts that no Hugging Face token-shaped variable appears in `infra/dem
 Runs every Functions/worker test, packages and imports the dependency-inclusive
 Functions ZIP, builds all seven images, and runs nine API-mocked Playwright
 scenarios. These browser tests do not establish full-stack or cloud acceptance.
-The merged real-model workflow/evidence is explicitly identified
+The separate real-model API/Chromium workflow/evidence is explicitly identified
 in [release validation](docs/RELEASE_VALIDATION.md), not represented as a
 Azure/browser/benchmark result.
 

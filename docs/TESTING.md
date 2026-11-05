@@ -151,7 +151,8 @@ achieve a predetermined quality score. One real warmup precedes each measured
 performance workload and is excluded from throughput counts/timing.
 
 These are fixed-prompt CPU smoke workloads, not standardized LLMPerf results,
-benchmark acceptance, real-browser testing or Azure release acceptance. The
+benchmark acceptance or Azure release acceptance. The hosted workflow separately
+exercises the real browser against the same live deployment as described above. The
 Ollama runner does not synthesize a specified input-token distribution. API-mocked
 Playwright tests remain a separate boundary. Cloud authentication, real Azure
 GPU/networking and independently owned billable-resource cleanup require their
