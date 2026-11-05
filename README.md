@@ -27,6 +27,7 @@ with the current in-process runners is established.
 
 - [`backend/README.md`](backend/README.md) - backend-specific setup, local Ollama mode, and validation commands
 - [`frontend/README.md`](frontend/README.md) - frontend setup, lint/unit-test commands, and Playwright smoke test
+- [`docs/UI_DEPLOYMENT.md`](docs/UI_DEPLOYMENT.md) - existing local/container/cloud UI options, public headless API and Easy Auth boundaries
 - [`infra/README.md`](infra/README.md) - Terraform module split, bring-up order, and control-plane vs. demo-environment isolation
 - [`specs/001-llm-serving-demo/`](specs/001-llm-serving-demo/) - spec-kit artifacts (`spec.md`, `plan.md`, `research.md`, `tasks.md`) that describe the feature intent and planned architecture
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) - deeper architecture reference with multiple views and runtime diagrams

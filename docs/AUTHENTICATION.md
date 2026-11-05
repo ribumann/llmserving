@@ -1,5 +1,11 @@
 # Authentication and external SSO bootstrap
 
+Public UI/backend ingress is an intentional supported architecture, distinct
+from anonymous access or public database/inference ports. UI and headless
+clients use the same protected operator APIs; a private backend is not required.
+See [UI hosting and headless/local access options](UI_DEPLOYMENT.md) for what is
+implemented and the limits of Easy Auth with a local UI.
+
 ## Trust boundaries
 
 `AUTH_MODE=entra-jwt` is the backend's safe default. Cloud Terraform sets this
