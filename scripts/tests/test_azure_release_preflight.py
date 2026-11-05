@@ -205,6 +205,47 @@ class ReadOnlyPreflightTests(unittest.TestCase):
             ):
                 preflight.summarize_sku(records)
 
+    def test_missing_duplicate_or_malformed_quota_cannot_be_a_success_report(self):
+        complete = self.azure("vm", "list-usage")
+        malformed = copy.deepcopy(complete)
+        malformed[0]["limit"] = "8"
+        boolean = copy.deepcopy(complete)
+        boolean[0]["currentValue"] = False
+        negative = copy.deepcopy(complete)
+        negative[0]["limit"] = -1
+        for rows in (
+            None,
+            [],
+            complete[1:],
+            complete[:1],
+            complete + [complete[0]],
+            malformed,
+            boolean,
+            negative,
+        ):
+
+            def changed(*arguments, rows=rows):
+                if arguments[:2] == ("vm", "list-usage"):
+                    return rows
+                return self.azure(*arguments)
+
+            with self.subTest(rows=rows), self.assertRaises(preflight.PreflightError):
+                self.inspect(changed)
+
+    def test_missing_family_cannot_silently_drop_family_quota(self):
+        for family in (None, "", " "):
+
+            def changed(*arguments, family=family):
+                result = self.azure(*arguments)
+                if arguments[:2] == ("vm", "list-skus"):
+                    result[0]["family"] = family
+                return result
+
+            with self.subTest(family=family), self.assertRaises(
+                preflight.PreflightError
+            ):
+                self.inspect(changed)
+
     def test_command_allowlist_refuses_mutation_and_cli_defaults(self):
         for operation in (("vm", "create"), ("group", "delete"), ("account", "set")):
             with self.subTest(operation=operation), patch.object(

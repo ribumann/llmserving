@@ -169,7 +169,10 @@ def inspect() -> dict:
     usage = read_azure("vm", "list-usage", "--location", REGION)
     if not isinstance(usage, list):
         raise PreflightError("Quota response must be a list.")
-    names = {str(sku["family"]).lower(), "cores", "lowprioritycores"}
+    family = sku["family"]
+    if not isinstance(family, str) or not family.strip():
+        raise PreflightError("Exact SKU family is missing; quota cannot be resolved.")
+    names = {family.lower(), "cores", "lowprioritycores"}
     quota = [
         {
             "name": item["name"]["value"],
@@ -181,6 +184,16 @@ def inspect() -> dict:
         and isinstance(item.get("name"), dict)
         and str(item["name"].get("value", "")).lower() in names
     ]
+    if (
+        len(quota) != len(names)
+        or {item["name"].lower() for item in quota} != names
+        or any(
+            type(item[field]) is not int or item[field] < 0
+            for item in quota
+            for field in ("current", "limit")
+        )
+    ):
+        raise PreflightError("Required quota rows are missing, ambiguous or malformed.")
     return {
         "sourceSha": os.environ.get("GITHUB_SHA"),
         "scope": "Read-only fallback inventory/SKU/quota, not deployment readiness",
