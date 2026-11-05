@@ -16,6 +16,24 @@ Do not run the default modules against an original deployment or pre-existing
 protected test groups. Validation (`init -backend=false`/`validate`) proves
 neither an applicable plan nor ownership-safe migration.
 
+The separate `Azure fallback read-only preflight` workflow uses the existing
+protected fallback OIDC environment from `main`. It verifies the exact fallback
+identity, retained group IDs and campaign ownership tags, reports only resource
+counts/types, and queries `az vm list-skus --all` plus quota for the exact
+Italy North `Standard_NC4as_T4_v3`. It never creates resources, registers
+providers, changes CLI defaults, performs VM validation or alters roles/tags.
+Azure CLI errors fail explicitly without publishing raw diagnostic payloads;
+investigate the precise denial privately. No token/credential transfer is
+needed from another machine.
+
+The report retains restriction **types**, zones and `locationInfo` rather than
+turning a Zone restriction into a region-wide denial or permission for an
+unzoned deployment. Quota, SKU listing and an empty inventory do not prove
+allocation, app bootstrap, SSO or billable-resource cleanup. Missing metadata
+is not permission to spend. The script's read-only command allowlist and fixed
+target are covered by credential-free tests. This is a new inspection workflow,
+not evidence it has already run or that application deployment is ready.
+
 For a **fresh demo state**, control inputs `demo_resource_group_name` and
 `demo_resource_tags` wire operator-owned group/ownership tags into the backend.
 The group name is omitted from the environment when unset, rather than silently
