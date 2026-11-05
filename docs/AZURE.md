@@ -791,3 +791,14 @@ the operation. No endpoint URL is logged. Recognition is preserve-only:
 neither resource enters Terraform state, delete lists or ownership adoption.
 Cleanup preserves the topic, subscription and retained account/grants; it
 never deletes/disables platform security automation to make a guard pass.
+# Owned private-endpoint subnet attachment verification
+
+The shared vault private endpoint's platform NIC appears in the private
+endpoint subnet's `ipConfigurations`. It is accepted only through live,
+bidirectional ARM verification: exact owned/tagged vault endpoint references
+one NIC in the fixed shared group and the exact private-endpoint subnet;
+that NIC references the exact endpoint, has no VM attachment and contains
+one named IP configuration bound to that same subnet. Its full configuration
+ID must equal the subnet attachment ID, case-insensitively. Duplicate,
+foreign or incomplete bindings stop the operation. No generated-name prefix
+allowance, extra NIC ownership, or other-subnet/attachment exception is added.
