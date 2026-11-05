@@ -106,6 +106,74 @@ run "external_same_tenant_default" {
     condition     = length(azuread_application.sso) == 0 && length(azuread_application_password.sso) == 0
     error_message = "External mode must not create an application or password."
   }
+  assert {
+    condition = (
+      length(azurerm_key_vault_secret.database_url) == 0
+      && local.database_url_secret_id == "https://isolated-test.vault.azure.net/secrets/database-url"
+      && one([for secret in azurerm_container_app.backend.secret : secret.key_vault_secret_id if secret.name == "database-url"]) == local.database_url_secret_id
+    )
+    error_message = "Default external database secret seeding and backend reference must remain unchanged."
+  }
+  assert {
+    condition = (
+      length(azapi_resource.functions_packages) == 0
+      && output.functions_package_blob_url == null
+      && !contains(keys(azurerm_linux_function_app.orchestrator.app_settings), "WEBSITE_RUN_FROM_PACKAGE")
+    )
+    error_message = "Omitted Functions package digest must preserve legacy deployment settings."
+  }
+}
+
+run "private_digest_functions_package" {
+  command = plan
+  variables {
+    functions_package_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+  assert {
+    condition = (
+      length(azapi_resource.functions_packages) == 1
+      && azapi_resource.functions_packages[0].name == "functions-packages"
+      && jsondecode(azapi_resource.functions_packages[0].body).properties.publicAccess == "None"
+      && azurerm_linux_function_app.orchestrator.storage_uses_managed_identity
+      && azurerm_linux_function_app.orchestrator.app_settings.WEBSITE_RUN_FROM_PACKAGE == "https://${azapi_resource.functions_storage.name}.blob.core.windows.net/functions-packages/functions-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.zip"
+      && azurerm_linux_function_app.orchestrator.app_settings.WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID == "SystemAssigned"
+      && !contains(keys(azurerm_linux_function_app.orchestrator.app_settings), "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING")
+      && !azurerm_linux_function_app.orchestrator.webdeploy_publish_basic_authentication_enabled
+    )
+    error_message = "Keyless Premium Functions must run the exact private digest-named ZIP using the existing host identity, not Azure Files or basic-auth ZIP publishing."
+  }
+}
+
+run "reject_mutable_functions_package" {
+  command = plan
+  variables {
+    functions_package_sha256 = "latest"
+  }
+  expect_failures = [var.functions_package_sha256]
+}
+
+run "private_executor_seeds_database_url" {
+  command = plan
+  variables {
+    manage_database_url_secret = true
+    database_admin_password    = "synthetic-password-not-a-credential"
+  }
+  assert {
+    condition = (
+      length(azurerm_key_vault_secret.database_url) == 1
+      && azurerm_key_vault_secret.database_url[0].name == "database-url"
+      && azurerm_key_vault_secret.database_url[0].key_vault_id == local.shared.key_vault_id
+    )
+    error_message = "Opted-in private execution must manage exactly the database URL secret in the shared vault."
+  }
+  assert {
+    condition = (
+      length(azuread_application.sso) == 0
+      && length(azuread_application_password.sso) == 0
+      && length(azurerm_key_vault_secret.sso_client_secret) == 0
+    )
+    error_message = "Database seeding must not change external SSO ownership."
+  }
 }
 
 run "explicit_platform_group" {

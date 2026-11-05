@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
@@ -34,9 +35,20 @@ class ReleaseImportError(RuntimeError):
 
 
 def command(arguments: list[str], *, decode: bool = True) -> object:
+    executable = arguments[0]
+    if os.name == "nt":
+        executable = shutil.which(executable)
+        if executable is None:
+            raise ReleaseImportError(
+                "Release executable is unavailable; no shell or authentication fallback."
+            )
     try:
         result = subprocess.run(
-            arguments, capture_output=True, text=True, check=False, timeout=600
+            [executable, *arguments[1:]],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ReleaseImportError(

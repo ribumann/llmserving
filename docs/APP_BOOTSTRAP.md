@@ -50,8 +50,10 @@ python scripts/app_bootstrap.py validate --inputs /protected/app-inputs.json
 
 This offline check requires all seven digest references and an actual
 checksum-matching Functions ZIP with root `host.json` and `function_app.py`.
-It prints nonsecret application tfvars, not a complete retained-control
-configuration. It does not prove registry pulls, artifact provenance, package
+It prints nonsecret application tfvars, including the private-executor database
+secret opt-in and checked Functions package digest, not a complete retained-control
+configuration. Review these proposed inputs before any native plan/apply.
+It does not prove registry pulls, artifact provenance, package
 dependencies, state availability, permissions or authentication.
 
 ## Exact phase boundary
@@ -77,7 +79,8 @@ dependencies, state availability, permissions or authentication.
    `store-secret` with an operator-owned FD.
 4. Merge the emitted application tfvars with the reviewed retained-control
    inputs, preserving ownership tags, shared state path, demo/platform groups
-   and the explicit SSO tenant. Prepare/review/apply the **full native control
+   and the explicit SSO tenant. Set `manage_database_url_secret=true` for a clean
+   apply from the approved private-network Terraform executor. Prepare/review/apply the **full native control
    plan**, using the normal ownership/scope guards and approvals. Do not use
    `-target`, `-refresh=false` or a partial-plan bypass. The credential already
    exists for initial app secret resolution. Easy Auth stays enabled, but
@@ -88,8 +91,10 @@ dependencies, state availability, permissions or authentication.
    issuance. There is no CAE/app/auth dependency cycle and no temporary anonymous
    app. An interrupted full apply may leave a readable CAE; completing auth
    configuration is not permission to skip recovery/review of that apply.
-6. Deploy the verified Functions ZIP through the approved deployment path; the
-   Terraform module does not deploy its Python package.
+6. Upload the verified Functions ZIP to its digest-named private host-storage
+   blob, then restart/sync triggers as described below. The helper emits the
+   checked `functions_package_sha256` Terraform input; Terraform creates the
+   private container and configures the package URL, not the package bytes.
 
 Shared/state absence is a real stop, not successful bootstrap. The next
 operator action is phase 1, then preview and the approved `create-secret` command.
@@ -180,8 +185,124 @@ Verify actual frontend Easy Auth sign-in, signed ID-token injection through
 nginx `/api`, backend tenant/audience/domain checks and negative authorization
 paths. A successfully stored secret is not proof of consent or platform token
 forwarding. Also verify Functions package/startup and orchestration, private
-database connectivity/migrations, image pulls and cleanup. Database URL
-private-vault seeding remains the existing
-[in-VNet operator prerequisite](../infra/README.md), separate from this SSO
-helper. No GPU work before these gates. A full reviewed control apply and
+database connectivity/migrations, image pulls and cleanup. No GPU work before
+these gates. A full reviewed control apply and
 authenticated browser/API acceptance are still required.
+
+## Database secret and full-apply ordering
+
+The original external-seeding default has a first-deployment gap: the backend
+cannot create its initial revision until `database-url` exists, but its generated
+password and PostgreSQL FQDN originate in the same full control apply.
+`manage_database_url_secret=true` closes this gap without a targeted apply:
+
+1. Approved shared outputs/private DNS and the externally bootstrapped SSO
+   secret exist before control planning. The executor must actually reach the
+   private vault endpoint, not merely hold ARM Owner. A private ACI capable of
+   one OAuth call is not proof of a trusted Terraform execution environment.
+   The operator must prepare the approved Terraform version/provider set,
+   source, protected state/locking, network path and narrow vault secret-write
+   access there before approving a native plan.
+2. PostgreSQL/server database creation completes. Native Terraform then writes
+   the generated database URL into the shared vault. The backend secret
+   reference depends on that resource's versionless URI, so its initial
+   revision cannot race the vault write. The backend's existing AcrPull/Secrets
+   User assignments and propagation wait remain unchanged.
+3. The backend image runs `alembic upgrade head` followed by all four
+   idempotent catalog seed commands before starting Uvicorn. Migration/seed
+   failure terminates startup rather than reporting a healthy application.
+   Test `/readyz` and actual catalog retrieval; `/healthz` alone does not prove
+   database schema or seed readiness.
+4. Jobs, Functions, exact per-resource runtime permissions and both Easy Auth
+   configurations complete in the normal full graph. Configure the final app
+   callbacks from the now-real CAE domain.
+
+No new secret output or executor permission is added. The database password/URL
+already reside in sensitive Terraform state; the managed secret also persists
+its value there. Protect native plans/state and never print, upload or forward
+their JSON. Existing `database_url` sensitive output is not an operator handoff
+channel. Native mocked plans and graph ordering prove source dependencies,
+not private endpoint reachability or a successful Azure apply.
+
+Omitting the opt-in preserves legacy external seeding exactly. Do not enable
+it over an already populated `database-url` without inspecting ownership and
+reviewing adoption/import: the AzureRM resource checks existing secrets through
+the data plane. It does not import an external secret automatically. Only this
+secret is newly Terraform-owned; external SSO remains external. Cleanup plans
+must account for the owned secret without deleting the retained shared vault.
+
+## Functions deployment and startup
+
+The full graph creates the Functions site with system-assigned identity, then
+grants that identity blob/queue/table data roles at its exact private host
+storage account and job operator roles at the five jobs. The site may initially
+fail to start before those grants/private endpoints become available; no
+application package is present yet. This is not a Terraform dependency cycle
+requiring a new identity: package upload occurs **after the full apply**,
+role propagation and real private storage/DNS reachability checks. An elapsed
+timer is not proof of permissions.
+
+The checked runtime workflow packages `.python_packages/lib/site-packages`,
+all orchestration/activity modules, `host.json` and `function_app.py`, then
+imports/enumerates functions from the extracted ZIP. Use that exact
+checksum-verified ZIP with dependencies already installed; do not rebuild or
+ask a remote build to fetch different dependencies. This is the existing
+orchestration app, not an API replacement. Basic-auth publishing stays disabled.
+
+**Premium code storage is distinct from host storage.** This stack disables
+shared keys and has no Azure Files connection/share. A plain Kudu ZIP push or
+`WEBSITE_RUN_FROM_PACKAGE=1` is therefore not its supported keyless content
+route. The [documented no-Azure-Files Premium path](https://learn.microsoft.com/azure/azure-functions/storage-considerations#create-an-app-without-azure-files)
+requires a private Blob package URL and managed identity. Set
+`functions_package_sha256` to the verified ZIP checksum **in the original full
+native control plan**; its exact blob path is
+`functions-packages/functions-<sha256>.zip` in the Functions host account.
+The existing host Blob Data Owner role supplies read access, so no additional
+app identity, role, SAS, public storage exception or account key is introduced.
+The output `functions_package_blob_url` is nonsecret and SAS-free.
+
+After confirming actual private blob connectivity and separately approved
+operator upload access, use the reviewed outputs for account/app names:
+
+```sh
+python scripts/app_bootstrap.py validate --inputs /protected/app-inputs.json
+az storage blob upload --auth-mode login --overwrite false \
+  --account-name <functions_storage_account_name> \
+  --container-name functions-packages --name functions-<reviewed-sha256>.zip \
+  --file /protected/functions.zip \
+  --subscription 86677b6e-28fc-48e4-8988-5ab9e568eece \
+  --only-show-errors --output none
+az functionapp restart --resource-group rg-llmserving-e2e-control \
+  --name <functions_app_name> \
+  --subscription 86677b6e-28fc-48e4-8988-5ab9e568eece \
+  --only-show-errors --output none
+az rest --method POST \
+  --url "https://management.azure.com/subscriptions/86677b6e-28fc-48e4-8988-5ab9e568eece/resourceGroups/rg-llmserving-e2e-control/providers/Microsoft.Web/sites/<functions_app_name>/syncfunctiontriggers?api-version=2022-03-01" \
+  --subscription 86677b6e-28fc-48e4-8988-5ab9e568eece \
+  --only-show-errors --output none
+```
+
+The uploaded file must be the same path/file hash checked by `validate`, not
+another ZIP. Upload refuses overwriting an existing digest-named blob. This
+naming/command prevents accidental overwrite; it is not an immutable-storage
+policy against another authorized writer. If a blob already exists, verify
+its content checksum privately rather than overwrite/adopt it. Package rotation
+uses a new reviewed digest and full plan, uploads that new object, then
+restarts/syncs. Old objects remain until explicitly reviewed cleanup; never
+remove the active package.
+
+No Azure Files means no shared writable content and potentially limited
+Premium scale-out. This orchestration-only app must not depend on writable
+`wwwroot`; use Application Insights rather than file-log streaming. This is an
+intentional documented keyless deployment mode, not a plan/architecture
+migration. Omitting the digest preserves legacy settings, not a certified
+clean deployment.
+
+After package deployment, confirm that the actual host enumerates both HTTP
+routes, both orchestrator versions and six activities before starting work.
+Then perform an authenticated bounded orchestration and verify the backend's
+managed-identity callback allowlist, job dispatch, cancellation and terminal
+state. The backend fetches this site's function key via its existing exact-site
+ARM permission; never copy a key into tfvars, logs or acceptance artifacts.
+The host can be reachable while storage/role propagation or function discovery
+is broken, so successful HTTP ingress alone is not startup acceptance.
