@@ -76,13 +76,13 @@ jobs:
           fi
 
       - uses: hashicorp/setup-terraform@v3
-        if: matrix.module == 'shared'
+        if: matrix.module == 'shared' || matrix.module == 'control'
         with:
           terraform_version: "1.14.0"
 
-      - name: Native singleton-state upgrade with mocked providers
-        if: matrix.module == 'shared'
-        working-directory: infra/shared
+      - name: Native existing-state upgrade with mocked providers
+        if: matrix.module == 'shared' || matrix.module == 'control'
+        working-directory: infra/${{ matrix.module }}
         run: |
           terraform init -backend=false -test-directory=tests/migration
           terraform test -test-directory=tests/migration -no-color

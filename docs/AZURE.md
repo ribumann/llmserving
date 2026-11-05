@@ -38,9 +38,13 @@ old group-owning state to retained mode. Use the
 [private exact-plan ownership guard](TERRAFORM_STATE.md#retained-shared-group-and-private-plan-guard)
 before any approved retained-group apply.
 
-Control's VNet-integrated Consumption workload-profile environment currently
-leaves `infrastructure_resource_group_name` unset. The AzureRM provider supports
-an explicit name and describes a **platform-managed infrastructure group created
+Control's VNet-integrated Consumption workload-profile environment accepts
+`container_apps_infrastructure_resource_group_name`. Null retains the legacy
+platform-generated name; an explicitly approved name is passed to the provider's
+create request. Blank/invalid names fail. Existing environment naming is not
+changed or force-replaced: a mismatched explicit name fails a postcondition
+instead of silently accepting ignored drift. The configured AzureRM 3.117.1
+provider supports this input and describes a **platform-managed infrastructure group created
 in the subnet's subscription**. Parent control-group scope alone is therefore
 not evidence that every created resource is inside the approved allowlist.
 Verify the exact infrastructure group, platform creation/deletion behavior and

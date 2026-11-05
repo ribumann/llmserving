@@ -53,6 +53,10 @@ variables {
 run "external_same_tenant_default" {
   command = plan
   assert {
+    condition     = var.container_apps_infrastructure_resource_group_name == null && azurerm_container_app_environment.control.infrastructure_resource_group_name == null
+    error_message = "The existing platform-generated infrastructure group behavior must remain the default."
+  }
+  assert {
     condition     = length([for env in azurerm_container_app.backend.template[0].container[0].env : env if env.name == "AZURE_DEMO_RESOURCE_GROUP_NAME"]) == 0
     error_message = "Default deployment must not enable retained demo groups."
   }
@@ -64,6 +68,25 @@ run "external_same_tenant_default" {
     condition     = length(azuread_application.sso) == 0 && length(azuread_application_password.sso) == 0
     error_message = "External mode must not create an application or password."
   }
+}
+
+run "explicit_platform_group" {
+  command = plan
+  variables {
+    container_apps_infrastructure_resource_group_name = "rg-approved-platform"
+  }
+  assert {
+    condition     = azurerm_container_app_environment.control.infrastructure_resource_group_name == "rg-approved-platform"
+    error_message = "The environment must receive the exact explicit infrastructure group name."
+  }
+}
+
+run "reject_blank_platform_group" {
+  command = plan
+  variables {
+    container_apps_infrastructure_resource_group_name = ""
+  }
+  expect_failures = [var.container_apps_infrastructure_resource_group_name]
 }
 
 run "operator_demo_group_configuration" {
