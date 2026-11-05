@@ -78,6 +78,14 @@ def main() -> None:
             def log_message(self, *_: object) -> None:
                 pass
 
+            def do_HEAD(self) -> None:
+                checks.assertEqual(self.headers["Host"], HOST)
+                seen.add("backend")
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.send_header("x-ms-blob-type", "BlockBlob")
+                self.end_headers()
+
             def do_GET(self) -> None:
                 host = self.headers["Host"]
                 if host == VAULT and self.path.startswith("/secrets/fixture"):
@@ -98,8 +106,17 @@ def main() -> None:
                     status, content_type = 200, "application/xml"
                 elif host == HOST and self.path.startswith("/tfstate/"):
                     seen.add("backend")
-                    body = b"<Error><Code>BlobNotFound</Code><Message>Fixture</Message></Error>"
-                    status, content_type = 404, "application/xml"
+                    body = json.dumps(
+                        {
+                            "version": 4,
+                            "terraform_version": "1.16.6",
+                            "serial": 1,
+                            "lineage": "00000000-0000-0000-0000-000000000001",
+                            "outputs": {},
+                            "resources": [],
+                        }
+                    ).encode()
+                    status, content_type = 200, "application/json"
                 elif host == HOST and self.path == "/tls-fixture":
                     body = b"tls-end-to-end"
                     status, content_type = 200, "text/plain"
