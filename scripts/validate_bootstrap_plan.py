@@ -305,8 +305,13 @@ def validate_plan(plan: object, expected: dict) -> None:
                 "Unexpected configured ARM type.",
             )
             _references(expr.get("parent_id"), references[address])
-        elif "expressions" in item:
-            _object(item["expressions"])
+        elif address == "data.azapi_client_config.current":
+            _require(
+                _object(item.get("expressions", {})) == {},
+                "Client configuration data must have no input overrides.",
+            )
+        else:
+            _object(item.get("expressions"))
 
     prior = plan.get("prior_state")
     if prior is not None:

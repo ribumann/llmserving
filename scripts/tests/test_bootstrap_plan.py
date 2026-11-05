@@ -216,6 +216,16 @@ class BootstrapPlanTests(unittest.TestCase):
         guard.validate_plan(data, target())
         current["expressions"] = None
         self.reject(data)
+        current["expressions"] = {"subscription_id": {"constant_value": SUBSCRIPTION}}
+        self.reject(data)
+        data = plan()
+        shared = next(
+            item
+            for item in data["configuration"]["root_module"]["resources"]
+            if item["address"] == "data.azapi_resource.shared"
+        )
+        del shared["expressions"]
+        self.reject(data)
 
     def test_known_exact_parent_chain_and_absent_prior(self):
         data = plan()
