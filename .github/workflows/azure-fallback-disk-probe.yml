@@ -1,0 +1,57 @@
+name: Azure fallback billable disk probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      outcome:
+        description: Create one fixed 4 GiB disk, then fail or wait for cancellation
+        required: true
+        type: choice
+        options: [failure, cancellation]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-fallback-billable-disk-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/main' && github.repository == 'ribumann/llmserving'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: azure-e2e-fallback
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_CORE_OUTPUT: none
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Validate fixed creation configuration and mask OIDC subject before login
+        run: python scripts/azure_disk_probe.py validate-create
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Create only the fixed owned unattached disk
+        run: python scripts/azure_disk_probe.py create
+      - name: Deliberate failure for independent cleanup verification
+        if: inputs.outcome == 'failure'
+        run: |
+          echo "::error::Intentional failure after owned disk creation; separate cleanup must run."
+          exit 1
+      - name: Wait for externally requested cancellation
+        if: inputs.outcome == 'cancellation'
+        run: |
+          echo "Fixed disk verified. Cancel this workflow to test independent cleanup."
+          sleep 900
+          echo "::error::External cancellation was not observed within the bounded window."
+          exit 1

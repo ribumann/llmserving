@@ -39,8 +39,7 @@ group ownership/inventory reads, but rejected Azure's mixed-case `ItalyNorth`
 location identifier. Region identifier matching is now case-insensitive while
 SKU name/type remain exact and duplicate matches fail closed. The original
 metadata failure was not an SKU eligibility denial; zonal restriction contents
-are preserved unchanged. A successful rerun is still needed for a complete
-fresh quota/SKU report.
+are preserved unchanged.
 
 Azure CLI can serialize usage counts as strings. Preflight normalizes
 nonnegative JSON integers or 1–20 ASCII decimal digits to integers; booleans,
@@ -49,6 +48,14 @@ values remain errors. The exact SKU family matches quota `name.value`
 (case-insensitive), never a localized display label or an unrelated GPU family.
 All three unique family/regional/low-priority rows remain mandatory. The second
 inspection reached this count check, not an Azure quota denial.
+
+The corrected protected inspection
+[42028735853](https://github.com/ribumann/llmserving/actions/runs/42028735853)
+passed at source `f52ce573f7a72c983f66b0dd42a65cb3707575da`.
+All four inspected persistent groups were empty. Family/regional/low-priority
+usage and limits were respectively 0/8, 0/108 and 0/100. The exact SKU retained
+its Zone restrictions; unzoned eligibility and allocation remain unverified.
+This observation is not a permanent quota, access or deployment guarantee.
 
 For a **fresh demo state**, control inputs `demo_resource_group_name` and
 `demo_resource_tags` wire operator-owned group/ownership tags into the backend.
@@ -134,6 +141,37 @@ reuse a pre-existing persistent group or add groups/roles automatically.
 The successful [canary](AZURE_CANARY.md) establishes its own OIDC/identity cleanup
 only. It does not satisfy application authentication, a new target's access,
 billable-resource cleanup, quota or GPU allocation.
+
+### Fixed billable-disk cleanup proof
+
+The separate `Azure fallback billable disk probe` and
+`Azure fallback billable disk cleanup` workflows test **only one unattached empty
+managed disk**, not app/VM/DB/network cleanup. The creation workflow is manual,
+protected-main-only and intentionally fails after creation or waits up to
+15 minutes for external cancellation. The independent cleanup runs on completion
+(including failure/cancellation), hourly and manually. Both workflows share a
+non-cancelling concurrency group; cleanup checks the exact owning run **attempt**
+is completed before deleting. Rerunning a creator cannot adopt an existing disk.
+
+| Reviewed resource manifest | Fixed value |
+| --- | --- |
+| Target | Existing fallback subscription/tenant/OIDC principal only |
+| Parent | Existing campaign-tagged `rg-llmserving-e2e-demo`, preserved |
+| Resource | `disk-llmserving-release-cleanup-probe`, Italy North |
+| Shape | One empty 4 GiB `Standard_LRS` managed disk, unattached |
+| Access | `DenyAll` network policy; public disk access disabled |
+| Ownership | Exact campaign, purpose, repository, source SHA, run ID and attempt tags |
+| Other mutations | None: no group, role, identity, VM, NIC, public IP, model or app creation |
+
+Before any dispatch, confirm current regional S4 disk pricing (the billing tier
+can exceed the requested 4 GiB), a conservative delayed-cleanup exposure bound,
+passing fresh-main guards and independent exact-source review. Source/tests alone
+are **not** live cleanup evidence or a price quote. The expiry tag is advisory,
+not an Azure TTL or hard spending cap. GitHub/Azure outages can delay cleanup;
+inspect the exact owned disk and use the separately reviewed cleanup workflow,
+never a group deletion or wildcard sweep. A foreign/malformed disk, changed
+ownership, attached disk, untrusted or active owning run fails closed without
+deletion. Any failure to verify disk absence remains a release blocker.
 
 Use explicit subscription/resource arguments for every command; do not change
 shared Azure CLI subscription/region defaults. In public logs mask infrastructure

@@ -2,10 +2,10 @@ name: Cloud safety CI
 
 on:
   pull_request:
-    paths: ["scripts/azure_canary.py", "scripts/azure_release_preflight.py", "scripts/release_bundle.py", "scripts/validate_retained_group_plan.py", "scripts/tests/**", ".github/workflows/**", "docs/AZURE_CANARY.md"]
+    paths: ["scripts/azure_canary.py", "scripts/azure_disk_probe.py", "scripts/azure_release_preflight.py", "scripts/release_bundle.py", "scripts/validate_retained_group_plan.py", "scripts/tests/**", ".github/workflows/**", "docs/AZURE_CANARY.md"]
   push:
     branches: [main]
-    paths: ["scripts/azure_canary.py", "scripts/azure_release_preflight.py", "scripts/release_bundle.py", "scripts/validate_retained_group_plan.py", "scripts/tests/**", ".github/workflows/**", "docs/AZURE_CANARY.md"]
+    paths: ["scripts/azure_canary.py", "scripts/azure_disk_probe.py", "scripts/azure_release_preflight.py", "scripts/release_bundle.py", "scripts/validate_retained_group_plan.py", "scripts/tests/**", ".github/workflows/**", "docs/AZURE_CANARY.md"]
   workflow_dispatch: {}
 
 permissions:
