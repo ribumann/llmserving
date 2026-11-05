@@ -1,0 +1,45 @@
+name: Isolated private operator image CI
+
+on:
+  pull_request:
+    paths: ["tools/private_operator/**", "infra/**", "scripts/**", ".github/workflows/private-operator-ci.yml"]
+  push:
+    branches: [main]
+    paths: ["tools/private_operator/**", "infra/**", "scripts/**", ".github/workflows/private-operator-ci.yml"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build only reviewed tracked source, without credentials or publication
+        run: |
+          mkdir "$RUNNER_TEMP/operator-source"
+          git archive HEAD infra scripts tools/private_operator |
+            tar -x -C "$RUNNER_TEMP/operator-source"
+          docker build --platform linux/amd64 \
+            --build-arg "SOURCE_REVISION=$(git rev-parse HEAD)" \
+            -f "$RUNNER_TEMP/operator-source/tools/private_operator/Dockerfile" \
+            -t llmserving-private-operator:ci "$RUNNER_TEMP/operator-source"
+      - name: Packaged tools without network, mounts or capabilities
+        run: |
+          docker run --rm --network none --cap-drop ALL \
+            --read-only --security-opt no-new-privileges \
+            --tmpfs /tmp --tmpfs /run --tmpfs /root \
+            llmserving-private-operator:ci \
+            python /opt/llmserving/operator-smoke.py
+      - name: Nonpersistent TUN only inside an isolated container namespace
+        run: |
+          test -c /dev/net/tun
+          docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN \
+            --device /dev/net/tun --read-only --security-opt no-new-privileges \
+            --tmpfs /tmp --tmpfs /run --tmpfs /root \
+            llmserving-private-operator:ci \
+            python /opt/llmserving/operator-smoke.py --tun
