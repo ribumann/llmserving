@@ -42,7 +42,7 @@ RESOURCES = {
         "name": "llmrelease-operator-vpn",
         "type": "Vpn",
         "vpn_type": "RouteBased",
-        "sku": "VpnGw1",
+        "sku": "VpnGw1AZ",
         "generation": "Generation1",
         "active_active": False,
         "enable_bgp": False,

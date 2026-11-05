@@ -12,6 +12,7 @@ from pathlib import Path
 import azure_operator_access as cleanup
 import azure_shared_bridge as bridge
 import validate_operator_access_plan as scope
+import validate_operator_reconcile as reconcile
 from azure_release_import import ReleaseImportError, az, command
 from validate_retained_group_plan import PlanRejected, run_saved_plan
 
@@ -167,19 +168,25 @@ def local_context(module: Path) -> None:
             )
 
 
-def live(selected: dict) -> None:
+def live(selected: dict, *, recovering: bool = False) -> None:
     bridge.identity(protected=False)
     bridge.shared.dependencies_absent()
-    existing = bridge.shared.inventory(None, bridge=True)
-    if set(existing) != set(scope.shared.RESOURCES):
-        raise bridge.shared.SharedError(
-            "Operator apply requires complete owned shared infrastructure."
-        )
-    bridge.reject_attached_children(existing)
-    if cleanup.inventory(selected):
-        raise bridge.shared.SharedError(
-            "Initial operator apply cannot adopt/retry existing resources."
-        )
+    if recovering:
+        if set(cleanup.inventory(selected)) != reconcile.EXISTING:
+            raise bridge.shared.SharedError(
+                "Operator recovery requires exactly the six owned existing resources."
+            )
+    else:
+        existing = bridge.shared.inventory(None, bridge=True)
+        if set(existing) != set(scope.shared.RESOURCES):
+            raise bridge.shared.SharedError(
+                "Operator apply requires complete owned shared infrastructure."
+            )
+        bridge.reject_attached_children(existing)
+        if cleanup.inventory(selected):
+            raise bridge.shared.SharedError(
+                "Initial operator apply cannot adopt/retry existing resources."
+            )
     feature = az(
         "feature",
         "show",
@@ -199,7 +206,13 @@ def live(selected: dict) -> None:
 
 
 def local_apply(
-    plan: Path, log: Path, target: Path, second_backup: Path, cleanup_run: str
+    plan: Path,
+    log: Path,
+    target: Path,
+    second_backup: Path,
+    cleanup_run: str,
+    *,
+    recovering: bool = False,
 ) -> None:
     if target.is_symlink() or not target.is_file():
         raise bridge.shared.SharedError(
@@ -215,25 +228,40 @@ def local_apply(
     module = Path.cwd()
     local_context(module)
     arming(selected, cleanup_run)
-    live(selected)
+    if recovering:
+        live(selected, recovering=True)
+    else:
+        live(selected)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     before = bridge.backup(module, second_backup, f"operator-{stamp}-before")
-    if before["state"] is not None:
+    canonical = None
+    if recovering:
+        reconcile.snapshot(before["state"])
+        canonical = reconcile.canonical_state()
+    elif before["state"] is not None:
         raise bridge.shared.SharedError(
             "Initial operator apply requires no canonical state."
         )
 
     def gate(native: object, group: str) -> None:
-        scope.validate(native, group, operation="create", target=selected)
+        if recovering:
+            reconcile.validate_reconcile(native, group, canonical, selected)
+        else:
+            scope.validate(native, group, operation="create", target=selected)
         local_context(module)
-        if (module / "terraform.tfstate").exists() or (
+        if recovering:
+            reconcile.snapshot(before["state"])
+        elif (module / "terraform.tfstate").exists() or (
             module / "terraform.tfstate"
         ).is_symlink():
             raise bridge.shared.SharedError(
                 "Canonical operator state appeared before apply."
             )
         arming(selected, cleanup_run)
-        live(selected)
+        if recovering:
+            live(selected, recovering=True)
+        else:
+            live(selected)
 
     try:
         run_saved_plan(
@@ -263,6 +291,11 @@ def main() -> None:
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--second-backup", type=Path, required=True)
     parser.add_argument("--cleanup-run", required=True)
+    parser.add_argument(
+        "--recover-serial8",
+        action="store_true",
+        help="Only the reviewed exact failed operator snapshot; never a general retry.",
+    )
     args = parser.parse_args()
     try:
         local_apply(
@@ -271,6 +304,7 @@ def main() -> None:
             args.target,
             args.second_backup,
             args.cleanup_run,
+            recovering=args.recover_serial8,
         )
     except (
         bridge.shared.SharedError,

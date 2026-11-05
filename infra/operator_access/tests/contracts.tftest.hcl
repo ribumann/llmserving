@@ -33,8 +33,8 @@ variables {
 run "private_operator_scope" {
   command = plan
   assert {
-    condition     = azurerm_virtual_network_gateway.operator.sku == "VpnGw1" && azurerm_virtual_network_gateway.operator.vpn_type == "RouteBased" && !azurerm_virtual_network_gateway.operator.enable_bgp && !azurerm_virtual_network_gateway.operator.active_active
-    error_message = "Gateway must remain the bounded single route-based VpnGw1."
+    condition     = azurerm_virtual_network_gateway.operator.sku == "VpnGw1AZ" && azurerm_virtual_network_gateway.operator.vpn_type == "RouteBased" && !azurerm_virtual_network_gateway.operator.enable_bgp && !azurerm_virtual_network_gateway.operator.active_active
+    error_message = "Gateway must remain the bounded single route-based VpnGw1AZ."
   }
   assert {
     condition     = toset(azurerm_virtual_network_gateway.operator.vpn_client_configuration[0].vpn_auth_types) == toset(["Certificate"]) && toset(azurerm_virtual_network_gateway.operator.vpn_client_configuration[0].vpn_client_protocols) == toset(["OpenVPN"])

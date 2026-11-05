@@ -2,10 +2,10 @@ name: Private operator access source CI
 
 on:
   pull_request:
-    paths: ["infra/operator_access/**", "scripts/validate_operator_access_plan.py", "scripts/azure_operator_access.py", "scripts/azure_operator_apply.py", "scripts/tests/test*operator*.py", ".github/workflows/operator-access-ci.yml"]
+    paths: ["infra/operator_access/**", "scripts/validate_operator*.py", "scripts/azure_operator_access.py", "scripts/azure_operator_apply.py", "scripts/tests/test*operator*.py", ".github/workflows/operator-access-ci.yml"]
   push:
     branches: [main]
-    paths: ["infra/operator_access/**", "scripts/validate_operator_access_plan.py", "scripts/azure_operator_access.py", "scripts/azure_operator_apply.py", "scripts/tests/test*operator*.py", ".github/workflows/operator-access-ci.yml"]
+    paths: ["infra/operator_access/**", "scripts/validate_operator*.py", "scripts/azure_operator_access.py", "scripts/azure_operator_apply.py", "scripts/tests/test*operator*.py", ".github/workflows/operator-access-ci.yml"]
   workflow_dispatch: {}
 
 permissions:
