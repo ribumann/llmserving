@@ -82,13 +82,11 @@ def resolver_platform_attachments(details: dict, expected_tags: dict) -> bool:
     configuration = configurations[0]
     if not isinstance(configuration, dict):
         raise lifecycle.SharedError("Malformed owned inbound IP configuration.")
-    properties = configuration.get("properties")
     if (
-        not isinstance(properties, dict)
-        or properties.get("privateIpAddress") != "10.20.31.4"
-        or properties.get("privateIpAllocationMethod") != "Static"
-        or not isinstance(properties.get("subnet"), dict)
-        or not scope.shared.equal(properties["subnet"].get("id"), subnet)
+        configuration.get("privateIpAddress") != "10.20.31.4"
+        or configuration.get("privateIpAllocationMethod") != "Static"
+        or not isinstance(configuration.get("subnet"), dict)
+        or not scope.shared.equal(configuration["subnet"].get("id"), subnet)
     ):
         raise lifecycle.SharedError("Owned inbound endpoint subnet/address differs.")
     return True

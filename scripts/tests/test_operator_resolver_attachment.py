@@ -41,11 +41,9 @@ class ResolverAttachmentTests(unittest.TestCase):
                 "provisioningState": "Succeeded",
                 "ipConfigurations": [
                     {
-                        "properties": {
-                            "privateIpAddress": "10.20.31.4",
-                            "privateIpAllocationMethod": "Static",
-                            "subnet": {"id": subnet},
-                        }
+                        "privateIpAddress": "10.20.31.4",
+                        "privateIpAllocationMethod": "Static",
+                        "subnet": {"id": subnet},
                     }
                 ],
             },
@@ -114,7 +112,7 @@ class ResolverAttachmentTests(unittest.TestCase):
         ):
             details, owned, tags = self.fixture()
             properties = owned["properties"]
-            config = properties["ipConfigurations"][0]["properties"]
+            config = properties["ipConfigurations"][0]
             if mutation == "id":
                 owned["id"] += "-foreign"
             elif mutation == "guid":
