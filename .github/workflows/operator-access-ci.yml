@@ -1,0 +1,34 @@
+name: Private operator access source CI
+
+on:
+  pull_request:
+    paths: ["infra/operator_access/**", "scripts/validate_operator_access_plan.py", "scripts/azure_operator_access.py", "scripts/tests/test*operator_access*.py", ".github/workflows/operator-access-ci.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/operator_access/**", "scripts/validate_operator_access_plan.py", "scripts/azure_operator_access.py", "scripts/tests/test*operator_access*.py", ".github/workflows/operator-access-ci.yml"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: "1.16.6"
+          terraform_wrapper: false
+      - name: Native source formatting and actual provider schema
+        working-directory: infra/operator_access
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false -no-color
+          terraform validate -no-color
+          terraform test -no-color
+      - name: Check fixed native plan policy without Azure credentials
+        run: python -m unittest discover -s scripts/tests -p 'test*operator_access*.py' -v

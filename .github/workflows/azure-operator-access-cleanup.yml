@@ -1,0 +1,57 @@
+name: Azure main private operator access cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      cleanup_now:
+        type: boolean
+        required: true
+        default: false
+        description: Remove only the approved temporary operator access now
+  schedule:
+    - cron: "11,31,51 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-fallback-shared-lifecycle
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.repository == 'ribumann/llmserving' && github.ref == 'refs/heads/main' && vars.OPERATOR_ACCESS_CLEANUP_ARMED == 'true'
+    runs-on: ubuntu-latest
+    environment: azure-e2e-fallback
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      OPERATOR_ACCESS_CLEANUP_ARMED: ${{ vars.OPERATOR_ACCESS_CLEANUP_ARMED }}
+      OPERATOR_ACCESS_EXPIRES_AT: ${{ vars.OPERATOR_ACCESS_EXPIRES_AT }}
+      OPERATOR_ACCESS_ROOT_SHA256: ${{ vars.OPERATOR_ACCESS_ROOT_SHA256 }}
+      AZURE_CORE_OUTPUT: none
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Mask fixed protected subject
+        run: PYTHONPATH=scripts python -c 'from azure_disk_probe import mask_subject; mask_subject()'
+      - uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify fixed ARM cleanup and remove only eligible operator resources
+        env:
+          CLEANUP_NOW: ${{ inputs.cleanup_now }}
+        run: |
+          if [ "$CLEANUP_NOW" = "true" ]; then
+            python scripts/azure_operator_access.py --now
+          else
+            python scripts/azure_operator_access.py
+          fi
