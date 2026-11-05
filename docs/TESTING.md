@@ -5,6 +5,16 @@ It does not deploy, push container images, or run Terraform plan/apply/destroy.
 The separately protected Azure canary and opt-in application deployments are not
 pull-request jobs.
 
+Deployment workflow guard tests execute the actual embedded pre-login masking
+Python with synthetic environment values, including every missing field and
+escaped multiline/percent values. They also verify protected manual-main deploy
+gates, absence of deployment credentials in PR checks and fixed privileged
+checkout/login commits. These credential-free tests never invoke Azure login,
+push images, enable deployment or establish current target authorization.
+Protected resource names must also use environment secrets so GitHub masks
+runner-generated environment headers before the masking script starts; direct
+Python snippet execution alone cannot prove runner log redaction.
+
 | Surface | CI coverage | What it does not prove |
 | --- | --- | --- |
 | Backend | Ruff, Black, migrations/seeds on disposable PostgreSQL 16, full `python -m pytest -q -o addopts=""` | Live Azure services or an actual inference model |
@@ -49,7 +59,7 @@ python -m src.performance.seed_workloads
 python -m pytest -q -o addopts=""
 ```
 
-Without `TEST_DATABASE_URL`, the three real database tests explicitly skip.
+Without `TEST_DATABASE_URL`, the seven real database tests explicitly skip.
 Hosted Backend CI always sets it. An invalid configured URL, failed connection,
 missing migration/seed, or unexpected SQLSTATE fails rather than falling back to
 SQLite or an in-memory session.

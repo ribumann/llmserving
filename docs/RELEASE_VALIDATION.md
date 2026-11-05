@@ -1,13 +1,15 @@
 # Public validation evidence and blocked gates
 
 This is a pre-release evidence record, not full Azure acceptance. Source
-baseline `119b39d03c87814cbbe9e78d6a261d75a14c0341` includes reviewed PRs
+baseline `bf90ce8de6f23bc25db04f0d61cbac6a22765fab` includes reviewed PRs
 [1](https://github.com/ribumann/llmserving/pull/1) through
 [11](https://github.com/ribumann/llmserving/pull/11), plus
 [13](https://github.com/ribumann/llmserving/pull/13). Each implementation PR
 received independent agentic review and passing checks before merge.
 Named test runs below retain their exact original source SHA; merged code is
 not a claim that an earlier measurement came from a newer combined revision.
+Privileged action/log masking hardening is additionally merged in
+[PR 14](https://github.com/ribumann/llmserving/pull/14), at this baseline.
 
 ## Passed gates
 

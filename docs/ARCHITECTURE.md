@@ -395,7 +395,8 @@ Deployment requires an explicit dispatch from `main` with `deploy=true`,
 repository variable `ENABLE_AZURE_DEPLOYMENT=true`, and the `azure-deployment`
 environment. Resource group, registry, and app names come from that environment's
 `AZURE_RESOURCE_GROUP`, `AZURE_ACR_NAME`, `AZURE_BACKEND_APP_NAME`, and
-`AZURE_FRONTEND_APP_NAME` configuration variables. See the root README for setup.
+`AZURE_FRONTEND_APP_NAME` protected environment secrets. See the root README
+for the explicit migration from legacy variables before enabling deployment.
 
 ## 6. Frontend structure
 
@@ -552,7 +553,7 @@ Only patterns directly evidenced in this repo are included below.
 | Control-plane vs. workload-plane infrastructure separation | `infra/shared`, `infra/control`, and `infra/demo`, especially `infra/README.md`, `infra/control/main.tf`, `infra/demo/main.tf` | The control plane must be stable and long-lived, while demo GPU environments are intentionally disposable. Splitting the Terraform modules minimizes blast radius and lets demo environments be torn down without touching the operator app. |
 | Infrastructure as Code | All Terraform under `infra/`; validation in `.github/workflows/infra.yml` | The app provisions non-trivial Azure topology: network, identities, storage, Container Apps, Functions, PostgreSQL, and GPU VMs. Capturing that in Terraform makes the demo reproducible and reviewable. |
 | Traceable per-commit image tags | Git-SHA tags in `.github/workflows/backend.yml` and `.github/workflows/frontend.yml` | Tags aid tracing but can be overwritten; digest pinning/provenance is still required for immutable release/rollback claims. |
-| OIDC federated CI/CD auth instead of stored long-lived secrets | `azure/login@v2` usage and comments in `.github/workflows/backend.yml` and `.github/workflows/frontend.yml` | The deployment workflows need Azure access but should not carry a checked-in or long-lived secret. OIDC reduces credential sprawl and narrows blast radius. |
+| OIDC federated CI/CD auth instead of stored long-lived credentials | Commit-pinned Azure login actions in `.github/workflows/backend.yml` and `.github/workflows/frontend.yml` | OIDC avoids stored cloud credentials. Nonsecret infrastructure IDs use protected environment secrets for pre-step log masking; that does not broaden access or certify an unattended release. |
 | Schema-as-code migrations | `backend/alembic.ini`, `backend/migrations/env.py`, `backend/migrations/versions/` | The backend persists workflow state, catalog entries, deployments, and result reports. Alembic provides an auditable way to evolve that schema across environments. |
 | Shared-component reuse in the frontend | `frontend/src/components/EnvironmentPicker.tsx`, `RunHistory.tsx`, `ConfigVersionHistory.tsx`; reused across pages per `frontend/src/pages/*.tsx` imports | The same environment selection and history views appear across multiple operator tasks. Reusing them keeps the workflow consistent and avoids duplicating logic/UI markup. |
 | UX resilience through local browser persistence | `frontend/src/pages/Provision.tsx` uses `window.localStorage` under `llmDemo.activeProvisioning` | Provisioning is asynchronous and can outlive a tab refresh. Persisting the in-flight state lets the operator recover context instead of restarting the workflow. |
