@@ -236,7 +236,10 @@ operator explicitly records repository variables
 `FALLBACK_STATE_DATA_ACCESS_APPROVED=true` and
 `FALLBACK_SHARED_CLEANUP_ARMED=true`; creation additionally needs
 `FALLBACK_SHARED_CREATION_ENABLED=true`. Do not set these based on inferred
-approval. The first flag remains unapproved for the current campaign.
+approval. The operator has authorized needed scoped Azure configuration/RBAC
+in the isolated main subscription; the coordinator owns account creation,
+the exact-account data-role assignment and live state acceptance. Do not arm
+these flags until that acceptance and independent cleanup review are complete.
 Identity secrets stay in protected, main-only `azure-e2e-fallback`.
 
 The controller requires the existing exact keyless bootstrap account/security
