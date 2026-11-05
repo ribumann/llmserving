@@ -269,6 +269,12 @@ generated NIC/DNS group is accepted only with its verified owned parent and
 relationship, never independently deleted. Other orphan forms require a
 separately reviewed recovery. A soft-deleted vault is intentionally not purged,
 so immediate same-name reuse is not promised.
+Owned destruction also accepts an absent endpoint DNS group after interrupted
+creation/deletion, but never a foreign group or missing service connection.
+An empty refreshed destroy plan may persist already-completed deletions only
+when no managed prior/planned resources or changes remain; stale managed
+resources without corresponding delete changes still fail. Creation and the
+standalone scope-check CLI remain strict.
 
 Every apply uses a private native saved plan checked by the fixed shared guard;
 only exact initial creates or pure owned deletes are permitted. Plans, state

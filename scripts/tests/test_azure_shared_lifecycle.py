@@ -233,6 +233,57 @@ class SharedLifecycleTests(unittest.TestCase):
                 plan, lifecycle.GROUP, operation="create", owner=self.owner
             )
 
+    def test_interrupted_endpoint_delete_or_partial_import_can_finish(self):
+        plan = self.owned_plan("destroy", {"azurerm_private_endpoint.vault"})
+        for record in plan["prior_state"]["values"]["root_module"]["resources"]:
+            if record["mode"] == "managed":
+                record["values"]["private_dns_zone_group"] = []
+        change = next(
+            record for record in plan["resource_changes"] if record["mode"] == "managed"
+        )
+        change["change"]["before"]["private_dns_zone_group"] = []
+        lifecycle.validate_owned_plan(
+            plan, lifecycle.GROUP, operation="destroy", owner=self.owner
+        )
+        change["change"]["before"]["private_dns_zone_group"] = [
+            {
+                "name": "foreign",
+                "private_dns_zone_ids": ["/subscriptions/foreign"],
+            }
+        ]
+        with self.assertRaises(lifecycle.PlanRejected):
+            lifecycle.validate_owned_plan(
+                plan, lifecycle.GROUP, operation="destroy", owner=self.owner
+            )
+        create = self.owned_plan()
+        endpoint = next(
+            record
+            for record in create["resource_changes"]
+            if record.get("address") == "azurerm_private_endpoint.vault"
+        )
+        endpoint["change"]["after"]["private_dns_zone_group"] = []
+        with self.assertRaises(lifecycle.PlanRejected):
+            lifecycle.validate_owned_plan(
+                create, lifecycle.GROUP, operation="create", owner=self.owner
+            )
+
+    def test_empty_refreshed_destroy_can_persist_reconciled_state(self):
+        plan = self.owned_plan("destroy", set())
+        plan.pop("resource_changes")
+        lifecycle.validate_owned_plan(
+            plan, lifecycle.GROUP, operation="destroy", owner=self.owner
+        )
+        with self.assertRaises(lifecycle.PlanRejected):
+            lifecycle.validate_owned_plan(
+                plan, lifecycle.GROUP, operation="create", owner=self.owner
+            )
+        stale = self.owned_plan("destroy", {"azurerm_container_registry.shared"})
+        stale.pop("resource_changes")
+        with self.assertRaises(lifecycle.PlanRejected):
+            lifecycle.validate_owned_plan(
+                stale, lifecycle.GROUP, operation="destroy", owner=self.owner
+            )
+
     def test_blob_calls_are_oauth_fixed_and_conditional(self):
         with (
             tempfile.TemporaryDirectory() as directory,

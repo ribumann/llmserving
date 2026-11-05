@@ -316,7 +316,12 @@ def validate_owned_plan(
                     values = change.get(field)
                     if isinstance(values, dict) and "tags" in values:
                         remove_owned_tags(values["tags"])
-    scope.validate_fixed_shared(normalized, group, operation=operation)
+    scope.validate_fixed_shared(
+        normalized,
+        group,
+        operation=operation,
+        allow_partial_destroy=operation == "destroy",
+    )
 
 
 def terraform(module: Path, arguments: list[str], log: Path) -> None:
@@ -767,6 +772,7 @@ def state_resources(module: Path, directory: Path, label: str, owner: dict) -> s
             address,
             normalized,
             existing=True,
+            allow_partial_destroy=True,
         )
         found.add(address)
     return found
