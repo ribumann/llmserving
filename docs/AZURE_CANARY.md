@@ -5,6 +5,13 @@ created resource is one fixed user-assigned managed identity (no compute, disks,
 networking, database, or role assignments). Its resource group and the federated
 login identity must already exist. **Never delete the resource group.**
 
+**Current execution pause:** both canary and cleanup workflows are explicitly
+disabled while the coordinator reassesses exact target/scoped identity setup.
+The recorded successful runs below remain historical evidence for their
+original target only. Scheduled fallback does not execute while its workflow
+is disabled. Do not re-enable or transplant federation to another subscription
+without approved scoped setup and an independent cleanup plan.
+
 ## Prerequisites
 
 Configure the `azure-e2e` GitHub environment with a main-branch-only deployment

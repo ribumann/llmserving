@@ -57,6 +57,13 @@ run in this flow.
 
 ## Blocked or not yet demonstrated
 
+Both primary canary/cleanup workflows are currently disabled pending exact
+approved target setup; their historical proof does not establish active cleanup
+or access to a fallback tenant. A coordinator-reported isolated fallback Graph
+capability check is not consent, an application registration, federated CI
+access, a deployed auth configuration or authenticated browser acceptance.
+No fallback app/resource creation is authorized by that capability check alone.
+
 | Gate | Status and next prerequisite |
 | --- | --- |
 | Actual authenticated Azure browser/API | Blocked: approved isolated SSO app/credential/consent/assignments, final callbacks and real platform signed-token injection; no policy bypass/sign-in retries |
