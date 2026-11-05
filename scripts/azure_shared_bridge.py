@@ -285,7 +285,9 @@ def backup(module: Path, destination: Path, label: str) -> dict:
             "Second backup must be an existing private directory outside the module."
         )
     checkpoint = destination / label
-    checkpoint.mkdir(mode=0o700, exist_ok=False)
+    # Windows 0700 synthesizes OWNER RIGHTS ACEs rather than inheriting the
+    # already-verified parent ACL. Verify the inherited ACL before writing.
+    checkpoint.mkdir(mode=0o777 if os.name == "nt" else 0o700, exist_ok=False)
     private_directory(checkpoint)
     metadata = {"schemaVersion": 1, "state": None, "files": {}}
     for path in sorted(module.iterdir()):

@@ -18,6 +18,31 @@ import test_shared_plan as fixture
 
 
 class SharedBridgeTests(unittest.TestCase):
+    def test_windows_checkpoint_inherits_then_verifies_parent_acl(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / "module"
+            second = root / "second"
+            module.mkdir()
+            second.mkdir()
+            with patch.object(bridge.os, "name", "nt"), patch.object(
+                bridge, "private_directory"
+            ) as verify, patch.object(Path, "mkdir") as mkdir:
+                # Abort after the new child's ACL check, before any file write.
+                verify.side_effect = [
+                    None,
+                    bridge.shared.SharedError("verified-test-stop"),
+                ]
+                with self.assertRaisesRegex(
+                    bridge.shared.SharedError, "verified-test-stop"
+                ):
+                    bridge.backup(module, second, "checkpoint")
+                mkdir.assert_called_once_with(mode=0o777, exist_ok=False)
+                self.assertEqual(verify.call_args_list[0].args, (second,))
+                self.assertEqual(
+                    verify.call_args_list[1].args, (second / "checkpoint",)
+                )
+
     def test_deadline_and_arming_are_independent_of_blob_access(self):
         future = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
 
