@@ -52,6 +52,9 @@ resource "azurerm_public_ip" "gateway" {
   allocation_method   = "Static"
   sku                 = "Standard"
   tags                = local.tags
+  lifecycle {
+    ignore_changes = [ip_tags, zones]
+  }
 }
 
 resource "azurerm_private_dns_resolver" "operator" {
