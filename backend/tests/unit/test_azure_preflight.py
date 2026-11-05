@@ -66,6 +66,7 @@ def evaluate(
     include_regional=True,
     family="standardNCT4Family",
     include_spot=True,
+    low_priority_capable="True",
 ):
     entries = [
         SimpleNamespace(
@@ -90,7 +91,10 @@ def evaluate(
         name="Standard_NC16as_T4_v3",
         locations=["eastus2"],
         restrictions=[],
-        capabilities=[SimpleNamespace(name="vCPUs", value=vcpus)],
+        capabilities=[
+            SimpleNamespace(name="vCPUs", value=vcpus),
+            SimpleNamespace(name="LowPriorityCapable", value=low_priority_capable),
+        ],
         family=family,
     )
     client = SimpleNamespace(
@@ -114,6 +118,23 @@ def test_spot_quota_requires_entire_requested_sku(usage, limit, available) -> No
 
 def test_spot_does_not_substitute_regular_family_quota() -> None:
     assert evaluate(include_spot=False).available is None
+
+
+def test_spot_is_blocked_by_sku_capability_despite_sufficient_quota() -> None:
+    result = evaluate(low_priority_capable="False")
+    assert result.available is False
+    assert any("LowPriorityCapable=False" in item for item in result.evidence)
+
+
+def test_regular_does_not_require_spot_capability() -> None:
+    assert evaluate(priority="Regular", low_priority_capable="False").available is True
+
+
+@pytest.mark.parametrize("capability", [None, "invalid", ""])
+def test_missing_or_invalid_spot_capability_is_unknown(capability) -> None:
+    result = evaluate(low_priority_capable=capability)
+    assert result.available is None
+    assert any("Spot capability" in item for item in result.evidence)
 
 
 @pytest.mark.parametrize("vcpus", [None, "invalid", "16.5", "0", "-1", 16.5, True])

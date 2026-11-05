@@ -174,3 +174,47 @@ def test_denied_preflight_blocks_preview_and_creation_without_side_effects(
     keygen.assert_not_called()
     sku_reader.assert_called_once()
     assert usage_reader.call_count == (0 if operation == "sku" else 1)
+
+
+@pytest.mark.parametrize("route", ["/environments/preview", "/environments"])
+@pytest.mark.parametrize("priority", [None, "Regular ", [], True])
+def test_invalid_priority_blocks_requests_before_reads_or_persistence(route, priority, monkeypatch):
+    preflight = Mock()
+    preview = AzurePreviewService(preflight=preflight)
+    profile = CloudDeploymentProfile(
+        profileId="azure", configurableInputs={}, eligibleRegions=["italynorth"]
+    )
+
+    class PriorityProvider:
+        start_provisioning = Mock()
+
+        def preview_with_details(self, *, profileId, regionOverride=None, configurableInputs=None):
+            return preview.preview_environment(
+                profile=profile,
+                region_override=regionOverride,
+                configurable_inputs=configurableInputs,
+            )
+
+    provider = PriorityProvider()
+    route_session = Mock(spec=Session)
+    keygen = Mock()
+    monkeypatch.setattr(environments, "_generate_admin_ssh_keypair", keygen)
+    app = create_app()
+    app.state.provider_adapter = provider
+    app.state.session_factory = lambda: NoopPersistenceSession()
+    app.state.telemetry = None
+    app.dependency_overrides[get_db_session] = lambda: route_session
+
+    response = TestClient(app).post(
+        route,
+        headers={"X-Demo-User": "presenter@example.com"},
+        json={"profileId": "azure", "configurableInputs": {"vmPriority": priority}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_vm_priority"
+    preflight.evaluate_region.assert_not_called()
+    for method in ("get", "add", "flush", "commit"):
+        getattr(route_session, method).assert_not_called()
+    provider.start_provisioning.assert_not_called()
+    keygen.assert_not_called()

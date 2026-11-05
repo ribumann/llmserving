@@ -43,6 +43,38 @@ run "managed_default" {
     condition     = azurerm_linux_virtual_machine.demo.tags["managedBy"] == "terraform"
     error_message = "Legacy managed mode must continue ignoring a caller's managedBy tag."
   }
+  assert {
+    condition     = azurerm_linux_virtual_machine.demo.priority == "Spot" && azurerm_linux_virtual_machine.demo.eviction_policy == "Deallocate" && azurerm_linux_virtual_machine.demo.max_bid_price == -1
+    error_message = "Omitted allocation priority must preserve existing Spot behavior."
+  }
+}
+
+run "regular_allocation" {
+  command = plan
+  variables {
+    vm_priority = "Regular"
+    vm_size     = "Standard_NC4as_T4_v3"
+  }
+  assert {
+    condition     = azurerm_linux_virtual_machine.demo.priority == "Regular" && azurerm_linux_virtual_machine.demo.eviction_policy == null && azurerm_linux_virtual_machine.demo.size == "Standard_NC4as_T4_v3"
+    error_message = "Explicit Regular allocation must use the requested SKU without a Spot eviction policy."
+  }
+}
+
+run "reject_unknown_priority" {
+  command = plan
+  variables {
+    vm_priority = "spot"
+  }
+  expect_failures = [var.vm_priority]
+}
+
+run "reject_null_priority" {
+  command = plan
+  variables {
+    vm_priority = null
+  }
+  expect_failures = [var.vm_priority]
 }
 
 run "retained_group" {

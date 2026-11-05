@@ -97,7 +97,9 @@ class AzureCapacityPreflight:
         if priority not in {"Regular", "Spot"}:
             raise ValueError(f"Unsupported VM priority '{priority}'.")
         checked_at = datetime.now(UTC)
-        sku = self._check_sku(region=region, vm_size=vm_size, checked_at=checked_at)
+        sku = self._check_sku(
+            region=region, vm_size=vm_size, checked_at=checked_at, priority=priority
+        )
         quota = self._check_quota(
             region=region,
             vm_size=vm_size,
@@ -266,7 +268,7 @@ class AzureCapacityPreflight:
         )
 
     def _check_sku(
-        self, *, region: str, vm_size: str, checked_at: datetime
+        self, *, region: str, vm_size: str, checked_at: datetime, priority: str
     ) -> SkuAvailabilityResult:
         try:
             sku_entries = list(
@@ -333,6 +335,23 @@ class AzureCapacityPreflight:
         evidence = [f"{vm_size} is listed for {region}."] if available else []
         if restrictions:
             evidence.append(f"{vm_size} is restricted in {region}: {'; '.join(restrictions)}")
+        if priority == "Spot":
+            capability = next(
+                (
+                    getattr(item, "value", None)
+                    for item in getattr(sku_entry, "capabilities", []) or []
+                    if str(getattr(item, "name", "")).lower() == "lowprioritycapable"
+                ),
+                None,
+            )
+            normalized = str(capability).strip().lower()
+            if normalized == "false":
+                available = False
+                evidence.append(f"{vm_size} reports LowPriorityCapable=False; Spot is unsupported.")
+            elif normalized != "true":
+                if available is not False:
+                    available = None
+                evidence.append(f"{vm_size} Spot capability could not be verified.")
 
         return SkuAvailabilityResult(
             region=region,

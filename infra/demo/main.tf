@@ -92,9 +92,9 @@ resource "azurerm_linux_virtual_machine" "demo" {
 
   # Spot capacity is interruptible. max_bid_price = -1 allows up to the
   # on-demand price; eviction can still occur when Azure reclaims capacity.
-  priority        = "Spot"
-  eviction_policy = "Deallocate"
-  max_bid_price   = -1
+  priority        = var.vm_priority
+  eviction_policy = var.vm_priority == "Spot" ? "Deallocate" : null
+  max_bid_price   = var.vm_priority == "Spot" ? -1 : null
 
   # Password auth intentionally disabled; SSH key only. With no public IP and no Bastion,
   # this key is only usable from inside the VNet (e.g. a future diagnostic Container Apps Job).

@@ -42,6 +42,32 @@ def test_default_group_remains_managed_and_caller_cannot_select_group():
     assert result["tags"]["managedBy"] == "terraform"
 
 
+@pytest.mark.parametrize(
+    "defaults,inputs,expected",
+    [
+        ({}, {}, "Spot"),
+        ({"vmPriority": "Regular"}, {}, "Regular"),
+        ({"vmPriority": "Spot"}, {"vmPriority": "Regular"}, "Regular"),
+        ({"vmPriority": "Regular"}, {"vmPriority": "Spot"}, "Spot"),
+    ],
+)
+def test_saved_terraform_priority_matches_effective_request(defaults, inputs, expected):
+    selected_profile = profile()
+    selected_profile.configurableInputs = {**selected_profile.configurableInputs, **defaults}
+    result = _terraform_variables(
+        environment_id="demo123",
+        profile=selected_profile,
+        settings=Settings(_env_file=None),
+        inputs={
+            "adminSshPublicKey": "test-key",
+            "vmSizeOverride": "Standard_NC4as_T4_v3",
+            **inputs,
+        },
+    )
+    assert result["vm_priority"] == expected
+    assert result["vm_size"] == "Standard_NC4as_T4_v3"
+
+
 def test_operator_group_and_tags_override_caller():
     result = variables(
         Settings(
