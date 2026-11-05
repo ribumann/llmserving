@@ -13,6 +13,7 @@ from pathlib import Path
 
 import azure_shared_lifecycle as shared
 import validate_shared_plan as scope
+import validate_shared_reconcile as reconcile
 from azure_disk_probe import mask_subject
 from azure_release_import import ReleaseImportError, az, command
 from validate_retained_group_plan import PlanRejected, run_saved_plan
@@ -333,7 +334,14 @@ def backup(module: Path, destination: Path, label: str) -> dict:
     return metadata
 
 
-def local_apply(plan: Path, log: Path, second_backup: Path, cleanup_run: str) -> None:
+def local_apply(
+    plan: Path,
+    log: Path,
+    second_backup: Path,
+    cleanup_run: str,
+    *,
+    recovering: bool = False,
+) -> None:
     if not re.fullmatch(r"[1-9][0-9]*", cleanup_run):
         raise shared.SharedError(
             "Exact successful independent cleanup arming run is required."
@@ -364,7 +372,10 @@ def local_apply(plan: Path, log: Path, second_backup: Path, cleanup_run: str) ->
         )
     identity(protected=False)
     shared.dependencies_absent()
-    shared.inventory(None)
+    if recovering:
+        recovery_inventory()
+    else:
+        shared.inventory(None)
     deleted = az("keyvault", "list-deleted", "--resource-type", "vault")
     if not isinstance(deleted, list) or any(
         not isinstance(item, dict) or item.get("name") == "llmrelease-kv-0ea5e6"
@@ -424,16 +435,26 @@ def local_apply(plan: Path, log: Path, second_backup: Path, cleanup_run: str) ->
                 )
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     before = backup(module, second_backup, f"{stamp}-before")
-    if before["state"] is not None:
+    if recovering:
+        recovery_state(before["state"])
+    elif before["state"] is not None:
         raise shared.SharedError(
             "Initial bridge cannot adopt/retry existing canonical state."
         )
 
     def gate(native: object, group: str) -> None:
-        scope.validate_fixed_shared(native, group, operation="create")
+        if recovering:
+            recovery_state(before["state"])
+            canonical = command(["terraform", "show", "-json", "terraform.tfstate"])
+            reconcile.validate_reconcile(native, group, canonical)
+        else:
+            scope.validate_fixed_shared(native, group, operation="create")
         # Recheck the independent deadline immediately before the single apply.
         configuration(creating=True)
-        shared.inventory(None)
+        if recovering:
+            recovery_inventory()
+        else:
+            shared.inventory(None)
         shared.dependencies_absent()
 
     try:
@@ -458,9 +479,56 @@ def local_apply(plan: Path, log: Path, second_backup: Path, cleanup_run: str) ->
     )
 
 
+def recovery_state(metadata: object) -> None:
+    if metadata != {
+        "sha256": reconcile.STATE_SHA256,
+        "lineage": reconcile.LINEAGE,
+        "serial": reconcile.SERIAL,
+    }:
+        raise shared.SharedError(
+            "Recovery requires the exact preserved failed-apply snapshot."
+        )
+    state = Path.cwd() / "terraform.tfstate"
+    if (
+        state.is_symlink()
+        or hashlib.sha256(state.read_bytes()).hexdigest() != reconcile.STATE_SHA256
+    ):
+        raise shared.SharedError(
+            "Canonical recovery state changed; never retry automatically."
+        )
+
+
+def recovery_inventory() -> None:
+    if configuration(creating=True) > shared.utc(reconcile.DEADLINE):
+        raise shared.SharedError(
+            "Recovery cannot extend the existing cleanup deadline."
+        )
+    feature = az(
+        "feature",
+        "show",
+        "--namespace",
+        "Microsoft.Network",
+        "--name",
+        "AllowBringYourOwnPublicIpAddress",
+    )
+    if (
+        not isinstance(feature, dict)
+        or feature.get("properties", {}).get("state") != "Registered"
+    ):
+        raise shared.SharedError("Policy-required public IP feature is not Registered.")
+    present = shared.inventory(None, bridge=True)
+    if set(present) != set(scope.RESOURCES) - {"azurerm_public_ip.nat"}:
+        raise shared.SharedError(
+            "Recovery live owned inventory differs from exact missing PIP."
+        )
+    reject_attached_children(present)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("local-apply", "arm-cleanup"))
+    parser.add_argument(
+        "operation", choices=("local-apply", "local-reconcile", "arm-cleanup")
+    )
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--private-log", type=Path)
     parser.add_argument("--second-backup", type=Path)
@@ -486,7 +554,11 @@ def main() -> None:
                     "Local apply needs private plan/log/backup and exact cleanup arming run."
                 )
             local_apply(
-                args.plan, args.private_log, args.second_backup, args.cleanup_run
+                args.plan,
+                args.private_log,
+                args.second_backup,
+                args.cleanup_run,
+                recovering=args.operation == "local-reconcile",
             )
     except (shared.SharedError, PlanRejected, ReleaseImportError) as error:
         raise SystemExit(f"Shared bridge stopped: {error}") from None
