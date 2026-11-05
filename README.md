@@ -207,8 +207,8 @@ Only on an explicitly enabled manual deployment dispatch from `main`:
 - logs into Azure with OIDC
 - resolves the live backend Container App FQDN
 - builds and pushes `llmserving-frontend:${github.sha}` with `az acr build`
-- passes `VITE_API_BASE_URL=https://<backend-fqdn>` as a build arg
-- points Container App `llm-frontend` at that immutable SHA tag
+- sets `BACKEND_URL=https://<backend-fqdn>` at runtime for the same-origin signed-token proxy
+- points the configured frontend Container App at the commit-tagged image (a tag is not digest immutability)
 - polls the frontend root URL
 
 ### Terraform validation (`.github/workflows/infra.yml`)

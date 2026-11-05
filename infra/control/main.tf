@@ -629,7 +629,7 @@ resource "azurerm_container_app" "frontend" {
       memory = var.frontend_memory
 
       env {
-        name  = "VITE_API_BASE_URL"
+        name  = "BACKEND_URL"
         value = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
       }
     }

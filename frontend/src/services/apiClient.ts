@@ -1,10 +1,11 @@
 import type { ApiErrorShape } from './types';
 
-const DEFAULT_API_BASE_URL = 'http://localhost:8000';
+const DEFAULT_LOCAL_API_BASE_URL = 'http://localhost:8000';
 
 function getApiBaseUrl() {
   const configured = import.meta.env.VITE_API_BASE_URL?.trim();
-  return (configured && configured.length > 0 ? configured : DEFAULT_API_BASE_URL).replace(
+  const defaultBase = import.meta.env.PROD ? '/api' : DEFAULT_LOCAL_API_BASE_URL;
+  return (configured && configured.length > 0 ? configured : defaultBase).replace(
     /\/$/,
     '',
   );
@@ -25,20 +26,20 @@ export class ApiError extends Error {
 }
 
 function getDemoAuthHeaders(): Record<string, string> {
-  // Dev/demo-only convenience: production deployments should sit behind an
-  // Entra ID reverse proxy that sets X-MS-CLIENT-PRINCIPAL-NAME instead.
+  if (import.meta.env.PROD) return {};
   const demoUser = import.meta.env.VITE_DEMO_USER?.trim();
   return demoUser ? { 'X-Demo-User': demoUser } : {};
 }
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers({
+    'Content-Type': 'application/json',
+    ...getDemoAuthHeaders(),
+  });
+  new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...getDemoAuthHeaders(),
-      ...init?.headers,
-    },
     ...init,
+    headers,
   });
 
   if (!response.ok) {
