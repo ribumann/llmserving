@@ -58,8 +58,13 @@ before enabling deployment. Configure OIDC trust for that environment, not arbit
 pull requests.
 
 Set `AZURE_RESOURCE_GROUP`, `AZURE_ACR_NAME`, `AZURE_BACKEND_APP_NAME`, and
-`AZURE_FRONTEND_APP_NAME` as environment variables in GitHub's environment settings
-(configuration variables, not shell variables). No Azure identity or resources are
+`AZURE_FRONTEND_APP_NAME` as **secrets** in the protected `azure-deployment`
+GitHub environment, alongside the Azure identity IDs. Although resource names
+are not credentials, secret-backed values are masked before runner step headers
+are printed; runtime `add-mask` alone cannot redact earlier headers. Operators
+with legacy configuration variables must explicitly copy these settings to
+environment secrets before enabling deployment; no automatic fallback to
+unmasked variables is provided. No Azure identity or resources are
 configured by importing this repository.
 
 ### Backend environment variables
@@ -188,10 +193,12 @@ On PRs and relevant pushes:
 
 Only on an explicitly enabled manual deployment dispatch from `main`:
 
-- logs into Azure with `azure/login@v2` (OIDC)
+- logs into Azure with a commit-pinned `azure/login` action (OIDC), after masking
+  required protected infrastructure configuration
 - builds and pushes `llmserving-backend:${github.sha}` with `az acr build`
-- points Container App `llm-backend` at that immutable SHA tag
-- polls `https://<fqdn>/healthz`
+- points Container App `llm-backend` at that commit-labelled tag (tags remain mutable;
+  digest pinning is still required for immutable release claims)
+- polls `https://<fqdn>/readyz`
 
 ### Frontend (`.github/workflows/frontend.yml`)
 
@@ -204,7 +211,7 @@ On PRs and relevant pushes:
 
 Only on an explicitly enabled manual deployment dispatch from `main`:
 
-- logs into Azure with OIDC
+- logs into Azure with the same commit-pinned OIDC action and pre-login masking
 - resolves the live backend Container App FQDN
 - builds and pushes `llmserving-frontend:${github.sha}` with `az acr build`
 - sets `BACKEND_URL=https://<backend-fqdn>` at runtime for the same-origin signed-token proxy
