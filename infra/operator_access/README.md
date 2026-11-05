@@ -192,7 +192,8 @@ Five subsequently observed external NSGs are recognized preserve-only at exact
 IDs for `snet-private-endpoints`, `snet-functions`, `snet-operator-dns`,
 `snet-data` and `snet-containerapps`. Each GET must confirm the exact shared
 campaign tags, Italy North, successful provisioning, zero custom rules, no NIC
-associations and only its exact same-named owned subnet association. Actual
+associations. Only the containerapps NSG may have its exact same-named owned
+subnet association; the other four must remain unattached. Actual
 activity identified an external creator; a causal policy assignment was **not**
 verified. This is not general trust in policy resources or tag-based ownership.
 These NSGs never enter either cleanup deletion set or Terraform ownership;

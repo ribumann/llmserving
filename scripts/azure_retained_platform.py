@@ -21,6 +21,14 @@ EXTERNAL_NSGS = {
         "containerapps",
     )
 }
+DEFAULT_NSG_RULE_NAMES = {
+    "AllowVnetInBound",
+    "AllowAzureLoadBalancerInBound",
+    "DenyAllInBound",
+    "AllowVnetOutBound",
+    "AllowInternetOutBound",
+    "DenyAllOutBound",
+}
 
 
 def preserve_external_nsg(record: dict) -> bool:
@@ -53,10 +61,24 @@ def preserve_external_nsg(record: dict) -> bool:
         or not isinstance(properties, dict)
         or properties.get("provisioningState") != "Succeeded"
         or properties.get("securityRules") != []
-        or properties.get("networkInterfaces", []) != []
+        or properties.get("networkInterfaces") not in (None, [])
     ):
         raise ReleaseImportError("Exact externally created NSG metadata differs.")
     subnets = properties.get("subnets")
+    rules = properties.get("defaultSecurityRules")
+    if (
+        not isinstance(rules, list)
+        or len(rules) != 6
+        or any(not isinstance(rule, dict) for rule in rules)
+        or {rule.get("name") for rule in rules} != DEFAULT_NSG_RULE_NAMES
+    ):
+        raise ReleaseImportError("External NSG default rule identities differ.")
+    if identifier != next(
+        item for item in EXTERNAL_NSGS if item.endswith("-containerapps-nsg-italynorth")
+    ):
+        if subnets not in (None, []):
+            raise ReleaseImportError("External NSG must remain exactly unattached.")
+        return True
     if (
         not isinstance(subnets, list)
         or len(subnets) != 1

@@ -21,7 +21,12 @@ class RetainedPlatformTests(unittest.TestCase):
                 "properties": {
                     "provisioningState": "Succeeded",
                     "securityRules": [],
-                    "subnets": [{"id": subnet}],
+                    "defaultSecurityRules": [
+                        {"name": name} for name in platform.DEFAULT_NSG_RULE_NAMES
+                    ],
+                    "subnets": (
+                        [{"id": subnet}] if "-containerapps-" in identifier else None
+                    ),
                 },
             }
             with patch.object(platform, "az", return_value=metadata) as read:
@@ -55,7 +60,7 @@ class RetainedPlatformTests(unittest.TestCase):
                 elif mutation == "subnet":
                     changed["properties"]["subnets"] = [{"id": "/foreign"}]
                 elif mutation == "extra":
-                    changed["properties"]["subnets"] *= 2
+                    changed["properties"]["subnets"] = [{"id": subnet}, {"id": subnet}]
                 elif mutation == "nic":
                     changed["properties"]["networkInterfaces"] = [{"id": "/foreign"}]
                 else:
