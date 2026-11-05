@@ -309,12 +309,13 @@ resource "azurerm_private_endpoint" "artifacts" {
 # --- Container Apps environment ---
 
 resource "azurerm_container_app_environment" "control" {
-  name                       = "${var.name_prefix}-cae"
-  resource_group_name        = azurerm_resource_group.control.name
-  location                   = local.location
-  log_analytics_workspace_id = local.shared.log_analytics_workspace_id
-  infrastructure_subnet_id   = local.shared.container_apps_subnet_id
-  tags                       = local.common_tags
+  name                               = "${var.name_prefix}-cae"
+  resource_group_name                = azurerm_resource_group.control.name
+  location                           = local.location
+  log_analytics_workspace_id         = local.shared.log_analytics_workspace_id
+  infrastructure_subnet_id           = local.shared.container_apps_subnet_id
+  infrastructure_resource_group_name = var.container_apps_infrastructure_resource_group_name
+  tags                               = local.common_tags
 
   workload_profile {
     name                  = "Consumption"
@@ -326,6 +327,14 @@ resource "azurerm_container_app_environment" "control" {
   # on every subsequent plan.
   lifecycle {
     ignore_changes = [infrastructure_resource_group_name]
+
+    postcondition {
+      condition = var.container_apps_infrastructure_resource_group_name == null ? true : (
+        self.infrastructure_resource_group_name == null ? false :
+        lower(self.infrastructure_resource_group_name) == lower(var.container_apps_infrastructure_resource_group_name)
+      )
+      error_message = "The platform infrastructure group does not match the explicitly approved name. Existing environments are not automatically replaced or moved."
+    }
   }
 }
 

@@ -58,6 +58,20 @@ variable "container_apps_workload_profile" {
   default     = "Consumption"
 }
 
+variable "container_apps_infrastructure_resource_group_name" {
+  description = "Optional explicitly approved platform-created Container Apps infrastructure group name. This does not adopt an existing group or grant cleanup permissions."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.container_apps_infrastructure_resource_group_name == null ? true : (
+      can(regex("^[A-Za-z0-9._()-]{1,90}$", var.container_apps_infrastructure_resource_group_name))
+      && !endswith(var.container_apps_infrastructure_resource_group_name, ".")
+    )
+    error_message = "container_apps_infrastructure_resource_group_name must be a nonblank Azure resource group name, not ending in a period."
+  }
+}
+
 # --- Backend/frontend Container Apps ---
 
 variable "backend_image" {
