@@ -1,0 +1,37 @@
+{
+  "apiUrl": "https://REPLACE-WITH-ACTUAL-MAIN-HOST/api",
+  "environmentId": "REPLACE-WITH-DEDICATED-AZURE-TEST-ENVIRONMENT",
+  "catalogEntryId": "REPLACE-WITH-ACTUAL-CATALOG-ENTRY",
+  "engineId": "vllm",
+  "modelRepo": "REPLACE-WITH-ACTUAL-HUGGINGFACE-REPOSITORY",
+  "checkpointRef": "REPLACE-WITH-40-CHAR-MODEL-COMMIT",
+  "deployedSourceCommit": "REPLACE-WITH-40-CHAR-DEPLOYED-SOURCE-COMMIT",
+  "deploymentEvidence": "REPLACE-WITH-VERIFIED-DEPLOYMENT-RUN-URL-OR-RELEASE-DIGEST",
+  "allowConfigWrites": false,
+  "allowDeploy": false,
+  "seededWorkloadsVerified": false,
+  "requestTimeoutSeconds": 60,
+  "operationTimeoutSeconds": 900,
+  "pollSeconds": 5,
+  "modelSettings": {},
+  "servingSettings": {},
+  "generationSettings": {"temperature": 0.0, "max_tokens": 64},
+  "golden": {
+    "id": "demo-factual-qa-v1",
+    "version": 1,
+    "caseCount": 12,
+    "minPassRate": 1.0
+  },
+  "performance": {
+    "single": {
+      "maxP95LatencyMs": null,
+      "minTokensPerSecond": null,
+      "maxFailureRate": 0
+    },
+    "concurrent": {
+      "maxP95LatencyMs": null,
+      "minTokensPerSecond": null,
+      "maxFailureRate": 0
+    }
+  }
+}
