@@ -160,6 +160,18 @@ own evidence.
 
 ## Release evidence
 
+The backend image gate also exercises its actual packaged `LmEvalRunner` on
+one compatible GSM8K chat-generation sample and `LlmPerfRunner` using the exact
+genuine pinned upstream tool, on the owned CPU Ollama model. It reuses the
+already-built image and runs toolkit containers sequentially with two-CPU/four-GiB
+limits, a separate two-GiB model server, bounded wall time, no GPU or cloud
+credentials, and explicit cleanup. Model digest, actual effective sample/request
+counts and normalized result shapes are required. Tiny-model benchmark quality
+may fail; inference/network/tool failures may not be replaced by mock results.
+Artifacts contain quantitative fresh synthetic evidence, not dataset questions,
+private data or credentials. This gate does not enable durable routing or certify
+Azure, statistically representative performance or a full benchmark suite.
+
 Report exact commit/image/model versions, workload, counts/failures and measured
 latency/throughput for fresh real-model tests. Historical metrics and mocked
 outputs cannot replace a missing run. Record blocked capacity/consent/auth tests
