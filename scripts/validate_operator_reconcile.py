@@ -61,6 +61,62 @@ def managed(module: object) -> dict:
     return records
 
 
+def validate_refresh(plan: dict, prior: dict, current: dict) -> None:
+    fields = {
+        "azurerm_public_ip.gateway": ("zones",),
+        "azurerm_subnet.gateway": ("service_endpoints", "service_endpoint_policy_ids"),
+        "azurerm_subnet.dns": ("service_endpoints", "service_endpoint_policy_ids"),
+    }
+    changed = set()
+    for address in EXISTING:
+        original = current[address]
+        refreshed = prior[address]
+        expected = copy.deepcopy(original)
+        values = scope.shared.obj(expected.get("values"))
+        actual = scope.shared.obj(refreshed.get("values"))
+        sensitivity = scope.shared.obj(expected.get("sensitive_values", {}))
+        actual_sensitivity = scope.shared.obj(refreshed.get("sensitive_values", {}))
+        for field in fields.get(address, ()):
+            if field in values and values[field] is None and actual.get(field) == []:
+                values[field] = []
+                if field not in sensitivity and actual_sensitivity.get(field) == []:
+                    sensitivity[field] = []
+        if "sensitive_values" in original:
+            expected["sensitive_values"] = sensitivity
+        if expected != refreshed:
+            raise PlanRejected(
+                "Operator refresh exceeds exact empty-field normalizations."
+            )
+        if original.get("values") != actual:
+            changed.add(address)
+    drift = plan.get("resource_drift", [])
+    if not isinstance(drift, list):
+        raise PlanRejected("Malformed operator refresh changes.")
+    seen = set()
+    for record in drift:
+        record = scope.shared.obj(record)
+        address = record.get("address")
+        change = scope.shared.obj(record.get("change"))
+        if (
+            address not in changed
+            or address in seen
+            or record.get("mode") != "managed"
+            or record.get("type") != address.split(".")[0]
+            or change.get("actions") != ["update"]
+            or change.get("before") != current[address]["values"]
+            or change.get("after") != prior[address]["values"]
+            or change.get("after_unknown") not in ({}, False)
+        ):
+            raise PlanRejected(
+                "Operator refresh differs from exact canonical/native values."
+            )
+        seen.add(address)
+    if seen != changed:
+        raise PlanRejected(
+            "Every operator normalization must have exact native drift evidence."
+        )
+
+
 def validate_reconcile(
     plan: object, group: str, canonical: object, target: dict
 ) -> None:
@@ -78,14 +134,9 @@ def validate_reconcile(
     )
     prior = managed(prior_module)
     current = managed(scope.shared.obj(canonical.get("values")).get("root_module"))
-    if (
-        set(prior) != EXISTING
-        or prior != current
-        or plan.get("resource_drift", []) != []
-    ):
-        raise PlanRejected(
-            "Recovery prior must equal the exact canonical six; no drift."
-        )
+    if set(prior) != EXISTING or set(current) != EXISTING:
+        raise PlanRejected("Recovery requires the exact canonical six.")
+    validate_refresh(plan, prior, current)
     future = managed(scope.shared.obj(plan.get("planned_values")).get("root_module"))
     if set(future) != set(scope.RESOURCES):
         raise PlanRejected("Recovery must leave exactly the seven reviewed resources.")

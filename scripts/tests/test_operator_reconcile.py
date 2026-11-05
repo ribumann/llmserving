@@ -43,6 +43,83 @@ class OperatorReconcileTests(unittest.TestCase):
         ]
         self.validate(plan, canonical, target)
 
+    def normalized_fixture(self):
+        plan, canonical, target = self.fixture()
+        plan["resource_drift"] = []
+        fields = {
+            "azurerm_public_ip.gateway": ("zones",),
+            "azurerm_subnet.gateway": (
+                "service_endpoints",
+                "service_endpoint_policy_ids",
+            ),
+            "azurerm_subnet.dns": ("service_endpoints", "service_endpoint_policy_ids"),
+        }
+        for original in canonical["values"]["root_module"]["resources"]:
+            address = original["address"]
+            if address not in fields:
+                continue
+            original["sensitive_values"] = (
+                {"tags": {}}
+                if "public_ip" in address
+                else {"address_prefixes": [False], "delegation": []}
+            )
+            for field in fields[address]:
+                original["values"][field] = None
+            prior = next(
+                item
+                for item in plan["prior_state"]["values"]["root_module"]["resources"]
+                if item["address"] == address
+            )
+            prior.update(copy.deepcopy(original))
+            for field in fields[address]:
+                prior["values"][field] = []
+                prior["sensitive_values"][field] = []
+            future = next(
+                item
+                for item in plan["planned_values"]["root_module"]["resources"]
+                if item["address"] == address
+            )
+            future.update(copy.deepcopy(prior))
+            change = next(
+                item for item in plan["resource_changes"] if item["address"] == address
+            )
+            change["change"]["before"] = copy.deepcopy(prior["values"])
+            change["change"]["after"] = copy.deepcopy(prior["values"])
+            plan["resource_drift"].append(
+                {
+                    "address": address,
+                    "mode": "managed",
+                    "type": original["type"],
+                    "change": {
+                        "actions": ["update"],
+                        "before": copy.deepcopy(original["values"]),
+                        "after": copy.deepcopy(prior["values"]),
+                        "after_unknown": {},
+                    },
+                }
+            )
+        return plan, canonical, target
+
+    def test_exact_native_empty_normalizations_and_masks(self):
+        self.validate(*self.normalized_fixture())
+        for mutation in ("mask", "extra", "missing-drift", "foreign-drift"):
+            plan, canonical, target = self.normalized_fixture()
+            prior = next(
+                item
+                for item in plan["prior_state"]["values"]["root_module"]["resources"]
+                if item["address"] == "azurerm_public_ip.gateway"
+            )
+            if mutation == "mask":
+                prior["sensitive_values"]["zones"] = [True]
+            elif mutation == "extra":
+                prior["values"]["foreign"] = []
+            elif mutation == "missing-drift":
+                plan["resource_drift"].pop()
+            else:
+                plan["resource_drift"][0]["address"] = "azurerm_private_endpoint.state"
+            with self.subTest(mutation=mutation), self.assertRaises(guard.PlanRejected):
+                self.validate(plan, canonical, target)
+
     def test_actions_drift_canonical_metadata_and_scope_fail_closed(self):
         for mutation in (
             "update",

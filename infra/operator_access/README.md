@@ -151,7 +151,12 @@ The failed non-AZ create retained six resources in canonical serial8,
 lineage `5a630028-d04a-3e1c-af96-bbd58b8434fe`, SHA256
 `4496a600b605459310e5df169868204ec02894d661214b70ca421c2434054f76`.
 Only the absent gateway may be created as `VpnGw1AZ`; all six existing
-resources must remain exact known NOOPs, with no refresh drift. This is not a
+resources must remain exact known NOOPs. Only native null-to-empty refresh of
+PIP `zones` and the two subnets' `service_endpoints`/
+`service_endpoint_policy_ids`, plus their corresponding newly empty sensitivity
+arrays, is allowed. Each change must bind canonical before/native prior after
+values and exact drift evidence; all other values and metadata must match.
+This is not a
 general retry mechanism. The approved public root and `2026-11-05T21:55:55Z`
 deadline cannot change. Retain the verified failed-apply checkpoints.
 
