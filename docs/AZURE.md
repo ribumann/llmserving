@@ -2,8 +2,8 @@
 
 **A clean reproducible Azure release is not yet demonstrated.** The modules
 describe shared/control/demo layers, but still have local cross-module state,
-placeholder image defaults and default to managing their own groups. Demo-only
-retained-group mode is now opt-in; shared/control still manage groups. Existing
+placeholder image defaults and default to managing their own groups. Shared and
+demo retained-group modes are opt-in; control still manages its group. Existing
 deployment workflows update API/UI images only; they are not an end-to-end
 bootstrap or independent cleanup of billable resources.
 Their privileged checkout/login actions are now commit-pinned. Resource-name
@@ -23,9 +23,29 @@ treating a blank typo as managed mode. Caller input cannot select a group or
 override enforced operator tags. This does not adopt existing group state or
 change already-saved teardown configuration; see
 [state ownership and CLI limitations](TERRAFORM_STATE.md#retained-demo-resource-groups).
-Shared/control persistent-group ownership, protected bootstrap and independently
+Control persistent-group ownership, protected bootstrap and independently
 verified actual-resource cleanup are still pending. No Azure or GPU acceptance
 gate is satisfied by credential-free plan tests.
+
+For **fresh non-group-owning shared state**, `infra/shared` also accepts
+`existing_resource_group_name`, reads the group as data and keeps all owned
+platform resources in it. Deployment region remains `location`, not the existing
+group's metadata region. Only opted-in retained mode honors an operator's
+`managedBy` tag; default mode preserves legacy tag precedence and resource names.
+The original singleton group address has an explicit move to index zero, with
+an actual mocked-state upgrade contract. This is **not** permission to switch
+old group-owning state to retained mode. Use the
+[private exact-plan ownership guard](TERRAFORM_STATE.md#retained-shared-group-and-private-plan-guard)
+before any approved retained-group apply.
+
+Control's VNet-integrated Consumption workload-profile environment currently
+leaves `infrastructure_resource_group_name` unset. The AzureRM provider supports
+an explicit name and describes a **platform-managed infrastructure group created
+in the subnet's subscription**. Parent control-group scope alone is therefore
+not evidence that every created resource is inside the approved allowlist.
+Verify the exact infrastructure group, platform creation/deletion behavior and
+independent cleanup authorization before live deployment. Do not assume it can
+reuse a pre-existing persistent group or add groups/roles automatically.
 
 ## Prerequisites before any billable resource
 

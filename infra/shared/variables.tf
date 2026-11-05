@@ -14,6 +14,17 @@ variable "location" {
   default     = "polandcentral"
 }
 
+variable "existing_resource_group_name" {
+  description = "Optional existing shared group read as data only. Use fresh non-group-owning state; validate the private saved plan before apply."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.existing_resource_group_name == null ? true : can(regex("^[A-Za-z0-9._()-]{1,90}$", var.existing_resource_group_name)) && !endswith(var.existing_resource_group_name, ".")
+    error_message = "existing_resource_group_name must be a nonblank Azure resource group name, not ending in a period."
+  }
+}
+
 variable "stage" {
   description = "Deployment stage/slot, e.g. 'dev', 'pilot'. Used to name the retained resource groups (rg-llm-shared-{stage}, rg-llm-control-{stage}) per FR-074."
   type        = string
