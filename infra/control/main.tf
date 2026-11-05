@@ -710,6 +710,10 @@ resource "azurerm_container_app" "frontend" {
 
   lifecycle {
     ignore_changes = [template[0].container[0].image]
+    precondition {
+      condition     = length(toset(values(local.job_names))) == length(local.jobs)
+      error_message = "Computed ACA job names must remain unique; refuse any shortened-name collision."
+    }
   }
 }
 

@@ -49,7 +49,11 @@ class TunnelProxyHandler(socketserver.BaseRequestHandler):
                 if not readable:
                     return
                 for source in readable:
-                    data = source.recv(65536)
+                    try:
+                        data = source.recv(65536)
+                    except ConnectionResetError:
+                        # A client rejecting the test certificate may reset its TLS connection.
+                        return
                     if not data:
                         return
                     destination = upstream if source is self.request else self.request
