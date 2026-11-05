@@ -14,6 +14,18 @@ TerraformRunError = entrypoint.TerraformRunError
 run = entrypoint.run
 
 
+@pytest.fixture(autouse=True)
+def local_state_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "TF_STATE_STORAGE_ACCOUNT",
+        "TF_STATE_CONTAINER",
+        "CONTAINER_APP_JOB_NAME",
+        "CONTAINER_APP_NAME",
+        "IDENTITY_ENDPOINT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _completed(returncode: int, *, stdout: str = "", stderr: str = "") -> Any:
     return subprocess.CompletedProcess(
         args=["terraform"], returncode=returncode, stdout=stdout, stderr=stderr
@@ -259,12 +271,13 @@ def test_download_remote_state_writes_file_on_200(
     monkeypatch.setenv("TF_STATE_CONTAINER", "tfstate")
     monkeypatch.setattr(entrypoint, "_storage_bearer_headers", lambda: {"Authorization": "x"})
 
-    response = MagicMock(status_code=200, content=b'{"resources": []}')
+    state = b'{"version": 4, "resources": [], "outputs": {}}'
+    response = MagicMock(status_code=200, content=state)
     monkeypatch.setattr(entrypoint.httpx, "get", MagicMock(return_value=response))
 
     entrypoint._download_remote_state(tmp_path, "demo123")
 
-    assert (tmp_path / "terraform.tfstate").read_bytes() == b'{"resources": []}'
+    assert (tmp_path / "terraform.tfstate").read_bytes() == state
 
 
 def test_download_remote_state_noop_without_env_vars(
@@ -284,7 +297,8 @@ def test_upload_remote_state_puts_state_file(
     monkeypatch.setenv("TF_STATE_STORAGE_ACCOUNT", "acct")
     monkeypatch.setenv("TF_STATE_CONTAINER", "tfstate")
     monkeypatch.setattr(entrypoint, "_storage_bearer_headers", lambda: {"Authorization": "x"})
-    (tmp_path / "terraform.tfstate").write_bytes(b'{"resources": []}')
+    state = b'{"version": 4, "resources": [], "outputs": {}}'
+    (tmp_path / "terraform.tfstate").write_bytes(state)
 
     put_mock = MagicMock(return_value=MagicMock(status_code=201))
     monkeypatch.setattr(entrypoint.httpx, "put", put_mock)
@@ -292,10 +306,10 @@ def test_upload_remote_state_puts_state_file(
     entrypoint._upload_remote_state(tmp_path, "demo123")
 
     put_mock.assert_called_once()
-    assert put_mock.call_args.kwargs["content"] == b'{"resources": []}'
+    assert put_mock.call_args.kwargs["content"] == state
 
 
-def test_upload_remote_state_noop_when_state_file_missing(
+def test_upload_remote_state_rejects_missing_required_state_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TF_STATE_STORAGE_ACCOUNT", "acct")
@@ -303,7 +317,8 @@ def test_upload_remote_state_noop_when_state_file_missing(
     put_mock = MagicMock()
     monkeypatch.setattr(entrypoint.httpx, "put", put_mock)
 
-    entrypoint._upload_remote_state(tmp_path, "demo123")
+    with pytest.raises(TerraformRunError, match="required remote state file"):
+        entrypoint._upload_remote_state(tmp_path, "demo123")
 
     put_mock.assert_not_called()
 
@@ -339,8 +354,8 @@ def test_apply_downloads_and_uploads_state(
     )
 
     download_shared_mock.assert_called_once_with(tmp_path)
-    download_mock.assert_called_once_with(tmp_path, "demo123")
-    upload_mock.assert_called_once_with(tmp_path, "demo123")
+    download_mock.assert_called_once_with(tmp_path, "demo123", allow_missing=True)
+    upload_mock.assert_called_once_with(tmp_path, "demo123", required=True)
     cli_auth.assert_called_once_with()
 
 
@@ -351,7 +366,8 @@ def test_download_shared_state_writes_sibling_directory(
     monkeypatch.setenv("TF_STATE_CONTAINER", "tfstate")
     monkeypatch.setattr(entrypoint, "_storage_bearer_headers", lambda: {"Authorization": "x"})
 
-    response = MagicMock(status_code=200, content=b'{"outputs": {}}')
+    state = b'{"version": 4, "resources": [], "outputs": {}}'
+    response = MagicMock(status_code=200, content=state)
     get_mock = MagicMock(return_value=response)
     monkeypatch.setattr(entrypoint.httpx, "get", get_mock)
 
@@ -363,9 +379,7 @@ def test_download_shared_state_writes_sibling_directory(
     assert get_mock.call_args.args[0] == (
         "https://acct.blob.core.windows.net/tfstate/infra-shared.tfstate"
     )
-    assert (tmp_path / "infra" / "shared" / "terraform.tfstate").read_bytes() == (
-        b'{"outputs": {}}'
-    )
+    assert (tmp_path / "infra" / "shared" / "terraform.tfstate").read_bytes() == state
 
 
 def test_download_shared_state_noop_without_env_vars(

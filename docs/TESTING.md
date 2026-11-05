@@ -76,6 +76,15 @@ Terraform command behavior; dedicated tests separately assert missing-identity
 and denied-login failures stop before Terraform and that successful login uses
 only `az login --identity`. Production authentication is not disabled for tests.
 
+Terraform state regressions also exercise rejected partial/cloud configuration,
+denied identity/download/upload, malformed state, BlobNotFound versus missing
+container, required destroy state, state-owner mismatch, partial apply failure/
+timeout persistence, and output failures. State failure cannot become a completed
+callback or silently start from empty state. Fixtures explicitly remove inherited
+host markers for local-only cases; separate cloud-marker cases require state.
+These are credential-free HTTP/CLI fixtures, **not** live blob locking or cloud
+recovery certification. See [the state recovery boundary](TERRAFORM_STATE.md).
+
 ## Browser and image validation
 
 Install frontend and E2E lockfiles with `npm ci`; from `e2e`, install Chromium
