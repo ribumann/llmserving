@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 import copy
+import hashlib
+import json
+from pathlib import Path
 
 import validate_shared_plan as scope
-from validate_retained_group_plan import PlanRejected
+from azure_release_import import ReleaseImportError, command
+from validate_retained_group_plan import PlanRejected, run_saved_plan
 
 LINEAGE = "c5fe615f-a6a1-0d7b-eff8-b17acb8252b2"
 SERIAL = 29
@@ -102,3 +107,54 @@ def validate_reconcile(plan: object, group: str, canonical: object) -> None:
         for item in prior.values()
     ]
     scope.validate_fixed_shared(owned, group, operation="destroy")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--private-log", type=Path, required=True)
+    args = parser.parse_args()
+    # Import here to reuse the strict ACL/snapshot checks without an import cycle.
+    import azure_shared_bridge as bridge
+
+    try:
+        bridge.private_directory(Path.cwd())
+        raw = Path("terraform.tfstate").read_bytes()
+        state = json.loads(raw)
+        bridge.recovery_state(
+            {
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "lineage": state.get("lineage"),
+                "serial": state.get("serial"),
+            }
+        )
+        version = command(["terraform", "version", "-json"])
+        if (
+            not isinstance(version, dict)
+            or version.get("terraform_version") != "1.16.6"
+        ):
+            raise PlanRejected("Recovery check requires Terraform 1.16.6.")
+        canonical = command(["terraform", "show", "-json", "terraform.tfstate"])
+        run_saved_plan(
+            args.plan,
+            scope.GROUP,
+            args.private_log,
+            terraform="terraform",
+            apply=False,
+            validator=lambda plan, group: validate_reconcile(plan, group, canonical),
+        )
+    except (
+        PlanRejected,
+        OSError,
+        ValueError,
+        bridge.shared.SharedError,
+        ReleaseImportError,
+    ) as error:
+        raise SystemExit(
+            f"Recovery check stopped: {type(error).__name__}; inspect private evidence."
+        ) from None
+    print("Exact shared partial recovery native scope check passed; no apply.")
+
+
+if __name__ == "__main__":
+    main()
