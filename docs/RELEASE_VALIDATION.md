@@ -125,9 +125,16 @@ durable routing or removing proven API runners.
 The API deep-copies accepted environment/configuration/definition data, and its
 in-process golden, benchmark and performance execution reads the persisted
 definition snapshot rather than reopening the mutable catalog. Benchmark model
-selection also uses the accepted model snapshot. Editing or deleting a catalog
-definition after acceptance must not change that run's inputs or report identity;
-missing/mismatched snapshots fail explicitly rather than silently using today's
+selection also uses the accepted model snapshot. New snapshots retain the catalog
+repository ID separately from its checkpoint revision. vLLM benchmarks select that
+frozen served repository ID, matching prompt and performance behavior; Ollama
+retains its local tag instead of sending a Hugging
+Face repository ID. Older snapshots without the repository field retain their
+accepted checkpoint fallback, not a fresh catalog lookup.
+
+Editing or deleting a catalog definition after acceptance must not change that
+run's inputs or report identity; missing/mismatched snapshots fail explicitly
+rather than silently using today's
 definition. Deferred API tests cover this selection boundary with mocked
 execution, not genuine tool performance, process-restart recovery or durable
 worker/report parity. Durable routing remains unchanged.

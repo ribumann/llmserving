@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 from src.api.app import create_app
+from src.domain.catalog import ModelCatalogEntry
 from src.evaluation.lm_eval_runner import LmEvalRunner
 from src.evaluation.run_quality import QualityRunOrchestrator
 from src.persistence.db import get_db_session
@@ -164,7 +165,7 @@ def test_missing_or_mismatched_snapshot_fails_without_reading_current_catalog(
     evaluate.assert_not_called()
 
 
-def test_benchmark_model_uses_accepted_snapshot(queued_runner) -> None:
+def test_benchmark_model_uses_legacy_accepted_checkpoint(queued_runner) -> None:
     client, session, executor, _engine, evaluate = queued_runner
     accepted = client.post(
         "/environments/env-demo/runs",
@@ -173,6 +174,7 @@ def test_benchmark_model_uses_accepted_snapshot(queued_runner) -> None:
     )
     assert accepted.status_code == 202
     run = session.experiment_runs[accepted.json()["runId"]]
+    del run.environmentContextSnapshot["modelConfiguration"]["huggingFaceRepoId"]
     expected = run.environmentContextSnapshot["modelConfiguration"]["resolvedCheckpointRef"]
     session.model_configurations["env-demo-model-1"].resolvedCheckpointRef = "changed"
 
@@ -180,3 +182,59 @@ def test_benchmark_model_uses_accepted_snapshot(queued_runner) -> None:
 
     assert run.status.value == "completed"
     assert evaluate.call_args.kwargs["model_args"]["model"] == expected
+
+
+def test_mismatched_engine_snapshot_fails_before_invoking_runner(queued_runner) -> None:
+    client, session, executor, _engine, evaluate = queued_runner
+    accepted = client.post(
+        "/environments/env-demo/runs",
+        headers=HEADERS,
+        json={"runType": "quality-benchmark", "testDefinitionRef": "gsm8k"},
+    )
+    assert accepted.status_code == 202
+    run = session.experiment_runs[accepted.json()["runId"]]
+    run.environmentContextSnapshot["deploymentRevision"]["engineId"] = "ollama"
+
+    executor.execute()
+
+    assert run.status.value == "failed"
+    assert any("engine snapshot" in item["message"] for item in run.diagnostics)
+    evaluate.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "engine_id,checkpoint,expected",
+    [
+        ("vllm", "main", "Qwen/Qwen3-4B"),
+        ("vllm", "Qwen/Qwen3-4B@main", "Qwen/Qwen3-4B"),
+        ("ollama", "qwen3:4b", "qwen3:4b"),
+    ],
+)
+@pytest.mark.parametrize("catalog_change", ["edit", "delete"])
+def test_benchmark_uses_frozen_engine_specific_served_model_identity(
+    queued_runner, engine_id, checkpoint, expected, catalog_change
+) -> None:
+    client, session, executor, _engine, evaluate = queued_runner
+    revision = session.deployment_revisions["env-demo-deployment-1"]
+    revision.engineId = engine_id
+    session.inference_configurations["env-demo-inference-1"].engineId = engine_id
+    session.model_configurations["env-demo-model-1"].resolvedCheckpointRef = checkpoint
+    accepted = client.post(
+        "/environments/env-demo/runs",
+        headers=HEADERS,
+        json={"runType": "quality-benchmark", "testDefinitionRef": "gsm8k"},
+    )
+    assert accepted.status_code == 202
+    run = session.experiment_runs[accepted.json()["runId"]]
+    original_snapshot = deepcopy(run.environmentContextSnapshot)
+    if catalog_change == "edit":
+        session.get(ModelCatalogEntry, "qwen3-4b").huggingFaceRepoId = "changed/repository"
+    else:
+        del session.catalog_entries["qwen3-4b"]
+    session.model_configurations["env-demo-model-1"].resolvedCheckpointRef = "changed"
+
+    executor.execute()
+
+    assert run.status.value == "completed"
+    assert evaluate.call_args.kwargs["model_args"]["model"] == expected
+    assert run.environmentContextSnapshot == original_snapshot

@@ -13,6 +13,7 @@ from src.api.errors import ApiError, with_request_id
 from src.api.routes.deployments import _require_environment
 from src.api.routes.environments import _provider, _user
 from src.domain.benchmark_definition import BenchmarkDefinition
+from src.domain.catalog import ModelCatalogEntry
 from src.domain.deployment_revision import DeploymentRevision
 from src.domain.enums import (
     CompletenessIndicator,
@@ -410,6 +411,11 @@ def create_run(
         ) from exc
     user = _user(request)
     model_configuration = session.get(ModelConfiguration, revision.modelConfigId)
+    catalog_entry = (
+        session.get(ModelCatalogEntry, model_configuration.catalogEntryId)
+        if model_configuration is not None
+        else None
+    )
     inference_configuration = session.get(InferenceConfiguration, revision.inferenceConfigId)
     run = ExperimentRun(
         runId=run_id,
@@ -433,6 +439,7 @@ def create_run(
                 "modelConfiguration": {
                     "modelConfigId": getattr(model_configuration, "modelConfigId", None),
                     "catalogEntryId": getattr(model_configuration, "catalogEntryId", None),
+                    "huggingFaceRepoId": getattr(catalog_entry, "huggingFaceRepoId", None),
                     "resolvedCheckpointRef": getattr(
                         model_configuration, "resolvedCheckpointRef", None
                     ),

@@ -231,6 +231,8 @@ class QualityRunOrchestrator:
         ):
             raise RuntimeError("Run snapshot does not match the execution context.")
         snapshot = deepcopy(dict(run.environmentContextSnapshot or {}))
+        if dict(snapshot.get("deploymentRevision") or {}).get("engineId") != context.engineId:
+            raise RuntimeError("Run engine snapshot does not match the execution context.")
         definition = snapshot.get("testDefinition")
         identity_key = {
             ExperimentRunType.QUALITY_GOLDEN: "goldenDatasetId",
@@ -298,7 +300,10 @@ class QualityRunOrchestrator:
             report = self._report_repo.get_by_run_id(session, context.runId)
             if report is None:
                 raise RuntimeError("Benchmark run context was not persisted.")
-            model_id = dict(snapshot.get("modelConfiguration") or {}).get("resolvedCheckpointRef")
+            model_configuration = dict(snapshot.get("modelConfiguration") or {})
+            model_id = (
+                model_configuration.get("huggingFaceRepoId") if context.engineId == "vllm" else None
+            ) or model_configuration.get("resolvedCheckpointRef")
             if not isinstance(model_id, str) or not model_id:
                 raise RuntimeError("Benchmark model snapshot was not persisted.")
 
