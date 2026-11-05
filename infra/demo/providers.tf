@@ -16,10 +16,9 @@ terraform {
     }
   }
 
-  # No backend block here on purpose: the terraform_runner Container Apps Job writes a
-  # per-environment backend_override.tf pointing Terraform state at infra/control's tfstate
-  # storage account/container (key = "<environmentId>.tfstate") before running init/apply,
-  # mirroring the superseded infra/azure module's approach.
+  # The runner transfers state to/from private blobs with its managed identity.
+  # This is not Terraform remote-backend locking; independent lease/recovery
+  # validation remains required before unattended billable provisioning.
 }
 
 provider "azurerm" {
