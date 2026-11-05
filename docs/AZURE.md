@@ -181,6 +181,13 @@ never a group deletion or wildcard sweep. A foreign/malformed disk, changed
 ownership, attached disk, untrusted or active owning run fails closed without
 deletion. Any failure to verify disk absence remains a release blocker.
 
+The first live disk exercise reached Azure creation but its post-create guard
+and independent cleanup rejected the CLI size field: Azure returns
+`diskSizeGB`, not `diskSizeGb`. The guard now requires the exact CLI field to
+be integer `4`; it does not accept a guessed alias, missing value, string or
+larger size. All other scope/shape/ownership/run checks are unchanged. This
+schema correction alone is not evidence that recovery or cleanup succeeded.
+
 Use explicit subscription/resource arguments for every command; do not change
 shared Azure CLI subscription/region defaults. In public logs mask infrastructure
 identifiers **before** `azure/login` and avoid dumping account/environment data.

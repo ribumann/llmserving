@@ -266,7 +266,8 @@ def disk() -> dict | None:
         or result.get("name") != DISK
         or str(result.get("type", "")).lower() != "microsoft.compute/disks"
         or str(result.get("location", "")).lower() != REGION
-        or result.get("diskSizeGb") != 4
+        or type(result.get("diskSizeGB")) is not int
+        or result["diskSizeGB"] != 4
         or not isinstance(result.get("sku"), dict)
         or result.get("sku", {}).get("name") != "Standard_LRS"
         or result.get("managedBy") is not None

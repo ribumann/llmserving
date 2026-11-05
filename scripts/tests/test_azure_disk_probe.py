@@ -92,7 +92,7 @@ class DiskProbeTests(unittest.TestCase):
             "name": probe.DISK,
             "type": "Microsoft.Compute/disks",
             "location": probe.REGION,
-            "diskSizeGb": 4,
+            "diskSizeGB": 4,
             "sku": {"name": "Standard_LRS"},
             "managedBy": None,
             "diskState": "Unattached",
@@ -195,6 +195,25 @@ class DiskProbeTests(unittest.TestCase):
                 probe, "az", return_value=[changed]
             ), self.assertRaises(probe.ProbeError):
                 probe.disk()
+
+    def test_actual_azure_cli_disk_size_field_is_exact_and_strict(self):
+        record = self.record()
+        record["diskSizeBytes"] = 4294967296
+        record.pop("managedBy")
+        with patch.object(probe, "az", return_value=[record]):
+            self.assertEqual(probe.disk(), record)
+        for value in (None, True, 4.0, "4", 0, 8):
+            changed = {**record, "diskSizeGB": value}
+            with self.subTest(value=value), patch.object(
+                probe, "az", return_value=[changed]
+            ), self.assertRaises(probe.ProbeError):
+                probe.disk()
+        legacy = dict(record)
+        legacy["diskSizeGb"] = legacy.pop("diskSizeGB")
+        with patch.object(probe, "az", return_value=[legacy]), self.assertRaises(
+            probe.ProbeError
+        ):
+            probe.disk()
 
     def test_duplicate_and_malformed_inventory_rejected(self):
         for inventory in ({}, [None], [self.record(), self.record()]):
