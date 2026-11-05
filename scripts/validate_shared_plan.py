@@ -202,7 +202,9 @@ def known_or_reference(
     validate_reference(expressions.get(field), target)
 
 
-def validate_endpoint(plan: dict, values: dict, *, existing: bool) -> None:
+def validate_endpoint(
+    plan: dict, values: dict, *, existing: bool, allow_partial_destroy: bool = False
+) -> None:
     expressions = obj(
         configuration_record(plan, "azurerm_private_endpoint.vault").get("expressions")
     )
@@ -221,6 +223,13 @@ def validate_endpoint(plan: dict, values: dict, *, existing: bool) -> None:
         ),
     ):
         blocks = values.get(block)
+        if (
+            block == "private_dns_zone_group"
+            and blocks == []
+            and existing
+            and allow_partial_destroy
+        ):
+            continue
         if not isinstance(blocks, list) or len(blocks) != 1:
             raise PlanRejected(
                 "The vault endpoint must have exactly its owned service/DNS group."
@@ -258,7 +267,12 @@ def validate_endpoint(plan: dict, values: dict, *, existing: bool) -> None:
 
 
 def validate_values(
-    plan: dict, address: str, values: object, *, existing: bool
+    plan: dict,
+    address: str,
+    values: object,
+    *,
+    existing: bool,
+    allow_partial_destroy: bool = False,
 ) -> None:
     values = obj(values)
     if address in RESOURCES:
@@ -284,7 +298,12 @@ def validate_values(
         if "location" in values and not equal(values["location"], REGION):
             raise PlanRejected("Shared resource region differs.")
         if address == "azurerm_private_endpoint.vault":
-            validate_endpoint(plan, values, existing=existing)
+            validate_endpoint(
+                plan,
+                values,
+                existing=existing,
+                allow_partial_destroy=allow_partial_destroy,
+            )
     elif address in ASSOCIATIONS:
         bindings = ASSOCIATIONS[address]
         for field, target in bindings.items():
@@ -380,11 +399,15 @@ def validate_provider_bindings(plan: dict) -> None:
         raise PlanRejected("Missing fixed resource/context provider bindings.")
 
 
-def validate_fixed_shared(plan: object, group: str, *, operation: str) -> None:
+def validate_fixed_shared(
+    plan: object, group: str, *, operation: str, allow_partial_destroy: bool = False
+) -> None:
     if group != GROUP or operation not in ("create", "destroy"):
         raise PlanRejected(
             "Only the fixed fallback shared create/destroy scope is supported."
         )
+    if allow_partial_destroy and operation != "destroy":
+        raise PlanRejected("Partial recovery is only supported for owned destruction.")
     validate_plan(plan, group)
     plan = obj(plan)
     validate_provider_bindings(plan)
@@ -426,7 +449,13 @@ def validate_fixed_shared(plan: object, group: str, *, operation: str) -> None:
                     raise PlanRejected(
                         "Create requires fresh state; destroy must leave no managed resources."
                     )
-                validate_values(plan, address, record.get("values"), existing=existing)
+                validate_values(
+                    plan,
+                    address,
+                    record.get("values"),
+                    existing=existing,
+                    allow_partial_destroy=allow_partial_destroy,
+                )
             else:
                 validate_data(record)
     context_addresses = {
@@ -441,7 +470,7 @@ def validate_fixed_shared(plan: object, group: str, *, operation: str) -> None:
         raise PlanRejected(
             "Both verified existing-group and provider contexts are required."
         )
-    changes = plan.get("resource_changes")
+    changes = plan.get("resource_changes", [] if allow_partial_destroy else None)
     if not isinstance(changes, list):
         raise PlanRejected("Missing native shared resource changes.")
     managed = set()
@@ -479,6 +508,7 @@ def validate_fixed_shared(plan: object, group: str, *, operation: str) -> None:
             address,
             change.get("after" if operation == "create" else "before"),
             existing=operation == "destroy",
+            allow_partial_destroy=allow_partial_destroy,
         )
     if operation == "create" and managed != ADDRESSES:
         raise PlanRejected(

@@ -15,6 +15,43 @@ import azure_release_import as consumer
 
 
 class ReleaseImportTests(unittest.TestCase):
+    def test_windows_command_resolves_cmd_without_shell_and_keeps_redaction(self):
+        private = "private-service-diagnostic"
+        with patch.object(consumer.os, "name", "nt"), patch.object(
+            consumer.shutil, "which", return_value=r"C:\Azure CLI\az.cmd"
+        ), patch.object(
+            consumer.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, '{"id":"expected"}', ""),
+        ) as run:
+            self.assertEqual(
+                consumer.command(["az", "account", "show"]), {"id": "expected"}
+            )
+            self.assertEqual(
+                run.call_args.args[0], [r"C:\Azure CLI\az.cmd", "account", "show"]
+            )
+            self.assertNotIn("shell", run.call_args.kwargs)
+        with patch.object(consumer.os, "name", "nt"), patch.object(
+            consumer.shutil, "which", return_value=None
+        ), patch.object(consumer.subprocess, "run") as run, self.assertRaises(
+            consumer.ReleaseImportError
+        ):
+            try:
+                consumer.command(["az", "account", "show"])
+            finally:
+                run.assert_not_called()
+        with patch.object(consumer.os, "name", "nt"), patch.object(
+            consumer.shutil, "which", return_value=r"C:\Azure CLI\az.cmd"
+        ), patch.object(
+            consumer.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 1, "", private),
+        ), self.assertRaises(
+            consumer.ReleaseImportError
+        ) as error:
+            consumer.command(["az", "account", "show"])
+        self.assertNotIn(private, str(error.exception))
+
     def setUp(self):
         self.environment = {
             "GITHUB_REPOSITORY": consumer.bundle.REPOSITORY,

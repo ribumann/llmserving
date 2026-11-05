@@ -186,6 +186,220 @@ does not authorize state data-plane grants/use/migration, establish remote
 locking/recovery, prove live destroy behavior, or permit billable provisioning
 before the independent persistence/cleanup gates are complete.
 
+### Operator-only retained state bootstrap comes first
+
+**Current main-environment status:** the account now exists. Organizational
+governance changed its public network access to **Disabled** at creation.
+Do not rerun the initial three-create gate, reenable public access, request an
+exception, or infer that hosted OIDC grants network reachability. Existing
+account/service recovery is a separately reviewed operator slice. The
+initial-only procedure below is historical first-creation guidance, not the
+next action against this existing account.
+
+The reviewed [bootstrap gate](../infra/bootstrap/README.md#initial-saved-plan-execution-gate)
+can create only the account, default blob service and private container. It does
+**not** depend on temporary shared-stack deletion: these three resources are
+intentionally retained, with local bootstrap state and `prevent_destroy`, and
+are excluded from shared cleanup. This is not an Azure lock or a tested restore.
+
+Before any independently authorized operator execution, verify fresh ARM
+inventory in the explicit fallback subscription: the named account must be
+absent and the retained group's five campaign tags unchanged. Also require
+typed `nameAvailable=true` from:
+
+```sh
+az storage account check-name --name llmreleasestate0ea5e6 \
+  --subscription 86677b6e-28fc-48e4-8988-5ab9e568eece -o json
+```
+
+Denied, ambiguous, present or unavailable means **stop**, never adopt. From
+the durable private initialized bootstrap directory, with the same separately
+approved isolated operator authentication and Terraform 1.16.6:
+
+```sh
+python /approved/reviewed-source/scripts/validate_bootstrap_plan.py \
+  --plan /protected/bootstrap.tfplan \
+  --expected-target /protected/independent-bootstrap-target.json \
+  --private-log /protected/NEW-bootstrap-apply.log \
+  --terraform-bin /approved/terraform-1.16.6 --apply
+```
+
+Keep restricted local state and a second private backup of the resulting state,
+backups, reviewed source/provider lock, inputs and log. Never copy CLI/token
+caches or upload these files. Verify exactly three managed state addresses and
+ARM security settings, not blob data. Partial apply requires preserving
+state/log and a separately reviewed recovery; the initial-create guard cannot
+resume/update and is not a blanket destroy path. Only **after the account
+exists**, and only following separately affirmative account-scoped approval,
+may an operator assign Blob Data Contributor to the existing UAMI. Neither
+operator availability nor this runbook authorizes that grant, data access,
+migration, app credentials/consent, shared provisioning or ACA changes.
+
+### Disabled one-shot shared lifecycle source
+
+**The immediate main-environment route is the local-state bridge below, not
+this remote-backend creator.** Remote lifecycle workflows additionally require
+`FALLBACK_PRIVATE_STATE_EXECUTOR_READY=true` and a dedicated trusted
+`llmserving-private-state` self-hosted runner. No such runner is provisioned
+by this source. An ACI command container is not an Actions runner. The remote
+path requires the exact approved blob private endpoint and exclusively private
+DNS resolution, while preserving `publicNetworkAccess=Disabled`.
+
+`azure-fallback-shared.yml` and the separate
+`azure-fallback-shared-cleanup.yml` implement a **one-shot temporary shared
+campaign**, not application deployment. They are disabled unless an authorized
+operator explicitly records repository variables
+`FALLBACK_STATE_DATA_ACCESS_APPROVED=true` and
+`FALLBACK_SHARED_CLEANUP_ARMED=true`; creation additionally needs
+`FALLBACK_SHARED_CREATION_ENABLED=true`. Do not set these based on inferred
+approval. The operator has authorized needed scoped Azure configuration/RBAC
+in the isolated main subscription; the coordinator owns account creation,
+the exact-account data-role assignment and live state acceptance. Do not arm
+these flags until that acceptance and independent cleanup review are complete.
+Identity secrets stay in protected, main-only `azure-e2e-fallback`.
+
+The controller requires the existing exact keyless bootstrap account/security
+and uses only OAuth at `tfstate/shared.tfstate`, with a conditional
+`shared-owner.json` claim. No account/group/role/credential is created by the
+controller and no local state is migrated. Backend locking is Terraform's
+native mechanism; never force-unlock. Four additional resource tags bind the
+exact creating run, attempt, source and four-hour deadline. The protected
+owner record is independently checked against GitHub's exact run-attempt API,
+including repository/main/manual/workflow/source and trusted creation time.
+Creating attempts cannot overwrite existing owner/state data, even after
+cleanup; a later campaign needs a separately reviewed recovery/rearm design.
+
+The independent completion workflow handles failure/cancellation immediately;
+successful creation is eligible after four hours, or earlier explicit manual
+cleanup. Hourly scans retry and continue auditing cleaned owner records for
+late completions. Scheduling, denied access, in-flight runs and live dependencies
+can delay cleanup: this is **not a guaranteed spending deadline**. GitHub's
+shared, non-cancelling concurrency group also serializes registry imports.
+Control/demo groups must contain no resources before create or delete; this
+controller never tears down their dependencies on their behalf.
+
+Fresh staging pins Terraform 1.16.6/AzureRM 3.117.1 and disables Key Vault
+purge/recovery **only in that staged fallback module**; original module defaults
+remain unchanged. Exact live cohort-tagged primary orphans, including VNet
+subnets and DNS links, may be imported into the same owned backend for recovery.
+Foreign/unverifiable roots, subnets, links, provider/state bindings or generated
+resources stop cleanup rather than broadening deletion. A private endpoint's
+generated NIC/DNS group is accepted only with its verified owned parent and
+relationship, never independently deleted. Other orphan forms require a
+separately reviewed recovery. A soft-deleted vault is intentionally not purged,
+so immediate same-name reuse is not promised.
+Owned destruction also accepts an absent endpoint DNS group after interrupted
+creation/deletion, but never a foreign group or missing service connection.
+An empty refreshed destroy plan may persist already-completed deletions only
+when no managed prior/planned resources or changes remain; stale managed
+resources without corresponding delete changes still fail. Creation and the
+standalone scope-check CLI remain strict.
+
+Every apply uses a private native saved plan checked by the fixed shared guard;
+only exact initial creates or pure owned deletes are permitted. Plans, state
+and raw Terraform diagnostics are private ephemeral runner files, never public
+artifacts; failed runners do not provide persistent raw logs. Preserve the
+protected backend/owner records and use authorized Azure Activity Log inspection
+for recovery. Source/schema/unit checks are **not actual state access,
+locking/restore, cancellation cleanup or deployment evidence**. Those live
+proofs and appropriate approval are required before treating the source as an
+operational provision/cleanup gate.
+
+### Executable local shared29 bridge and independent ARM cleanup
+
+The operator retains authoritative Terraform **1.16.6** local shared state
+while standing up the existing shared network. No blocked blob backend,
+private executor or migration is a prerequisite for this bounded bridge.
+`azure-fallback-shared-bridge-cleanup.yml` is a separate protected-main hosted
+OIDC workflow using **only ARM**; it never downloads state, accesses blobs,
+needs the shared network, purges a vault, or deletes storage/groups/grants.
+It is disabled unless `FALLBACK_SHARED_BRIDGE_CLEANUP_ARMED=true`. Set
+`FALLBACK_SHARED_BRIDGE_EXPIRES_AT` to one fixed UTC timestamp no more than
+four hours ahead, not a repeatedly extended lease. Do not arm until source
+review and exact-head CI pass.
+
+First dispatch the bridge cleanup workflow manually with `cleanup_now=false`.
+Before expiry it verifies the fixed UAMI/subscription/group ownership,
+empty control/demo dependencies and exact shared inventory without deleting.
+Its successful exact attempt-one run must be no more than thirty minutes old
+when the operator executes the bridge. From a restricted initialized local
+shared module, use the reviewed exact 29-create native saved plan and an
+existing restricted **second backup directory outside the module**:
+
+Before generating that plan, add this exact private
+`release_override.tf.json` (the wrapper requires it), then initialize/validate
+and regenerate the native plan. This does not change original module defaults:
+
+```json
+{
+  "terraform": {
+    "required_providers": {
+      "azurerm": {"source": "hashicorp/azurerm", "version": "= 3.117.1"}
+    }
+  },
+  "provider": {
+    "azurerm": {
+      "features": {
+        "key_vault": {
+          "purge_soft_delete_on_destroy": false,
+          "recover_soft_deleted_key_vaults": false
+        }
+      }
+    }
+  }
+}
+```
+
+```sh
+python /approved/reviewed-source/scripts/azure_shared_bridge.py local-apply \
+  --plan /protected/shared.tfplan --private-log /protected/NEW-shared-apply.log \
+  --second-backup /other-private/shared-checkpoints --cleanup-run EXACT_RUN_ID
+```
+
+The wrapper rejects an existing canonical state, remote/redirected backend,
+workspace/data-directory redirection, foreign/live resources, expired/unarmed
+cleanup and an existing soft-deleted vault name. It applies the same private
+copied binary plan the fixed native guard checked, never an edited JSON plan.
+Pre/post checkpoints include source/lock/inputs and any canonical state/backups;
+state metadata records verified SHA256, lineage and serial. Failed apply also
+checkpoints and stops: **never automatically retry against lost/partial state**.
+Windows directories must limit allow ACLs to the caller, SYSTEM and local
+Administrators; POSIX directories must exclude group/other access. Keep the
+primary, second copy, logs and plans private; neither CLI/token caches nor
+state are published.
+Persisted `.terraform/environment` must also select the default workspace.
+Before deleting a DNS zone, ARM cleanup enumerates its record sets and accepts
+only the unique default SOA. The vault endpoint is deleted first so Azure can
+remove its generated records; any remaining record, including a foreign one,
+blocks zone deletion rather than being cascaded away.
+
+The hosted cleanup runs every twenty minutes and at manual dispatch.
+After the fixed deadline (or protected manual `cleanup_now=true`) it deletes
+only exact live campaign-tagged shared roots in reverse dependency order,
+rechecking inventory/dependencies before each delete. Foreign roots, subnets,
+links, attachments or unknown generated resources stop it. An asynchronous
+deletion still pending is not success: the next independent run resumes.
+This is eventual emergency cleanup, not a guaranteed wall-clock/cost bound.
+ARM cleanup does not update the private local Terraform file; preserve both
+copies and reconcile native state before any later operation. Do not resume
+an apply from a stale binary plan.
+
+The next separately reviewed resource slice may add a blob private endpoint
+and DNS zone group in the existing shared network, a dedicated ACI-delegated
+subnet with NAT association, and one temporary private command container.
+These **five additional resources are not part of this 29-resource guard or
+cleanup**, and will deliberately block this cleanup until their own reviewed
+cleanup removes them. No second permanent VNet, public SSH, new identity or
+credential is required by that proposal. The existing pinned terraform-runner
+image contains Azure CLI but Terraform **1.9.8**; it can test OAuth blob access
+only and must not read/migrate authoritative 1.16.6 state without a reviewed
+tool-version update. A private blob/lease test is not migration or restore.
+The eventual network-backed state must be reverse-migrated to verified durable
+operator-local state **before shared network teardown**, or independent ARM
+cleanup must reconcile it afterward from retained private operator backups.
+Do not delete the only executor/network capable of persisting its own final
+Terraform state and claim a successful migration/cleanup.
+
 ## Prerequisites before any billable resource
 
 | Gate | Required evidence |
