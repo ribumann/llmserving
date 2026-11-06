@@ -3,6 +3,8 @@ from __future__ import annotations
 from scripts.tests import operator_fixture
 
 import ast
+from contextlib import redirect_stdout
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -30,6 +32,15 @@ class OperatorConfigurationTests(unittest.TestCase):
         self.assertEqual(config.setting("subscription_id"), operator_fixture.CONFIG["subscription_id"])
         os.environ["LLM_SERVING_OPERATOR_CONFIG"] = "{}"
         self.assertEqual(config.setting("subscription_id"), operator_fixture.CONFIG["subscription_id"])
+
+    def test_workflow_masks_identifiers_without_masking_single_digit_counters(self):
+        output = StringIO()
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}), redirect_stdout(output):
+            config.setting("subscription_id")
+        lines = output.getvalue().splitlines()
+        self.assertIn("::add-mask::" + operator_fixture.CONFIG["subscription_id"], lines)
+        for key in ("candidate_attempt", "shared_serial", "operator_serial"):
+            self.assertNotIn("::add-mask::" + operator_fixture.CONFIG[key], lines)
 
     def test_missing_unknown_malformed_and_duplicate_inputs_fail_closed(self):
         for raw in (
@@ -124,3 +135,20 @@ class OperatorConfigurationTests(unittest.TestCase):
                 if "resolved" in package:
                     with self.subTest(directory=directory, package=name):
                         self.assertTrue(package["resolved"].startswith("https://registry.npmjs.org/"))
+
+    def test_proxy_offline_fixture_hosts_are_consistent(self):
+        root = Path(__file__).resolve().parents[2]
+        proxy = root / "tools" / "private_proxy"
+        hosts = (proxy / "hosts.txt").read_text().splitlines()
+        self.assertEqual(hosts, [
+            "examplestate123abc.blob.core.windows.net",
+            "llmexample-kv-123abc.vault.azure.net",
+            "examplefunc456def.blob.core.windows.net",
+        ])
+        for path in (
+            proxy / "smoke.py",
+            root / ".github" / "workflows" / "private-proxy-ci.yml",
+        ):
+            for host in hosts:
+                self.assertIn(host, path.read_text())
+        self.assertIn(hosts[1], (proxy / "vault_fixture.go").read_text())

@@ -76,8 +76,9 @@ def _configuration() -> dict[str, str]:
         if not isinstance(value, str) or re.fullmatch(PATTERNS[key], value) is None:
             raise OperatorConfigurationError(f"Invalid operator configuration field: {key}.")
     if os.environ.get("GITHUB_ACTIONS") == "true":
-        for value in values.values():
-            print(f"::add-mask::{value}")
+        for key, value in values.items():
+            if key not in {"candidate_attempt", "shared_serial", "operator_serial"}:
+                print(f"::add-mask::{value}")
     return values
 
 

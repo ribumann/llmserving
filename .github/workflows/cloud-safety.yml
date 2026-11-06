@@ -26,7 +26,8 @@ jobs:
       - name: Inspect fixed public disk pricing without Azure credentials or resource mutation
         if: github.event_name == 'workflow_dispatch'
         run: |
-          export LLM_SERVING_OPERATOR_CONFIG="$(cat scripts/tests/fixtures/operator-config.json)"
+          LLM_SERVING_OPERATOR_CONFIG="$(cat scripts/tests/fixtures/operator-config.json)"
+          export LLM_SERVING_OPERATOR_CONFIG
           python scripts/azure_disk_probe.py quote
 
   staged-shared-schema:
@@ -42,7 +43,8 @@ jobs:
           terraform_wrapper: false
       - name: Stage exact fallback provider/backend overrides without Azure credentials
         run: |
-          export LLM_SERVING_OPERATOR_CONFIG="$(cat scripts/tests/fixtures/operator-config.json)"
+          LLM_SERVING_OPERATOR_CONFIG="$(cat scripts/tests/fixtures/operator-config.json)"
+          export LLM_SERVING_OPERATOR_CONFIG
           python scripts/azure_shared_lifecycle.py stage-check --destination "$RUNNER_TEMP/shared-schema"
       - name: Validate actual resolved provider schema without initializing remote state
         run: |
