@@ -231,6 +231,9 @@ def test_key_discovery_failure_is_explicit_unavailable(keypair) -> None:
 def test_separate_sso_tenant_keeps_arm_and_internal_auth_independent(keypair, monkeypatch) -> None:
     sso_tenant = "33333333-3333-3333-3333-333333333333"
     internal_audience = "api://internal-test"
+    internal_identity = (
+        "/subscriptions/test/resourceGroups/test/providers/Microsoft.Web/sites/functions"
+    )
     key_urls = []
 
     def keys(url, **_kwargs):
@@ -246,6 +249,7 @@ def test_separate_sso_tenant_keeps_arm_and_internal_auth_independent(keypair, mo
         auth_tenant_id=sso_tenant,
         auth_audience=AUDIENCE,
         internal_api_audience=internal_audience,
+        internal_api_allowed_identity_resource_ids=[internal_identity],
     )
     app = create_app(settings)
     with TestClient(app) as client:
@@ -274,7 +278,12 @@ def test_separate_sso_tenant_keeps_arm_and_internal_auth_independent(keypair, mo
         )
 
     internal = app.state.internal_token_validator
-    service_token = signed(keypair[0], aud=internal_audience, appid="test-managed-identity")
+    service_token = signed(
+        keypair[0],
+        aud=internal_audience,
+        appid="test-managed-identity",
+        xms_mirid=internal_identity,
+    )
     assert internal.validate(service_token).app_id == "test-managed-identity"
     with pytest.raises(ApiError) as error:
         internal.validate(

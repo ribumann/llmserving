@@ -7,11 +7,16 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from src.api.errors import ApiError
-from src.api.internal_auth import InternalTokenValidator
+from src.api.internal_auth import InternalTokenValidator, build_internal_token_validator
+from src.config import Settings
 
 _TENANT_ID = "11111111-1111-1111-1111-111111111111"
 _AUDIENCE = "api://internal-orchestration"
 _KID = "test-key-1"
+_IDENTITY_RESOURCE = (
+    "/subscriptions/44444444-4444-4444-4444-444444444444"
+    "/resourceGroups/test/providers/Microsoft.Web/sites/functions"
+)
 
 
 @dataclass
@@ -52,6 +57,7 @@ def _sign(private_key, *, audience=_AUDIENCE, issuer=None, expires_in=3600, **ex
         "exp": now + expires_in,
         "oid": "service-principal-object-id",
         "appid": "durable-functions-app-id",
+        "xms_mirid": _IDENTITY_RESOURCE,
         **extra_claims,
     }
     return jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": _KID})
@@ -61,6 +67,7 @@ def _validator(public_key) -> InternalTokenValidator:
     return InternalTokenValidator(
         tenant_id=_TENANT_ID,
         audience=_AUDIENCE,
+        allowed_identity_resource_ids=[_IDENTITY_RESOURCE],
         jwks_client_factory=_FakeJwksClient(public_key),
     )
 
@@ -136,3 +143,40 @@ def test_accepts_the_legacy_v1_issuer_for_the_same_tenant(rsa_keypair) -> None:
     caller = _validator(public_key).validate(token)
 
     assert caller.subject == "service-principal-object-id"
+
+
+@pytest.mark.parametrize("identity", [None, "", {}, ["not-a-resource"]])
+def test_rejects_non_managed_identity_tokens(rsa_keypair, identity) -> None:
+    private_key, public_key = rsa_keypair
+    with pytest.raises(ApiError) as error:
+        _validator(public_key).validate(_sign(private_key, xms_mirid=identity))
+    assert error.value.status_code == 401
+
+
+@pytest.mark.parametrize("identity", [_IDENTITY_RESOURCE + "-other", _IDENTITY_RESOURCE + "/child"])
+def test_rejects_other_identities_in_the_same_tenant(rsa_keypair, identity) -> None:
+    private_key, public_key = rsa_keypair
+    with pytest.raises(ApiError) as error:
+        _validator(public_key).validate(_sign(private_key, xms_mirid=identity))
+    assert error.value.status_code == 403
+    assert error.value.code == "internal_identity_not_allowed"
+
+
+def test_identity_resource_matching_is_case_insensitive(rsa_keypair) -> None:
+    private_key, public_key = rsa_keypair
+    assert (
+        _validator(public_key)
+        .validate(_sign(private_key, xms_mirid=_IDENTITY_RESOURCE.upper()))
+        .subject
+        == "service-principal-object-id"
+    )
+
+
+def test_missing_identity_allowlist_fails_closed() -> None:
+    settings = Settings(azure_tenant_id=_TENANT_ID, internal_api_audience=_AUDIENCE)
+    assert build_internal_token_validator(settings) is None
+
+
+def test_identity_allowlist_environment_parsing(monkeypatch) -> None:
+    monkeypatch.setenv("INTERNAL_API_ALLOWED_IDENTITY_RESOURCE_IDS", f'["{_IDENTITY_RESOURCE}"]')
+    assert Settings().internal_api_allowed_identity_resource_ids == [_IDENTITY_RESOURCE]

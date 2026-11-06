@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Application ID URI or client ID. Internal endpoints fail closed (503) when unset,
     # since that means no audience has been configured to validate against.
     internal_api_audience: str | None = None
+    internal_api_allowed_identity_resource_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=list
+    )
     hf_token_passthrough_header: str = "X-HuggingFace-Token"
     auth_allowed_email_domains: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["example.com"]
@@ -120,6 +123,7 @@ class Settings(BaseSettings):
     @field_validator(
         "auth_allowed_email_domains",
         "auth_bypass_paths",
+        "internal_api_allowed_identity_resource_ids",
         "cors_allowed_origins",
         mode="before",
     )

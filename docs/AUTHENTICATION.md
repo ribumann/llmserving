@@ -24,8 +24,16 @@ authenticate cloud requests. A real bearer token or Easy Auth's signed
 Missing tenant/audience fails closed with `operator_auth_unconfigured` (503).
 Invalid/missing tokens return 401; forbidden domains return 403. Service tokens
 cannot impersonate operators merely by supplying a username header. Internal
-workflow callbacks still use their separate audience-restricted managed-identity
-validator.
+workflow callbacks use their separate audience-restricted managed-identity
+validator. Only `/internal/workflows` and its descendants bypass the platform's
+browser sign-in policy; they still require signed, unexpired tokens from the
+deployment tenant with the internal audience and an exact `xms_mirid` resource
+match in `INTERNAL_API_ALLOWED_IDENTITY_RESOURCE_IDS` (CSV or JSON array).
+Terraform supplies only this deployment's Functions site and five job identities.
+An empty allowlist fails closed (503); ordinary user/service tokens without a
+managed-identity claim return 401, and other managed identities return 403.
+No ARM audience is added to operator API authorization, and no new identity or
+role grant is required.
 
 Operator tenant and infrastructure tenant are independent when explicitly
 configured: `AUTH_TENANT_ID` selects the single trusted operator issuer/JWKS/
