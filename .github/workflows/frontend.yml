@@ -36,8 +36,12 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
+        timeout-minutes: 5
         working-directory: frontend
-        run: npm ci
+        run: |
+          npm ci --no-audit --no-fund --fetch-retries=2 --fetch-timeout=30000 --loglevel=http
+          test -x node_modules/.bin/tsc
+          test -x node_modules/.bin/vite
 
       - name: Lint
         working-directory: frontend

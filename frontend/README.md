@@ -93,3 +93,7 @@ Container builds use the locked local TypeScript/Vite binaries, never `npx`
 downloads as a fallback for an incomplete install. Registry fetches are bounded
 and logged; missing build tools fail the install layer explicitly. A registry
 TLS/network failure must be repaired without disabling certificate verification.
+Browser CI uses the same bounded, logged npm fetches without install-time audits,
+checks the locked tools exist, and gives dependency/browser installation separate
+five-/twelve-minute deadlines. Playwright installation uses the installed local binary,
+not an `npx` fallback download.
