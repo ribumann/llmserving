@@ -252,6 +252,20 @@ class ReleaseBundleTests(unittest.TestCase):
             workflow,
         )
 
+    def test_browser_ci_installs_are_bounded_and_do_not_download_missing_tools(self):
+        for name in ("local-fullstack.yml", "runtime-ci.yml", "frontend.yml"):
+            source = (ROOT / ".github/workflows" / name).read_text()
+            installs = [line for line in source.splitlines() if "npm ci" in line]
+            self.assertTrue(installs, name)
+            for line in installs:
+                self.assertIn(
+                    "--no-audit --no-fund --fetch-retries=2 --fetch-timeout=30000 --loglevel=http",
+                    line, name,
+                )
+            self.assertIn("timeout-minutes: 5", source, name)
+            self.assertIn("test -x", source, name)
+            self.assertNotIn("npx playwright install", source, name)
+
 
 if __name__ == "__main__":
     unittest.main()

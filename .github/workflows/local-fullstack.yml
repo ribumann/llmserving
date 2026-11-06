@@ -10,7 +10,7 @@ permissions:
 jobs:
   real-local-api:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
@@ -52,11 +52,17 @@ jobs:
             frontend/package-lock.json
             e2e/package-lock.json
       - name: Install real-browser clients
+        timeout-minutes: 5
         run: |
-          npm ci --prefix frontend
-          npm ci --prefix e2e
-          cd e2e
-          npx playwright install --with-deps chromium
+          npm ci --prefix frontend --no-audit --no-fund --fetch-retries=2 --fetch-timeout=30000 --loglevel=http
+          test -x frontend/node_modules/.bin/tsc
+          test -x frontend/node_modules/.bin/vite
+          npm ci --prefix e2e --no-audit --no-fund --fetch-retries=2 --fetch-timeout=30000 --loglevel=http
+          test -x e2e/node_modules/.bin/playwright
+      - name: Install pinned browser client runtime
+        timeout-minutes: 12
+        working-directory: e2e
+        run: ./node_modules/.bin/playwright install --with-deps chromium
       - name: Start bounded real CPU model
         shell: bash
         run: |
