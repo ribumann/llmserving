@@ -268,6 +268,16 @@ variable "existing_sso_secret_id" {
   }
 }
 
+variable "frontend_token_store_sas_secret_id" {
+  description = "Optional versionless shared-vault secret URI containing a short-lived HTTPS user-delegation SAS URL for the private frontend-auth-tokens container. Configure after container creation and secure operator seeding; never pass the SAS value to Terraform."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.frontend_token_store_sas_secret_id == null || can(regex("^https://[a-zA-Z0-9-]+\\.vault\\.azure\\.net/secrets/[a-zA-Z0-9-]+/?$", var.frontend_token_store_sas_secret_id))
+    error_message = "frontend_token_store_sas_secret_id must be a versionless Key Vault secret URI, never a SAS or secret value."
+  }
+}
+
 variable "existing_sso_tenant_id" {
   description = "Optional operator SSO tenant UUID for an externally approved application. Null retains the ARM deployment tenant; never changes ARM or internal managed-identity callback tenants."
   type        = string
