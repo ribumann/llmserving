@@ -68,9 +68,11 @@ explicit `AZURE_OPERATOR_RUNNER_LABEL` variable selecting an approved private
 executor. The `self-hosted`, `linux`, `x64` requirements remain fixed; no runner
 host or custom label is bound by the public template.
 
-Release packaging in Runtime CI also requires `AZURE_OPERATOR_REPOSITORY`; it
-uses only that nonsecret repository field, not cloud credentials. PR checks use
-synthetic fixtures and never need operator configuration or Azure access.
+Credential-free release packaging in Runtime CI supplies only its nonsecret
+repository field from `github.repository`; it does not require the Azure
+operator opt-in variables or cloud credentials. The configuration loader emits
+Actions masking commands on stderr so redirected JSON records and manifests
+remain valid. PR checks use synthetic fixtures and never need Azure access.
 
 **Coordinate migration before merging or enabling these changes.** Existing
 operators must checkpoint their canonical source/config/state and populate their

@@ -6,6 +6,8 @@ import copy
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -60,6 +62,45 @@ class ReleaseBundleTests(unittest.TestCase):
         self.assertEqual(manifest["runAttempt"], "1")
         self.assertIn("NOT registry pull digests", manifest["limitations"][0])
         bundle.verify(manifest, self.archives)
+
+    def test_actions_cli_keeps_masking_commands_out_of_record_and_manifest_json(self):
+        environment = {
+            **os.environ,
+            "GITHUB_ACTIONS": "true",
+            "LLM_SERVING_OPERATOR_CONFIG": '{"repository":"example/llmserving"}',
+        }
+
+        def cli(*arguments):
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/release_bundle.py"), *arguments],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertIn("::add-mask::example/llmserving", result.stderr)
+            self.assertNotIn("::add-mask::", result.stdout)
+            return result.stdout
+
+        for component in bundle.COMPONENTS:
+            arguments = [
+                "record", "--component", component,
+                "--archive", str(self.archives / bundle.archive_name(component)),
+            ]
+            if component in bundle.IMAGES:
+                arguments += ["--image-id", "sha256:" + "b" * 64]
+            output = cli(*arguments)
+            self.assertEqual(json.loads(output)["component"], component)
+            (self.records / f"{component}.json").write_text(output)
+        manifest_path = self.root / "manifest.json"
+        output = cli("assemble", "--records", str(self.records))
+        self.assertEqual(len(json.loads(output)["artifacts"]), 8)
+        manifest_path.write_text(output)
+        self.assertIn(
+            "matches its expected run-bound checksum",
+            cli("verify", "--manifest", str(manifest_path),
+                "--archives", str(self.archives)),
+        )
 
     def test_packaging_refuses_other_repos_refs_events_and_missing_context(self):
         for field in self.environment:
