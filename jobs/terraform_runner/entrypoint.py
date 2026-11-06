@@ -199,6 +199,14 @@ def _validate_group_ownership(
             raise TerraformRunError(
                 "Invalid resource type or ownership mode.", stdout="", stderr=""
             )
+        if (
+            resource_type == "terraform_data"
+            and mode == "managed"
+            and resource.get("name") == "region_guard"
+            and resource.get("module") is None
+            and resource.get("provider") == 'provider["terraform.io/builtin/terraform"]'
+        ):
+            continue
         if mode not in {"managed", "data"} or (
             mode == "managed"
             and resource_type
