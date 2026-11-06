@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState, type JSX } from 'react';
-import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import {
+  BrowserRouter,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
 import {
   Button,
   FluentProvider,
   Hamburger,
+  Link,
   NavDrawer,
   NavDrawerBody,
   NavDrawerHeader,
@@ -42,7 +50,14 @@ import QualityReportPage from './pages/QualityReport';
 import QualityRunPage from './pages/QualityRun';
 import RetunePage from './pages/Retune';
 import TeardownPage from './pages/Teardown';
-import { THEMES, getStoredColorScheme, storeColorScheme, type ColorSchemeName } from './theme';
+import {
+  THEMES,
+  getStoredColorScheme,
+  storeColorScheme,
+  type ColorSchemeName,
+} from './theme';
+import { OperatorAccess, SignInLink } from './components/OperatorAccess';
+import { useOperatorSession } from './services/useOperatorSession';
 
 const NARROW_VIEWPORT_QUERY = '(max-width: 900px)';
 
@@ -63,7 +78,11 @@ const NAV_GROUPS: NavGroup[] = [
     key: 'setup',
     label: 'Setup',
     items: [
-      { value: '/provision', label: 'Provision', icon: <CloudArrowUp20Regular /> },
+      {
+        value: '/provision',
+        label: 'Provision',
+        icon: <CloudArrowUp20Regular />,
+      },
       { value: '/deploy', label: 'Deploy', icon: <Rocket20Regular /> },
     ],
   },
@@ -71,7 +90,11 @@ const NAV_GROUPS: NavGroup[] = [
     key: 'operate',
     label: 'Operate',
     items: [
-      { value: '/exercise', label: 'Exercise', icon: <ChatMultiple20Regular /> },
+      {
+        value: '/exercise',
+        label: 'Exercise',
+        icon: <ChatMultiple20Regular />,
+      },
       { value: '/retune', label: 'Retune', icon: <ArrowSyncCircle20Regular /> },
     ],
   },
@@ -79,8 +102,16 @@ const NAV_GROUPS: NavGroup[] = [
     key: 'evaluate',
     label: 'Evaluate',
     items: [
-      { value: '/quality/run', label: 'Quality Run', icon: <ClipboardTaskListLtr20Regular /> },
-      { value: '/performance/run', label: 'Performance Run', icon: <Gauge20Regular /> },
+      {
+        value: '/quality/run',
+        label: 'Quality Run',
+        icon: <ClipboardTaskListLtr20Regular />,
+      },
+      {
+        value: '/performance/run',
+        label: 'Performance Run',
+        icon: <Gauge20Regular />,
+      },
       { value: '/compare', label: 'Compare', icon: <ArrowSwap20Regular /> },
     ],
   },
@@ -88,7 +119,11 @@ const NAV_GROUPS: NavGroup[] = [
     key: 'manage',
     label: 'Manage',
     items: [
-      { value: '/history', label: 'Experiment History', icon: <History20Regular /> },
+      {
+        value: '/history',
+        label: 'Experiment History',
+        icon: <History20Regular />,
+      },
       { value: '/teardown', label: 'Teardown', icon: <Delete20Regular /> },
     ],
   },
@@ -106,6 +141,7 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: tokens.spacingHorizontalM,
+    flexWrap: 'wrap',
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalXXL}`,
     borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
@@ -114,6 +150,12 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
+  },
+  headerActions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
   },
   brand: {
     display: 'flex',
@@ -152,7 +194,9 @@ const useStyles = makeStyles({
 });
 
 function useColorScheme() {
-  const [scheme, setScheme] = useState<ColorSchemeName>(() => getStoredColorScheme());
+  const [scheme, setScheme] = useState<ColorSchemeName>(() =>
+    getStoredColorScheme(),
+  );
 
   useEffect(() => {
     storeColorScheme(scheme);
@@ -160,13 +204,16 @@ function useColorScheme() {
 
   return {
     scheme,
-    toggle: () => setScheme((current) => (current === 'light' ? 'dark' : 'light')),
+    toggle: () =>
+      setScheme((current) => (current === 'light' ? 'dark' : 'light')),
   };
 }
 
 function useIsNarrowViewport() {
   const [isNarrow, setIsNarrow] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(NARROW_VIEWPORT_QUERY).matches,
+    () =>
+      typeof window !== 'undefined' &&
+      window.matchMedia(NARROW_VIEWPORT_QUERY).matches,
   );
 
   useEffect(() => {
@@ -190,6 +237,7 @@ function Shell({ scheme, onToggleScheme }: ShellProps) {
   const location = useLocation();
   const isNarrow = useIsNarrowViewport();
   const [drawerOpen, setDrawerOpen] = useState(!isNarrow);
+  const { session, retry } = useOperatorSession();
 
   useEffect(() => {
     setDrawerOpen(!isNarrow);
@@ -197,7 +245,9 @@ function Shell({ scheme, onToggleScheme }: ShellProps) {
 
   const selectedValue = useMemo(() => {
     const match = NAV_GROUPS.flatMap((group) => group.items).find(
-      (item) => location.pathname === item.value || location.pathname.startsWith(`${item.value}/`),
+      (item) =>
+        location.pathname === item.value ||
+        location.pathname.startsWith(`${item.value}/`),
     );
     return match?.value ?? (location.pathname === '/' ? '/' : '');
   }, [location.pathname]);
@@ -215,15 +265,49 @@ function Shell({ scheme, onToggleScheme }: ShellProps) {
             <Subtitle1 as="h1">Azure LLM Serving Demo</Subtitle1>
           </div>
         </div>
-        <Tooltip content={scheme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'} relationship="label">
-          <Button
-            appearance="subtle"
-            shape="circular"
-            icon={scheme === 'light' ? <WeatherMoon20Regular /> : <WeatherSunny20Regular />}
-            onClick={onToggleScheme}
-            aria-label={scheme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-          />
-        </Tooltip>
+        <div className={styles.headerActions}>
+          <Text size={200}>
+            {session === 'authenticated'
+              ? 'Operator workspace'
+              : 'Public workflow guide'}
+          </Text>
+          {session === 'unavailable' ? (
+            <Button onClick={retry}>Check access again</Button>
+          ) : null}
+          {session === 'authenticated' ? (
+            <Link href="/.auth/logout?post_logout_redirect_uri=/">
+              Sign out
+            </Link>
+          ) : (
+            <SignInLink />
+          )}
+          <Tooltip
+            content={
+              scheme === 'light'
+                ? 'Switch to dark theme'
+                : 'Switch to light theme'
+            }
+            relationship="label"
+          >
+            <Button
+              appearance="subtle"
+              shape="circular"
+              icon={
+                scheme === 'light' ? (
+                  <WeatherMoon20Regular />
+                ) : (
+                  <WeatherSunny20Regular />
+                )
+              }
+              onClick={onToggleScheme}
+              aria-label={
+                scheme === 'light'
+                  ? 'Switch to dark theme'
+                  : 'Switch to light theme'
+              }
+            />
+          </Tooltip>
+        </div>
       </header>
       <div className={styles.body}>
         <NavDrawer
@@ -248,7 +332,12 @@ function Shell({ scheme, onToggleScheme }: ShellProps) {
               <div key={group.key}>
                 <NavSectionHeader>{group.label}</NavSectionHeader>
                 {group.items.map((item) => (
-                  <NavItem key={item.value} value={item.value} href={item.value} icon={item.icon}>
+                  <NavItem
+                    key={item.value}
+                    value={item.value}
+                    href={item.value}
+                    icon={item.icon}
+                  >
                     {item.label}
                   </NavItem>
                 ))}
@@ -259,20 +348,56 @@ function Shell({ scheme, onToggleScheme }: ShellProps) {
         <main className={styles.main} id="main-content" tabIndex={-1}>
           <div className={styles.mainInner}>
             <Routes>
-              <Route path="/" element={<OverviewPage />} />
-              <Route path="/provision" element={<ProvisionPage />} />
-              <Route path="/environments" element={<EnvironmentDetailPage />} />
-              <Route path="/environments/:environmentId" element={<EnvironmentDetailPage />} />
-              <Route path="/deploy" element={<DeployPage />} />
-              <Route path="/exercise" element={<ExercisePage />} />
-              <Route path="/quality/run" element={<QualityRunPage />} />
-              <Route path="/quality/report/:runId" element={<QualityReportPage />} />
-              <Route path="/performance/run" element={<PerformanceRunPage />} />
-              <Route path="/performance/report/:runId" element={<PerformanceReportPage />} />
-              <Route path="/retune" element={<RetunePage />} />
-              <Route path="/compare" element={<ComparePage />} />
-              <Route path="/teardown" element={<TeardownPage />} />
-              <Route path="/history" element={<ExperimentHistoryPage />} />
+              <Route
+                path="/"
+                element={
+                  <OverviewPage authenticated={session === 'authenticated'} />
+                }
+              />
+              <Route
+                element={
+                  session === 'authenticated' ? (
+                    <Outlet />
+                  ) : (
+                    <OperatorAccess session={session} retry={retry} />
+                  )
+                }
+              >
+                <Route path="/provision" element={<ProvisionPage />} />
+                <Route
+                  path="/environments"
+                  element={<EnvironmentDetailPage />}
+                />
+                <Route
+                  path="/environments/:environmentId"
+                  element={<EnvironmentDetailPage />}
+                />
+                <Route path="/deploy" element={<DeployPage />} />
+                <Route path="/exercise" element={<ExercisePage />} />
+                <Route path="/quality/run" element={<QualityRunPage />} />
+                <Route
+                  path="/quality/report/:runId"
+                  element={<QualityReportPage />}
+                />
+                <Route
+                  path="/performance/run"
+                  element={<PerformanceRunPage />}
+                />
+                <Route
+                  path="/performance/report/:runId"
+                  element={<PerformanceReportPage />}
+                />
+                <Route path="/retune" element={<RetunePage />} />
+                <Route path="/compare" element={<ComparePage />} />
+                <Route path="/teardown" element={<TeardownPage />} />
+                <Route path="/history" element={<ExperimentHistoryPage />} />
+                <Route
+                  path="*"
+                  element={
+                    <OperatorAccess session="signed-out" retry={retry} />
+                  }
+                />
+              </Route>
             </Routes>
           </div>
         </main>

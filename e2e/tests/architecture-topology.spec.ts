@@ -28,6 +28,11 @@ async function registerCatalogRoutes(
     const { pathname } = new URL(request.url());
     const method = request.method();
 
+    if (pathname === '/session') {
+      await fulfillJson(route, 200, { authenticated: true });
+      return;
+    }
+
     if (await extra(route, pathname, method)) {
       return;
     }

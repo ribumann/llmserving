@@ -174,6 +174,18 @@ resource "azapi_resource" "functions_packages" {
   })
 }
 
+resource "azapi_resource" "frontend_auth_tokens" {
+  count = var.enable_sso ? 1 : 0
+
+  type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01"
+  name      = "frontend-auth-tokens"
+  parent_id = "${azapi_resource.functions_storage.id}/blobServices/default"
+
+  body = jsonencode({
+    properties = { publicAccess = "None" }
+  })
+}
+
 resource "azapi_resource" "tfstate_storage" {
   type      = "Microsoft.Storage/storageAccounts@2023-01-01"
   name      = "${replace(var.name_prefix, "-", "")}tfstate${local.unique_suffix}"
@@ -691,6 +703,15 @@ resource "azurerm_container_app" "frontend" {
     }
   }
 
+  dynamic "secret" {
+    for_each = var.enable_sso && var.frontend_token_store_sas_secret_id != null ? [1] : []
+    content {
+      name                = "frontend-token-store-sas"
+      key_vault_secret_id = var.frontend_token_store_sas_secret_id
+      identity            = azurerm_user_assigned_identity.frontend.id
+    }
+  }
+
   template {
     min_replicas = 1
     max_replicas = 2
@@ -710,6 +731,12 @@ resource "azurerm_container_app" "frontend" {
 
   lifecycle {
     ignore_changes = [template[0].container[0].image]
+    precondition {
+      condition = var.frontend_token_store_sas_secret_id == null ? true : (
+        var.enable_sso && startswith(var.frontend_token_store_sas_secret_id, "${trimsuffix(local.shared.key_vault_uri, "/")}/secrets/")
+      )
+      error_message = "Frontend token-store SAS must reference the existing shared vault with SSO enabled."
+    }
     precondition {
       condition     = length(toset(values(local.job_names))) == length(local.jobs)
       error_message = "Computed ACA job names must remain unique; refuse any shortened-name collision."
@@ -1387,18 +1414,19 @@ resource "azapi_resource" "backend_auth_config" {
 resource "azapi_resource" "frontend_auth_config" {
   count = var.enable_sso ? 1 : 0
 
-  type      = "Microsoft.App/containerApps/authConfigs@2023-05-01"
+  type      = "Microsoft.App/containerApps/authConfigs@2024-03-01"
   name      = "current"
   parent_id = azurerm_container_app.frontend.id
 
   body = jsonencode({
-    properties = {
+    properties = merge({
       platform = {
         enabled = true
       }
       globalValidation = {
-        unauthenticatedClientAction = "RedirectToLoginPage"
-        redirectToProvider          = "azureactivedirectory"
+        # Only the static frontend is public. Nginx and the backend independently
+        # require a verified operator token for every /api request.
+        unauthenticatedClientAction = "AllowAnonymous"
       }
       identityProviders = {
         azureActiveDirectory = {
@@ -1413,7 +1441,16 @@ resource "azapi_resource" "frontend_auth_config" {
           }
         }
       }
-    }
+      }, var.frontend_token_store_sas_secret_id == null ? {} : {
+      login = {
+        tokenStore = {
+          enabled = true
+          azureBlobStorage = {
+            sasUrlSettingName = "frontend-token-store-sas"
+          }
+        }
+      }
+    })
   })
 }
 

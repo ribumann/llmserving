@@ -9,6 +9,11 @@ test('quickstart scenario 2 deploy and exercise flow', async ({ page }) => {
     const url = new URL(request.url());
     const { pathname } = url;
 
+    if (pathname === '/session') {
+      await fulfillJson(route, 200, { authenticated: true });
+      return;
+    }
+
     if (pathname === '/catalog' && request.method() === 'GET') {
       await fulfillJson(
         route,

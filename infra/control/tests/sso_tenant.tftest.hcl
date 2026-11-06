@@ -90,6 +90,18 @@ run "external_same_tenant_default" {
   command = plan
   assert {
     condition = (
+      jsondecode(azapi_resource.frontend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "AllowAnonymous"
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.platform.enabled
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.enabled
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.validation.allowedAudiences == [local.sso_client_id]
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.platform.enabled
+      && one([for env in azurerm_container_app.backend.template[0].container[0].env : env.value if env.name == "AUTH_MODE"]) == "entra-jwt"
+    )
+    error_message = "Only the static frontend may allow anonymous visitors; frontend SSO and backend EasyAuth/JWT validation must remain enabled."
+  }
+  assert {
+    condition = (
       length(azurerm_resource_group.control) == 1 && length(data.azurerm_resource_group.control) == 0
       && azurerm_role_assignment.backend_contributor["subscription"].role_definition_name == "Contributor"
       && azurerm_role_assignment.terraform_runner_contributor["subscription"].role_definition_name == "Contributor"
@@ -620,6 +632,7 @@ run "retained_requires_subnet_read_from_reader" {
     demo_resource_group_name                          = "rg-retained-demo"
     container_apps_infrastructure_resource_group_name = "rg-approved-platform"
   }
+
   override_data {
     target = data.azurerm_role_definition.subnet_reader[0]
     values = {
@@ -639,4 +652,58 @@ run "retained_requires_subnet_read_from_reader" {
     azurerm_role_assignment.runtime_gpu_subnet_reader["backend"],
     azurerm_role_assignment.runtime_gpu_subnet_reader["terraform_runner"]
   ]
+}
+
+run "frontend_token_store_container_precedes_secret_bootstrap" {
+  command = plan
+  assert {
+    condition = (
+      length(azapi_resource.frontend_auth_tokens) == 1
+      && azapi_resource.frontend_auth_tokens[0].name == "frontend-auth-tokens"
+      && jsondecode(azapi_resource.frontend_auth_tokens[0].body).properties.publicAccess == "None"
+      && !contains(keys(jsondecode(azapi_resource.frontend_auth_config[0].body).properties), "login")
+      && length([for secret in azurerm_container_app.frontend.secret : secret if secret.name == "frontend-token-store-sas"]) == 0
+    )
+    error_message = "The initial full plan must create a private token container without requiring an unseeded SAS secret."
+  }
+}
+
+run "frontend_token_store_relays_signed_token_without_backend_auth_changes" {
+  command = plan
+  variables {
+    frontend_token_store_sas_secret_id = "https://isolated-test.vault.azure.net/secrets/frontend-token-store-sas"
+  }
+  assert {
+    condition = (
+      azapi_resource.frontend_auth_config[0].type == "Microsoft.App/containerApps/authConfigs@2024-03-01"
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.login.tokenStore.enabled
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.login.tokenStore.azureBlobStorage.sasUrlSettingName == "frontend-token-store-sas"
+      && one([for secret in azurerm_container_app.frontend.secret : secret.key_vault_secret_id if secret.name == "frontend-token-store-sas"]) == var.frontend_token_store_sas_secret_id
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "AllowAnonymous"
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.platform.enabled
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.enabled
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.validation.allowedAudiences == [local.sso_client_id]
+      && !contains(keys(jsondecode(azapi_resource.backend_auth_config[0].body).properties), "login")
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.platform.enabled
+      && one([for env in azurerm_container_app.backend.template[0].container[0].env : env.value if env.name == "AUTH_MODE"]) == "entra-jwt"
+    )
+    error_message = "The public frontend shell must retain signed-token relay and SSO using a vault reference, while backend Easy Auth and independent JWT validation remain required."
+  }
+}
+
+run "frontend_token_store_rejects_foreign_vault" {
+  command = plan
+  variables {
+    frontend_token_store_sas_secret_id = "https://foreign.vault.azure.net/secrets/frontend-token-store-sas"
+  }
+  expect_failures = [azurerm_container_app.frontend]
+}
+
+run "frontend_token_store_rejects_raw_sas_input" {
+  command = plan
+  variables {
+    frontend_token_store_sas_secret_id = "https://synthetic.blob.core.windows.net/frontend-auth-tokens?sig=synthetic"
+  }
+  expect_failures = [var.frontend_token_store_sas_secret_id]
 }

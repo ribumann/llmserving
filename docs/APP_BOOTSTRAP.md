@@ -211,6 +211,51 @@ Do not delete the previous version/credential until real sign-in is verified.
 
 ## Acceptance before claiming running and clean
 
+### ACA signed-token relay
+
+Easy Auth's session cookie can authenticate frontend page loads without giving
+nginx a signed provider token. A blank nginx HTML 401 from `/api/` after successful
+login is not the backend rejecting a JWT: nginx has neither an incoming bearer
+token nor `X-MS-TOKEN-AAD-ID-TOKEN`. Do not replace backend JWT verification with
+unsigned principal headers.
+
+The [documented ACA token store](https://learn.microsoft.com/azure/container-apps/token-store)
+provides provider-token headers and requires a private blob container and a SAS
+secret. The frontend auth config uses the supported stable `2024-03-01` API;
+the older `2023-05-01` schema cannot configure this store.
+
+1. Apply/review the full control plan with
+   `frontend_token_store_sas_secret_id=null`. It creates only the private
+   `frontend-auth-tokens` container in the existing Functions storage account.
+   No account keys, public access, extra identity or token value are added.
+2. The approved operator generates a six-hour, HTTPS-only **user-delegation**
+   container SAS with read/write/delete permissions using existing OAuth access
+   at that exact storage account. Capture CLI output in process memory, never
+   a shell variable/value argument, log, file, chat or Terraform input. Assemble
+   the container URL and write it directly to the shared vault secret
+   `frontend-token-store-sas` using the already verified private HTTPS path.
+   Do not use shared-key SAS or enable storage account keys.
+   The existing account-scoped Storage Blob Data Contributor role includes
+   `Microsoft.Storage/storageAccounts/blobServices/generateUserDelegationKey/action`;
+   a container-scoped grant alone cannot acquire the account delegation key.
+   Six hours is an explicit verification window, not a cost-cleanup deadline;
+   user-delegation SAS validity cannot exceed seven days. Rotate before expiry.
+3. Set only the nonsecret URI
+   `frontend_token_store_sas_secret_id="https://<shared-vault>.vault.azure.net/secrets/frontend-token-store-sas"`
+   in the protected control inputs. Review/apply a fresh **full** native plan.
+   The frontend references the vault secret through its existing identity and
+   enables `login.tokenStore.azureBlobStorage.sasUrlSettingName`.
+4. Sign out and sign in again to populate the store. Verify `/api/environments`
+   returns authenticated application data, not nginx 401 or a login redirect.
+   Check only token presence, never log token headers or `/.auth/me` payloads.
+   Verify private token-store access; do not open storage networking on failure.
+
+The SAS expires independently of the SSO client credential. Record its expiry
+privately, rotate securely before expiry and verify the frontend resolves the
+new vault version. A timeout during vault delivery is an uncertain write:
+inspect metadata before retrying. This is a staged operator prerequisite,
+not automatic credential rotation or a claim that sign-in/API acceptance passed.
+
 Verify actual frontend Easy Auth sign-in, signed ID-token injection through
 nginx `/api`, backend tenant/audience/domain checks and negative authorization
 paths. A successfully stored secret is not proof of consent or platform token

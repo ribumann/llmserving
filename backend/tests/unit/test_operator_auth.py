@@ -81,6 +81,40 @@ def test_cloud_requires_real_signed_operator_token(keypair, header) -> None:
     value = f"Bearer {token}" if header == "Authorization" else token
     with TestClient(cloud_app(keypair[1])) as client:
         assert client.get("/providers", headers={header: value}).status_code == 200
+        response = client.get("/session", headers={header: value})
+        assert response.status_code == 200
+        assert response.json()["authenticated"] is True
+        assert set(response.json()) == {"authenticated", "requestId"}
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/session"),
+        ("GET", "/environments"),
+        ("GET", "/catalog"),
+        ("GET", "/environments/private/runs"),
+        ("GET", "/environments/private/runs/private/report"),
+        ("GET", "/environments/private/model-configurations"),
+        ("GET", "/environments/private/inference-configurations"),
+        ("POST", "/environments/preview"),
+        ("POST", "/environments"),
+        ("POST", "/environments/private/deployments"),
+        ("POST", "/environments/private/prompts"),
+        ("POST", "/environments/private/runs"),
+        ("POST", "/environments/private/runs/private/cancel"),
+        ("POST", "/environments/private/model-configurations"),
+        ("POST", "/environments/private/inference-configurations"),
+        ("POST", "/environments/private/teardown"),
+        ("POST", "/comparisons"),
+    ],
+)
+def test_public_shell_does_not_make_operator_data_or_actions_public(keypair, method, path) -> None:
+    with TestClient(cloud_app(keypair[1])) as client:
+        assert client.request(method, path).status_code == 401
+        token = signed(keypair[0], preferred_username="user@outside.test")
+        response = client.request(method, path, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 403
 
 
 @pytest.mark.parametrize(

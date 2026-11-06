@@ -7,6 +7,11 @@ test('quickstart scenario 5 compare flow', async ({ page }) => {
     const url = new URL(request.url());
     const { pathname } = url;
 
+    if (pathname === '/session') {
+      await fulfillJson(route, 200, { authenticated: true });
+      return;
+    }
+
     if (pathname === '/comparisons' && request.method() === 'POST') {
       await fulfillJson(route, 201, {
         requestId: 'req-comparison',

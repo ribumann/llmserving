@@ -6,6 +6,23 @@ Public reachability does **not** make provisioning, model deployment or runs
 anonymous. Keep their signed-token authentication and authorization enabled.
 There is no separate anonymous playground API or reduced duplicate application.
 
+The frontend static shell and workflow descriptions are accessible without
+sign-in. In Container Apps, only the **frontend** Easy Auth policy allows
+anonymous requests; its identity provider remains enabled for explicit sign-in.
+Nginx still rejects `/api` requests without a token, backend Easy Auth remains
+enabled, and the backend independently validates signed operator JWTs.
+
+Before mounting a live page, the UI checks the authenticated `GET /session`
+endpoint through the same API proxy. A 401 or 403 shows an intentional protected
+state, not an automatic failed-data panel. Other session-check failures keep
+live pages locked with a retry action. Sign-in returns to the requested route;
+no credentials are stored by the frontend and private API responses are not
+cached. Static workflow descriptions are not historical run evidence.
+
+Authorized operators still have the full workflow. This public shell is **not**
+the future read-only open-source showcase: publishing sanitized historical
+examples and disabling execution server-side are separate release changes.
+
 ## What the repository currently supports
 
 | UI option | Implementation | Authentication and limits |

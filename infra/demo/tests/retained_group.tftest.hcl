@@ -96,6 +96,10 @@ run "retained_group" {
     error_message = "Compute must use the retained group and shared subnet's region, not group metadata location."
   }
   assert {
+    condition     = azurerm_linux_virtual_machine.demo.zone == null
+    error_message = "GPU allocation must remain regional unless a supported availability zone is explicitly selected."
+  }
+  assert {
     condition     = azurerm_linux_virtual_machine.demo.tags["managedBy"] == "copilot-release" && azurerm_network_interface.demo.tags["project"] == "owned-test" && azurerm_virtual_machine_extension.nvidia_driver.tags["environmentId"] == "demo123"
     error_message = "Owned resource tags must preserve operator tags and enforce the environment id."
   }
