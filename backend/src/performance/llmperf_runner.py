@@ -136,8 +136,7 @@ class LlmPerfRunner:
         count: int,
         duration: float,
     ) -> dict[str, Any]:
-        # Measure the interval between successful completions, excluding the first
-        # CLI's startup. Each bounded batch uses upstream's normal prompt/profile.
+        # Include the first CLI startup and request in the observed warm-up phase.
         batch = {
             **workload,
             "concurrency": 1,
@@ -146,11 +145,9 @@ class LlmPerfRunner:
             "_warmupPhase": True,
         }
         timeout = int(dict(workload.get("safetyLimits") or {}).get("timeoutSeconds") or 600) + 60
-        deadline = monotonic() + timeout
-        batch["_warmupTimeoutSeconds"] = timeout
-        self._run_warmup_batch(base_url, batch, model_id, 1)
         started = monotonic()
-        completed = 1
+        deadline = started + timeout
+        completed = 0
         while True:
             remaining = deadline - monotonic()
             if remaining <= 0:

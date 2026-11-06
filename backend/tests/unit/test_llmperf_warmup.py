@@ -219,9 +219,12 @@ def test_measured_overload_preserves_partial_metrics_after_warmup() -> None:
     assert exc.value.partial_result["testConditions"]["warmupExecution"]["completedRequests"] == 3
 
 
-@pytest.mark.parametrize("configured_count, expected_warmups", [(0, 3), (4, 4)])
+@pytest.mark.parametrize(
+    "configured_count, step_seconds, expected_warmups",
+    [(0, 2, 1), (0, 3, 1), (3, 3, 3), (0, 1, 2), (4, 1, 4)],
+)
 def test_duration_warmup_executes_tool_until_both_minimums(
-    tmp_path, monkeypatch, configured_count, expected_warmups
+    tmp_path, monkeypatch, configured_count, step_seconds, expected_warmups
 ) -> None:
     script = tmp_path / "token_benchmark_ray.py"
     script.write_text(
@@ -262,7 +265,7 @@ print(json.dumps(result))
     def evaluator(**kwargs):
         result = runner._default_evaluator(**kwargs)
         if kwargs["workload"].get("_warmupPhase"):
-            clock[0] += 1
+            clock[0] += step_seconds
         return result
 
     runner._evaluator = evaluator
@@ -288,13 +291,16 @@ print(json.dumps(result))
     assert result["testConditions"]["warmupExecution"] == {
         "completedRequests": expected_warmups,
         "failedRequests": 0,
-        "elapsedSeconds": expected_warmups - 1,
+        "elapsedSeconds": expected_warmups * step_seconds,
     }
     assert result["requestFailures"] == {"count": 0, "total": 50, "rate": 0}
 
 
 @pytest.mark.parametrize("failure", ["error", "incomplete", "timeout", "deadline"])
-def test_duration_warmup_failure_never_starts_measurement(monkeypatch, failure) -> None:
+@pytest.mark.parametrize("failure_call", [1, 2])
+def test_duration_warmup_failure_never_starts_measurement(
+    monkeypatch, failure, failure_call
+) -> None:
     clock = [0.0]
     monkeypatch.setattr(runner_module, "monotonic", lambda: clock[0])
     calls = []
@@ -302,7 +308,7 @@ def test_duration_warmup_failure_never_starts_measurement(monkeypatch, failure) 
     def evaluator(**kwargs):
         calls.append(kwargs)
         assert kwargs["workload"].get("_warmupPhase")
-        if len(calls) == 2:
+        if len(calls) == failure_call:
             if failure == "timeout":
                 raise PerformanceRunOverloadError("timed out")
             if failure == "deadline":
@@ -332,7 +338,7 @@ def test_duration_warmup_failure_never_starts_measurement(monkeypatch, failure) 
             base_url="http://inference", workload=workload, model_id="model"
         )
     assert exc.value.partial_result is None
-    assert len(calls) == 2
+    assert len(calls) == failure_call
 
 
 def test_duration_batch_subprocess_timeout_is_clamped_to_remaining_deadline(
@@ -367,7 +373,7 @@ def test_duration_batch_subprocess_timeout_is_clamped_to_remaining_deadline(
 
     monkeypatch.setattr(subprocess, "run", run)
     workload = _workload(0, 25, 1)
-    workload["warmup"] = {"durationSeconds": 10}
+    workload["warmup"] = {"durationSeconds": 110}
     with pytest.raises(PerformanceRunOverloadError, match="warm-up failed"):
         LlmPerfRunner().run(base_url="http://inference", workload=workload, model_id="model")
     assert timeouts == [120, 20]

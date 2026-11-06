@@ -160,9 +160,9 @@ def test_performance_flow_runs_workload_end_to_end(monkeypatch, duration_warmup)
     assert payload["metrics"]["throughputTokensPerSec"] == 188.4
     assert payload["requestFailures"] == {"count": 1, "total": 20, "rate": 0.05}
     if duration_warmup:
-        assert phases == ["warmup", "warmup", "warmup", "measured"]
+        assert phases == ["warmup", "warmup", "measured"]
         assert payload["testConditions"]["warmupExecution"] == {
-            "completedRequests": 3,
+            "completedRequests": 2,
             "failedRequests": 0,
             "elapsedSeconds": 2,
         }

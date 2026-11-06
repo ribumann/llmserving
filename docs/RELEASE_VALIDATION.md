@@ -111,9 +111,9 @@ when earlier requests had warmed the model. New runs execute count-based warm-up
 separately through pinned LLMPerf with concurrency one and the same model and
 input/output profile; a failed, timed-out, or incomplete warm-up fails the run
 before measurement. Duration-based warm-up runs sequential one-request LLMPerf
-batches until the interval between the first and last successful completions
-reaches the configured duration; CLI startup between requests is included in
-that interval. When both duration and count are specified, both are minimums.
+batches until elapsed time from before the first invocation to a successful
+completion reaches the configured duration; all CLI startup time is included.
+When both duration and count are specified, both are minimums.
 The entire warm-up is bounded by the workload timeout plus the existing
 subprocess backstop; it fails if the duration or count cannot be reached in
 that time. `testConditions.warmupExecution` records observed successful and
