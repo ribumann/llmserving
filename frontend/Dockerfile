@@ -7,10 +7,12 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund --fetch-retries=2 --fetch-timeout=30000 --loglevel=http \
+    && test -x node_modules/.bin/tsc \
+    && test -x node_modules/.bin/vite
 
 COPY frontend/ ./
-RUN npx tsc --noEmit && npx vite build
+RUN ./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/vite build
 
 FROM nginx:1.27-alpine AS runtime
 

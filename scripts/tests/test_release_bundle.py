@@ -197,6 +197,20 @@ class ReleaseBundleTests(unittest.TestCase):
             self.assertIn("github.ref == 'refs/heads/main'", section)
             self.assertIn("inputs.package_release", section)
 
+    def test_frontend_build_uses_bounded_install_and_local_tools(self):
+        source = (ROOT / "frontend/Dockerfile").read_text()
+        self.assertIn("--fetch-retries=2 --fetch-timeout=30000", source)
+        self.assertIn("test -x node_modules/.bin/tsc", source)
+        self.assertIn("test -x node_modules/.bin/vite", source)
+        self.assertIn("./node_modules/.bin/tsc --noEmit", source)
+        self.assertIn("./node_modules/.bin/vite build", source)
+        self.assertNotIn("npx ", source)
+        workflow = (ROOT / ".github/workflows/runtime-ci.yml").read_text()
+        self.assertIn(
+            "timeout-minutes: ${{ matrix.image == 'frontend' && 10 || 45 }}",
+            workflow,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from threading import Lock
 from unittest.mock import MagicMock
 
 import pytest
@@ -76,9 +77,16 @@ def test_run_reports_partial_when_failures_occur() -> None:
     assert diagnostics["completenessIndicator"] == "partial"
 
 
-def test_run_clamps_concurrency_and_request_count_to_hard_limits() -> None:
+def test_run_clamps_concurrency_and_request_count_to_hard_limits(monkeypatch) -> None:
     callback = MagicMock()
-    submit = MagicMock(return_value=_fake_result(0.1))
+    recorded_submit = MagicMock(return_value=_fake_result(0.1))
+    submit_lock = Lock()
+    executor = MagicMock(side_effect=entrypoint.ThreadPoolExecutor)
+    monkeypatch.setattr(entrypoint, "ThreadPoolExecutor", executor)
+
+    def submit(*args, **kwargs):
+        with submit_lock:
+            return recorded_submit(*args, **kwargs)
 
     entrypoint.run(
         workflow_id="wf-3",
@@ -94,7 +102,8 @@ def test_run_clamps_concurrency_and_request_count_to_hard_limits() -> None:
         submit=submit,
     )
 
-    assert submit.call_count == entrypoint.HARD_MAX_REQUESTS
+    assert recorded_submit.call_count == entrypoint.HARD_MAX_REQUESTS
+    executor.assert_called_once_with(max_workers=entrypoint.HARD_MAX_CONCURRENCY)
 
 
 def test_run_raises_when_request_count_not_positive() -> None:
