@@ -207,6 +207,7 @@ PROFILE_RECORDS = [
         "provider": ProviderType.AZURE,
         "modelSizeClass": ModelSizeClass.THREE_B,
         "eligibleRegions": [
+            "italynorth",
             "polandcentral",
             "eastus2",
             "southcentralus",

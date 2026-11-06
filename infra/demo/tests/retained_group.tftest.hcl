@@ -52,13 +52,22 @@ run "managed_default" {
 run "regular_allocation" {
   command = plan
   variables {
-    vm_priority = "Regular"
-    vm_size     = "Standard_NC4as_T4_v3"
+    vm_priority     = "Regular"
+    vm_size         = "Standard_NC4as_T4_v3"
+    expected_region = "polandcentral"
   }
   assert {
     condition     = azurerm_linux_virtual_machine.demo.priority == "Regular" && azurerm_linux_virtual_machine.demo.eviction_policy == null && azurerm_linux_virtual_machine.demo.size == "Standard_NC4as_T4_v3"
     error_message = "Explicit Regular allocation must use the requested SKU without a Spot eviction policy."
   }
+}
+
+run "reject_region_mismatch" {
+  command = plan
+  variables {
+    expected_region = "italynorth"
+  }
+  expect_failures = [terraform_data.region_guard]
 }
 
 run "reject_unknown_priority" {

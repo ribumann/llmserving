@@ -24,6 +24,17 @@ data "terraform_remote_state" "shared" {
   }
 }
 
+resource "terraform_data" "region_guard" {
+  lifecycle {
+    precondition {
+      condition = var.expected_region == null ? true : (
+        lower(replace(var.expected_region, " ", "")) == lower(replace(data.terraform_remote_state.shared.outputs.location, " ", ""))
+      )
+      error_message = "The preflighted region must match the shared network location. No cross-region network is created."
+    }
+  }
+}
+
 locals {
   # Default VM SKU per size class, per research.md Section 4. An explicit var.vm_size always wins.
   default_vm_size_by_class = {
@@ -56,10 +67,11 @@ data "azurerm_resource_group" "demo" {
 }
 
 resource "azurerm_resource_group" "demo" {
-  count    = var.existing_resource_group_name == null ? 1 : 0
-  name     = local.resource_group_name
-  location = data.terraform_remote_state.shared.outputs.location
-  tags     = local.common_tags
+  depends_on = [terraform_data.region_guard]
+  count      = var.existing_resource_group_name == null ? 1 : 0
+  name       = local.resource_group_name
+  location   = data.terraform_remote_state.shared.outputs.location
+  tags       = local.common_tags
 }
 
 # No public IP, no NSG (snet-gpu's NSG is defined once in infra/shared and applies to every
@@ -67,6 +79,7 @@ resource "azurerm_resource_group" "demo" {
 # already inside vnet-llm-{stage} — Container Apps Jobs dispatch HTTP requests to port 8000
 # directly over the private network.
 resource "azurerm_network_interface" "demo" {
+  depends_on          = [terraform_data.region_guard]
   name                = "${local.name_prefix}-nic"
   resource_group_name = local.resource_group_name
   location            = data.terraform_remote_state.shared.outputs.location
@@ -80,6 +93,7 @@ resource "azurerm_network_interface" "demo" {
 }
 
 resource "azurerm_linux_virtual_machine" "demo" {
+  depends_on          = [terraform_data.region_guard]
   name                = "${local.name_prefix}-vm"
   resource_group_name = local.resource_group_name
   location            = data.terraform_remote_state.shared.outputs.location

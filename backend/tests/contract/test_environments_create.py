@@ -92,6 +92,11 @@ class FakeSession:
     "overrides,expected_sku",
     [
         ({}, "Standard_NC16as_T4_v3"),
+        ({"vmSizeOverride": None}, "Standard_NC16as_T4_v3"),
+        (
+            {"vmSizeOverride": "Standard_NC4as_T4_v3", "vmPriority": "Regular"},
+            "Standard_NC4as_T4_v3",
+        ),
         ({"vmSizeOverride": "Standard_NC24ads_A100_v4"}, "Standard_NC24ads_A100_v4"),
         ({"profileSizeClass": "large"}, "Standard_NC80adis_H100_v5"),
     ],
@@ -136,7 +141,7 @@ def test_create_environment_returns_accepted_and_binds_context(
         headers={"X-Demo-User": "presenter@example.com"},
         json={
             "profileId": "azure-single-gpu-3b",
-            "region": "westus3",
+            "region": "italynorth",
             "configurableInputs": overrides,
         },
     )
@@ -144,14 +149,16 @@ def test_create_environment_returns_accepted_and_binds_context(
     assert response.status_code == 202
     body = response.json()
     assert body["operationId"] == "op-123"
-    assert body["region"] == "westus3"
+    assert body["region"] == "italynorth"
     assert session.flushed is True
     assert session.committed is True
-    assert app.state.provider_adapter.bound_contexts[0]["region"] == "westus3"
+    assert app.state.provider_adapter.bound_contexts[0]["region"] == "italynorth"
     terraform_variables = app.state.provider_adapter.bound_contexts[0]["terraform_variables"]
     assert terraform_variables["environment_id"]
     assert terraform_variables["admin_ssh_public_key"].startswith("ssh-rsa ")
     assert terraform_variables["vm_size"] == expected_sku
+    assert terraform_variables["expected_region"] == "italynorth"
+    assert terraform_variables["vm_priority"] == overrides.get("vmPriority", "Spot")
     assert app.state.provider_adapter.preview_inputs == (overrides or None)
 
 
