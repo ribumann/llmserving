@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 import copy
 import hashlib
@@ -12,11 +14,11 @@ import validate_operator_access_plan as scope
 from azure_release_import import ReleaseImportError, command
 from validate_retained_group_plan import PlanRejected, run_saved_plan
 
-LINEAGE = "5a630028-d04a-3e1c-af96-bbd58b8434fe"
-SERIAL = 8
-STATE_SHA256 = "4496a600b605459310e5df169868204ec02894d661214b70ca421c2434054f76"
-DEADLINE = "2026-11-05T21:55:55Z"
-ROOT_SHA256 = "945b63536aebe7639cd0f879071182c15be158dba2d96bacd71eefc32a505bba"
+LINEAGE = setting("operator_lineage")
+SERIAL = int(setting("operator_serial"))
+STATE_SHA256 = f"{setting('operator_state_sha256')}"
+DEADLINE = setting("recovery_deadline")
+ROOT_SHA256 = f"{setting('operator_root_sha256')}"
 GATEWAY = "azurerm_virtual_network_gateway.operator"
 EXISTING = set(scope.RESOURCES) - {GATEWAY}
 

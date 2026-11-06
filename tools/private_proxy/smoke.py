@@ -14,9 +14,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import TestCase
 
-HOST = "llmreleasestate0ea5e6.blob.core.windows.net"
-VAULT = "llmrelease-kv-0ea5e6.vault.azure.net"
-FUNCTIONS = "llmreleasefunc6ce138.blob.core.windows.net"
+HOST = "examplestate123abc.blob.core.windows.net"
+VAULT = "llmexample-kv-123abc.vault.azure.net"
+FUNCTIONS = "examplefunc456def.blob.core.windows.net"
 
 
 def request(authority: str, method: str = "CONNECT") -> int:
@@ -163,7 +163,7 @@ def main() -> None:
                     (f"sub.{HOST}:443", "CONNECT"),
                     (f"{FUNCTIONS}.evil.example:443", "CONNECT"),
                     (f"sub.{FUNCTIONS}:443", "CONNECT"),
-                    ("llmreleasefunc6ce139.blob.core.windows.net:443", "CONNECT"),
+                    ("examplefunc456deg.blob.core.windows.net:443", "CONNECT"),
                     ("127.0.0.1:443", "CONNECT"),
                     (f"{HOST}:80", "CONNECT"),
                     (f"http://{HOST}/", "GET"),

@@ -21,7 +21,7 @@ concurrency:
 jobs:
   cleanup:
     if: >-
-      github.repository == 'ribumann/llmserving' &&
+      github.repository == vars.AZURE_OPERATOR_REPOSITORY && vars.ENABLE_AZURE_OPERATOR_WORKFLOWS == 'true' &&
       github.ref == 'refs/heads/main' &&
       vars.FALLBACK_SHARED_BRIDGE_CLEANUP_ARMED == 'true'
     runs-on: ubuntu-latest
@@ -32,6 +32,7 @@ jobs:
       actions: read
       id-token: write
     env:
+      LLM_SERVING_OPERATOR_CONFIG: ${{ secrets.LLM_SERVING_OPERATOR_CONFIG }}
       GH_TOKEN: ${{ github.token }}
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}

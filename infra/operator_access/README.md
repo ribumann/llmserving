@@ -39,10 +39,10 @@ replace DNS with public endpoint enablement, a policy exemption or an
 unreviewed hosts-file workaround. Downloading a client profile is distinct
 from permission to install software, certificates or routes on the user's OS.
 
-The separate [isolated Linux operator candidate](../../tools/private_operator/README.md)
-avoids a Windows client/certificate-store installation, but requires actual
-local Docker ownership/TUN verification and independent runtime-boundary
-review. Its CI is not evidence that the actual operator can connect.
+An isolated Linux operator environment may avoid a Windows
+client/certificate-store installation, but requires actual local Docker
+ownership/TUN verification and independent runtime-boundary review. CI is not
+evidence that the actual operator can connect.
 
 ## Required gates before execution
 
@@ -54,6 +54,8 @@ the native plan privately using the actual public certificate; never publish
 plan/state/inputs or provider diagnostics. Source/schema validation is not
 proof that VpnGw1AZ is allocatable in Italy North, a client connects, private
 DNS works, or secret/state data-plane operations succeed.
+Operator tools require the protected `LLM_SERVING_OPERATOR_CONFIG` JSON and
+its explicit frozen keys; see [`docs/OPERATOR_CONFIGURATION.md`](../../docs/OPERATOR_CONFIGURATION.md).
 
 A genuine acceptance must connect the operator client, verify private
 resolution and TLS of the exact state/vault FQDNs, perform separately scoped
@@ -63,7 +65,8 @@ locking recovery or restore proof.
 
 ## Guarded initial local execution
 
-After review/CI, shared29 completion and the actual native seven-create check,
+After review/CI, approved shared-infrastructure completion and the actual
+native seven-create check,
 arm the independent protected-main cleanup with **the same** public root
 fingerprint and a fixed deadline no later than the already-armed shared
 deadline. Set repository variables `OPERATOR_ACCESS_CLEANUP_ARMED=true`,
@@ -116,7 +119,7 @@ this is not policy exemption or public-IP tag removal.
 
 ## Cost and teardown budget
 
-The actual 2026-11-05 ARM create rejected non-AZ `VpnGw1` with
+An earlier ARM create rejected non-AZ `VpnGw1` with
 `NonAzSkusNotAllowedForVPNGateway`; this module now requests `VpnGw1AZ`,
 without changing the seven resource addresses or replacing the existing PIP.
 The coordinator's official Azure Retail Prices API read on that date returned
@@ -147,18 +150,20 @@ local OS authorization.
 
 ## Exact partial operator recovery
 
-The failed non-AZ create retained six resources in canonical serial8,
-lineage `5a630028-d04a-3e1c-af96-bbd58b8434fe`, SHA256
-`4496a600b605459310e5df169868204ec02894d661214b70ca421c2434054f76`.
-Only the absent gateway may be created as `VpnGw1AZ`; all six existing
+The failed non-AZ create retained six resources in the canonical local state.
+The exact preserved snapshot, its lineage and its checksum are private
+operator inputs and must be independently verified; do not copy them into
+public documentation. Only the absent gateway may be created as `VpnGw1AZ`;
+all six existing
 resources must remain exact known NOOPs. Only native null-to-empty refresh of
 PIP `zones` and the two subnets' `service_endpoints`/
 `service_endpoint_policy_ids`, plus their corresponding newly empty sensitivity
 arrays, is allowed. Each change must bind canonical before/native prior after
 values and exact drift evidence; all other values and metadata must match.
 This is not a
-general retry mechanism. The approved public root and `2026-11-05T21:55:55Z`
-deadline cannot change. Retain the verified failed-apply checkpoints.
+general retry mechanism. The approved public root and fixed cleanup deadline
+cannot change. Supply the actual deadline only through the protected operator
+configuration; retain the verified failed-apply checkpoints.
 
 From the canonical restricted operator directory, generate a fresh full
 native plan after updating only the gateway SKU. First run the read-only gate:
@@ -171,10 +176,12 @@ python <reviewed-source>/scripts/validate_operator_reconcile.py \
 
 Only after independent review, required exact-head checks, normal merge and
 fresh successful cleanup arming, run the existing `azure_operator_apply.py`
-command with the additional flag `--recover-serial8`. It rechecks the exact
-snapshot immediately before execution, requires the live owned six-resource
-inventory with no gateway, and retains verified before/after checkpoints even
-on failure. Initial execution without this flag still rejects any existing
+command with only the separately reviewed recovery option and private snapshot
+identity. The exact option/snapshot values are operator inputs and are not
+published here. The wrapper rechecks the exact snapshot immediately before
+execution, requires the live owned six-resource inventory with no gateway,
+and retains verified before/after checkpoints even on failure. Initial
+execution without the approved recovery option still rejects any existing
 state/resources. No automatic retry follows another failure. After successful
 completion, a refreshed full Terraform plan must be NOOP before VPN acceptance.
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 import copy
 import hashlib
@@ -12,10 +14,10 @@ import validate_shared_plan as scope
 from azure_release_import import ReleaseImportError, command
 from validate_retained_group_plan import PlanRejected, run_saved_plan
 
-LINEAGE = "c5fe615f-a6a1-0d7b-eff8-b17acb8252b2"
-SERIAL = 29
-STATE_SHA256 = "9ac867489cc393609edc99b2296bb6e3f69633c5d7b6befadb9fe4813c8b48b9"
-DEADLINE = "2026-11-05T21:55:55Z"
+LINEAGE = setting("shared_lineage")
+SERIAL = int(setting("shared_serial"))
+STATE_SHA256 = f"{setting('shared_state_sha256')}"
+DEADLINE = setting("recovery_deadline")
 CREATES = {
     "azurerm_public_ip.nat",
     "azurerm_nat_gateway_public_ip_association.shared",

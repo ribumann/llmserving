@@ -36,6 +36,7 @@ with the current in-process runners is established.
 - [`docs/PROVIDERS.md`](docs/PROVIDERS.md) - implemented Azure/local capabilities and explicit, non-blocking AWS/GCP limitations
 - [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) - signed cloud authentication and exact external SSO prerequisites
 - [`docs/AZURE.md`](docs/AZURE.md) - isolated bootstrap gates, deployment manifest and known reproducibility gaps
+- [`docs/OPERATOR_CONFIGURATION.md`](docs/OPERATOR_CONFIGURATION.md) - private exact-target inputs and disabled-by-default operator workflow templates
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) - readiness, power/quota/VRAM, costs, rollback and safe cleanup
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md) - contribution gates and security boundaries
 

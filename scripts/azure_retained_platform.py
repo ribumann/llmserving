@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 from azure_release_import import ReleaseImportError, az
 from validate_shared_plan import REGION, ROOT, TAGS, equal
 
-ACCOUNT = f"{ROOT}/providers/Microsoft.Storage/storageAccounts/llmreleasestate0ea5e6"
-NAME = "llmreleasestate0ea5e6-e8ee3cde-435b-41d3-bd0b-ec07e5d98c99"
+ACCOUNT = f"{ROOT}/providers/Microsoft.Storage/storageAccounts/{setting('state_account')}"
+NAME = setting("storage_topic_name")
 TOPIC = f"{ROOT}/providers/Microsoft.EventGrid/systemTopics/{NAME}"
 SUBSCRIPTION = f"{TOPIC}/eventSubscriptions/StorageAntimalwareSubscription"
 EXTERNAL_NSGS = {
     f"{ROOT}/providers/Microsoft.Network/networkSecurityGroups/"
-    f"llmrelease-shared-vnet-snet-{name}-nsg-italynorth": f"{ROOT}/providers/Microsoft.Network/virtualNetworks/"
-    f"llmrelease-shared-vnet/subnets/snet-{name}"
+    f"{setting('resource_prefix')}-shared-vnet-snet-{name}-nsg-{setting('region')}": f"{ROOT}/providers/Microsoft.Network/virtualNetworks/"
+    f"{setting('resource_prefix')}-shared-vnet/subnets/snet-{name}"
     for name in (
         "private-endpoints",
         "functions",
@@ -74,7 +76,7 @@ def preserve_external_nsg(record: dict) -> bool:
     ):
         raise ReleaseImportError("External NSG default rule identities differ.")
     if identifier != next(
-        item for item in EXTERNAL_NSGS if item.endswith("-containerapps-nsg-italynorth")
+        item for item in EXTERNAL_NSGS if item.endswith(f"-containerapps-nsg-{setting('region')}")
     ):
         if subnets not in (None, []):
             raise ReleaseImportError("External NSG must remain exactly unattached.")

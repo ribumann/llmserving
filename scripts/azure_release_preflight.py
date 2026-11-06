@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 import json
 import os
@@ -13,16 +15,16 @@ from fnmatch import fnmatchcase
 from azure_canary import FALLBACK_TARGET
 
 WORKFLOW = ".github/workflows/azure-fallback-preflight.yml"
-REGION = "italynorth"
+REGION = setting("region")
 SKU = "Standard_NC4as_T4_v3"
 GROUPS = {
-    "shared": "rg-llmserving-e2e-shared",
-    "control": "rg-llmserving-e2e-control",
-    "demo": "rg-llmserving-e2e-demo",
-    "canary": "rg-llmserving-e2e-canary",
+    "shared": setting("shared_group"),
+    "control": setting("control_group"),
+    "demo": setting("demo_group"),
+    "canary": setting("canary_group"),
 }
-INFRASTRUCTURE_GROUP = "rg-llmserving-e2e-aca-infra"
-SSO_CLIENT = "962740a1-be3e-454f-87c3-537ed1f02b78"
+INFRASTRUCTURE_GROUP = setting("infrastructure_group")
+SSO_CLIENT = setting("sso_client_id")
 SUBSCRIPTION_SCOPE = f"/subscriptions/{FALLBACK_TARGET.subscription}"
 PERMISSION_SCOPES = {
     alias: f"{SUBSCRIPTION_SCOPE}/resourceGroups/{name}"
@@ -60,10 +62,10 @@ def validate_config() -> None:
         "AZURE_SUBSCRIPTION_ID": FALLBACK_TARGET.subscription,
         "AZURE_TENANT_ID": FALLBACK_TARGET.tenant,
         "AZURE_CLIENT_ID": FALLBACK_TARGET.client,
-        "GITHUB_REPOSITORY": "ribumann/llmserving",
+        "GITHUB_REPOSITORY": setting("repository"),
         "GITHUB_REF": "refs/heads/main",
         "GITHUB_EVENT_NAME": "workflow_dispatch",
-        "GITHUB_WORKFLOW_REF": f"ribumann/llmserving/{WORKFLOW}@refs/heads/main",
+        "GITHUB_WORKFLOW_REF": f"{setting('repository')}/{WORKFLOW}@refs/heads/main",
     }
     if any(os.environ.get(key) != value for key, value in expected.items()):
         raise PreflightError("Protected read-only preflight configuration mismatch.")

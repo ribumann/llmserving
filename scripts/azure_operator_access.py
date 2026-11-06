@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 import os
 import re
@@ -23,14 +25,8 @@ ORDER = [
     "azurerm_subnet.gateway",
     "azurerm_public_ip.gateway",
 ]
-DNS_RESOURCE_GUID = "107f8f10-ce45-4963-9ec1-21583c343330"
-DNS_PLATFORM_IPCONFIG = (
-    "/subscriptions/9c188967-bc2c-4050-ad92-dd4cad989545"
-    "/resourceGroups/rg-prod-italynorth-main-endpoints"
-    "/providers/Microsoft.Network/loadBalancers"
-    "/lbi-prod-italynorth-main-ept-107f8f10ce4549639ec121583c343330"
-    "/frontendIPConfigurations/frontend-ipconfig"
-)
+DNS_RESOURCE_GUID = setting("dns_resource_guid")
+DNS_PLATFORM_IPCONFIG = setting("dns_platform_ipconfig")
 
 
 def resolver_platform_attachments(details: dict, expected_tags: dict) -> bool:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -18,15 +20,15 @@ import zipfile
 
 from release_bundle import IMAGES, file_hash
 
-SUBSCRIPTION = "86677b6e-28fc-48e4-8988-5ab9e568eece"
-TENANT = "ecd6dfda-d2ce-47a8-9901-e35f31fe18dd"
-CLIENT = "962740a1-be3e-454f-87c3-537ed1f02b78"
-APP_OBJECT_ID = "7bde2219-78f9-4d81-9707-38646a3775bb"
+SUBSCRIPTION = setting("subscription_id")
+TENANT = setting("tenant_id")
+CLIENT = setting("sso_client_id")
+APP_OBJECT_ID = setting("sso_object_id")
 ROOT = f"/subscriptions/{SUBSCRIPTION}/resourceGroups/"
-SHARED = ROOT + "rg-llmserving-e2e-shared"
+SHARED = ROOT + setting("shared_group")
 ENVIRONMENT = (
-    ROOT + "rg-llmserving-e2e-control"
-    "/providers/Microsoft.App/managedEnvironments/llmrelease-cae"
+    ROOT + f"{setting('control_group')}"
+    f"/providers/Microsoft.App/managedEnvironments/{setting('resource_prefix')}-cae"
 )
 APP_PATH = f"/v1.0/applications/{APP_OBJECT_ID}"
 SECRET_NAME = "sso-client-secret"
@@ -179,7 +181,7 @@ def preview(contract: dict, *, callbacks: bool = True) -> dict:
             "The CAE must supply its real Azure default domain.",
         )
         redirects = [
-            f"https://llmrelease-{name}.{domain}/.auth/login/aad/callback"
+            f"https://{setting('resource_prefix')}-{name}.{domain}/.auth/login/aad/callback"
             for name in ("frontend", "backend")
         ]
     registry = contract["acr_login_server"].removesuffix(".azurecr.io")

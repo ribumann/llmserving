@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from scripts.tests import operator_fixture  # noqa: F401
+
 import copy
 import os
 import subprocess
@@ -15,11 +17,12 @@ class CanaryTests(unittest.TestCase):
     def setUp(self):
         target = canary.TARGETS[self.target_name]
         self.environment = {
-            "AZURE_SUBSCRIPTION_ID": target.subscription or "test-subscription",
-            "AZURE_TENANT_ID": target.tenant or "test-tenant",
+            "AZURE_SUBSCRIPTION_ID": operator_fixture.CONFIG["subscription_id"],
+            "AZURE_TENANT_ID": operator_fixture.CONFIG["tenant_id"],
+            "AZURE_CLIENT_ID": operator_fixture.CONFIG["deployment_client_id"],
             "AZURE_CANARY_REGION": "polandcentral",
             "AZURE_CANARY_RESOURCE_GROUP": target.resource_group,
-            "GITHUB_REPOSITORY": "ribumann/llmserving",
+            "GITHUB_REPOSITORY": "example/llmserving",
             "GITHUB_REF": "refs/heads/main",
             "GITHUB_EVENT_NAME": "workflow_dispatch",
             "GITHUB_RUN_ID": "123",
@@ -30,7 +33,7 @@ class CanaryTests(unittest.TestCase):
             self.environment.update(
                 AZURE_CLIENT_ID=target.client,
                 GITHUB_WORKFLOW_REF=(
-                    f"ribumann/llmserving/{target.cleanup_workflow_path}@refs/heads/main"
+                    f"example/llmserving/{target.cleanup_workflow_path}@refs/heads/main"
                 ),
             )
         self.env_patch = patch.dict(os.environ, self.environment, clear=True)
@@ -40,7 +43,10 @@ class CanaryTests(unittest.TestCase):
         self.account = {
             "id": self.context.subscription,
             "tenantId": self.context.tenant,
-            "user": {"name": target.client, "type": "servicePrincipal"},
+            "user": {
+                "name": operator_fixture.CONFIG["deployment_client_id"],
+                "type": "servicePrincipal",
+            },
         }
         self.group = {
             "id": f"/subscriptions/{self.context.subscription}/resourceGroups/{target.resource_group}",
@@ -51,7 +57,7 @@ class CanaryTests(unittest.TestCase):
         self.tags = {
             **target.identity_tags,
             "purpose": canary.PURPOSE,
-            "repository": "ribumann/llmserving",
+            "repository": "example/llmserving",
             "runId": "123",
             "runAttempt": "1",
             "sourceSha": "a" * 40,
@@ -65,8 +71,8 @@ class CanaryTests(unittest.TestCase):
         }
         self.identity = copy.deepcopy(self.owned_identity)
         self.run = {
-            "repository": {"full_name": "ribumann/llmserving"},
-            "head_repository": {"full_name": "ribumann/llmserving"},
+            "repository": {"full_name": "example/llmserving"},
+            "head_repository": {"full_name": "example/llmserving"},
             "path": target.workflow_path,
             "event": "workflow_dispatch",
             "head_branch": "main",
@@ -125,7 +131,7 @@ class CanaryTests(unittest.TestCase):
     def select_create_workflow(self):
         if self.context.target.cleanup_workflow_path:
             os.environ["GITHUB_WORKFLOW_REF"] = (
-                f"ribumann/llmserving/{self.context.target.workflow_path}@refs/heads/main"
+                f"example/llmserving/{self.context.target.workflow_path}@refs/heads/main"
             )
 
     def test_create_and_verify(self):
@@ -275,8 +281,8 @@ class FallbackCanaryTests(CanaryTests):
     target_name = "fallback"
 
     def test_release_campaign_does_not_replace_workflow_ownership(self):
-        self.assertEqual(self.group["tags"]["runId"], "public-release-20261105")
-        self.assertEqual(self.group["tags"]["expiresOn"], "2026-12-05")
+        self.assertEqual(self.group["tags"]["runId"], "example-release")
+        self.assertEqual(self.group["tags"]["expiresOn"], "2030-01-01")
         self.assertEqual(self.tags["releaseRunId"], self.group["tags"]["runId"])
         self.assertEqual(self.tags["runId"], "123")
         self.assertEqual(self.tags["expiresOn"], self.group["tags"]["expiresOn"])
@@ -302,10 +308,10 @@ class FallbackCanaryTests(CanaryTests):
             ("AZURE_CLIENT_ID", "other-client"),
             ("AZURE_CANARY_REGION", "other-region"),
             ("AZURE_CANARY_RESOURCE_GROUP", canary.RESOURCE_GROUP),
-            ("GITHUB_WORKFLOW_REF", "ribumann/llmserving/unknown.yml@refs/heads/main"),
+            ("GITHUB_WORKFLOW_REF", "example/llmserving/unknown.yml@refs/heads/main"),
             (
                 "GITHUB_WORKFLOW_REF",
-                f"ribumann/llmserving/{canary.FALLBACK_TARGET.workflow_path}@refs/heads/feature",
+                f"example/llmserving/{canary.FALLBACK_TARGET.workflow_path}@refs/heads/feature",
             ),
         ]:
             with self.subTest(key=key, value=value), patch.dict(

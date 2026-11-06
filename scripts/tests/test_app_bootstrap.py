@@ -1,3 +1,4 @@
+from scripts.tests import operator_fixture  # noqa: F401
 import copy
 import hashlib
 import http.server
@@ -95,8 +96,8 @@ class BootstrapTests(unittest.TestCase):
             },
             "functions_zip": "functions.zip",
             "functions_sha256": hashlib.sha256(package.read_bytes()).hexdigest(),
-            "allowed_email_domains": ["liberatetheinnerchild.net"],
-            "operator_upn": "synthetic@liberatetheinnerchild.net",
+            "allowed_email_domains": ["operators.example.test"],
+            "operator_upn": "synthetic@operators.example.test",
         }
 
     def load(self):
@@ -132,7 +133,7 @@ class BootstrapTests(unittest.TestCase):
         azure.assert_not_called()
         self.assertEqual(len([key for key in values if key.endswith("_image")]), 7)
         self.assertTrue(values["enable_sso"])
-        self.assertEqual(values["auth_allowed_email_domains"], "liberatetheinnerchild.net")
+        self.assertEqual(values["auth_allowed_email_domains"], "operators.example.test")
         self.assertEqual(values["existing_sso_client_id"], bootstrap.CLIENT)
         self.assertEqual(values["functions_package_sha256"], contract["functions_sha256"])
         self.assertTrue(values["manage_database_url_secret"])
@@ -143,8 +144,8 @@ class BootstrapTests(unittest.TestCase):
         original = copy.deepcopy(self.contract)
         for field, value in [
             ("allowed_email_domains", ["example.com"]),
-            ("allowed_email_domains", ["*.liberatetheinnerchild.net"]),
-            ("allowed_email_domains", ["evilliberatetheinnerchild.net"]),
+            ("allowed_email_domains", ["*.operators.example.test"]),
+            ("allowed_email_domains", ["eviloperators.example.test"]),
             ("allowed_email_domains", []),
             ("allowed_email_domains", [True]),
             ("allowed_email_domains", ["foreign.example"]),
@@ -187,7 +188,7 @@ class BootstrapTests(unittest.TestCase):
         with patch.object(bootstrap, "az_json", side_effect=self.responses()) as azure:
             plan = bootstrap.preview(contract)
         self.assertEqual(plan["callbacks"], [
-            f"https://llmrelease-{name}.synthetic.italynorth.azurecontainerapps.io/.auth/login/aad/callback"
+            f"https://llmexample-{name}.synthetic.italynorth.azurecontainerapps.io/.auth/login/aad/callback"
             for name in ("frontend", "backend")
         ])
         for call in azure.call_args_list[1:]:
@@ -205,7 +206,7 @@ class BootstrapTests(unittest.TestCase):
     def test_preview_blocks_wrong_scope_or_reused_application(self):
         mutations = [
             (0, "tenantId", "foreign"),
-            (1, "id", bootstrap.ENVIRONMENT.replace("llmrelease", "production")),
+            (1, "id", bootstrap.ENVIRONMENT.replace("llmexample", "production")),
             (1, "properties", {"provisioningState": "Creating"}),
             (2, "properties", {"loginServer": "foreign.azurecr.io"}),
             (3, "properties", {**self.responses()[3]["properties"], "publicNetworkAccess": "Enabled"}),
@@ -234,10 +235,10 @@ class BootstrapTests(unittest.TestCase):
         self.assertFalse(any("managedEnvironments" in str(call) for call in azure.call_args_list))
 
     def test_actual_operator_domain_is_explicit_and_accepted(self):
-        self.contract["allowed_email_domains"] = ["mngenvmcap621318.onmicrosoft.com"]
-        self.contract["operator_upn"] = "admin@MngEnvMCAP621318.onmicrosoft.com"
+        self.contract["allowed_email_domains"] = ["operators.example.test"]
+        self.contract["operator_upn"] = "operator@operators.example.test"
         self.assertEqual(bootstrap.control_inputs(self.load())["auth_allowed_email_domains"],
-                         "mngenvmcap621318.onmicrosoft.com")
+                         "operators.example.test")
 
     def test_callback_patch_is_exact_and_preserves_access_token_setting(self):
         plan = {"callbacks": ["https://synthetic/callback"],

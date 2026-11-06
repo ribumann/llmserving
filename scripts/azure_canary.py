@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 import json
 import os
@@ -10,7 +12,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-RESOURCE_GROUP = "rg-llm-cleanup-canary-oss-e2e"
+RESOURCE_GROUP = setting("primary_canary_group")
 IDENTITY_NAME = "id-llm-oidc-cleanup-canary"
 IDENTITY_TYPE = "Microsoft.ManagedIdentity/userAssignedIdentities"
 WORKFLOW_PATH = ".github/workflows/azure-oidc-canary.yml"
@@ -37,9 +39,9 @@ class Target:
             **GROUP_TAGS,
             **(
                 {
-                    "target": "personal-fallback-e2e",
-                    "expiresOn": "2026-12-05",
-                    "runId": "public-release-20261105",
+                    "target": setting("target_tag"),
+                    "expiresOn": setting("expires_on"),
+                    "runId": setting("campaign_tag"),
                 }
                 if self.subscription is not None
                 else {}
@@ -57,13 +59,13 @@ class Target:
 
 PRIMARY_TARGET = Target(RESOURCE_GROUP, WORKFLOW_PATH)
 FALLBACK_TARGET = Target(
-    "rg-llmserving-e2e-canary",
+    setting("canary_group"),
     ".github/workflows/azure-fallback-oidc-canary.yml",
     ".github/workflows/azure-fallback-canary-cleanup.yml",
-    "86677b6e-28fc-48e4-8988-5ab9e568eece",
-    "ecd6dfda-d2ce-47a8-9901-e35f31fe18dd",
-    "ca40afa3-e0aa-487a-8dc3-1a19d8015f09",
-    "polandcentral",
+    setting("subscription_id"),
+    setting("tenant_id"),
+    setting("deployment_client_id"),
+    setting("canary_region"),
 )
 TARGETS = {"primary": PRIMARY_TARGET, "fallback": FALLBACK_TARGET}
 
@@ -109,8 +111,16 @@ class Context:
             )
         if os.environ.get("GITHUB_REF") != "refs/heads/main":
             raise CanaryError("Only protected main may operate this canary.")
-        if os.environ["GITHUB_REPOSITORY"] != "ribumann/llmserving":
+        if os.environ["GITHUB_REPOSITORY"] != setting("repository"):
             raise CanaryError("Unexpected canary repository.")
+        expected_identity = {
+            "AZURE_SUBSCRIPTION_ID": setting("subscription_id"),
+            "AZURE_TENANT_ID": setting("tenant_id"),
+            "AZURE_CLIENT_ID": setting("deployment_client_id"),
+            "AZURE_CANARY_REGION": setting("canary_region"),
+        }
+        if any(os.environ.get(key) != value for key, value in expected_identity.items()):
+            raise CanaryError("Canary identity differs from the reviewed operator target.")
         if target.subscription is not None:
             expected = {
                 "AZURE_SUBSCRIPTION_ID": target.subscription,
@@ -123,7 +133,7 @@ class Context:
                     "Protected fallback configuration does not match the fixed target."
                 )
             refs = {
-                f"ribumann/llmserving/{path}@refs/heads/main"
+                f"{setting('repository')}/{path}@refs/heads/main"
                 for path in (target.workflow_path, target.cleanup_workflow_path)
             }
             if os.environ.get("GITHUB_WORKFLOW_REF") not in refs:
@@ -171,9 +181,9 @@ class Context:
             raise CanaryError(
                 "Azure account does not match the protected subscription and tenant."
             )
-        if self.target.client is not None and (
+        if (
             account.get("user", {}).get("type") != "servicePrincipal"
-            or account.get("user", {}).get("name") != self.target.client
+            or account.get("user", {}).get("name") != setting("deployment_client_id")
         ):
             raise CanaryError(
                 "Azure login principal does not match the fixed fallback identity."

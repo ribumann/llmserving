@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 import hashlib
 import json
@@ -19,7 +21,7 @@ IMAGES = (
     "export_worker",
 )
 COMPONENTS = (*IMAGES, "functions")
-REPOSITORY = "ribumann/llmserving"
+REPOSITORY = setting("repository")
 
 
 def context() -> dict:

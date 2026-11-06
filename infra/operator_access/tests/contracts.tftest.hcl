@@ -1,33 +1,44 @@
 mock_provider "azurerm" {
   mock_data "azurerm_client_config" {
     defaults = {
-      subscription_id = "86677b6e-28fc-48e4-8988-5ab9e568eece"
-      tenant_id       = "ecd6dfda-d2ce-47a8-9901-e35f31fe18dd"
+      subscription_id = "11111111-1111-4111-8111-111111111111"
+      tenant_id       = "22222222-2222-4222-8222-222222222222"
     }
   }
   mock_data "azurerm_virtual_network" {
     defaults = {
-      name = "llmrelease-shared-vnet"
-      id   = "/subscriptions/86677b6e-28fc-48e4-8988-5ab9e568eece/resourceGroups/rg-llmserving-e2e-shared/providers/Microsoft.Network/virtualNetworks/llmrelease-shared-vnet"
+      name = "llmexample-shared-vnet"
+      id   = "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-example-shared/providers/Microsoft.Network/virtualNetworks/llmexample-shared-vnet"
     }
   }
   mock_data "azurerm_subnet" {
     defaults = {
-      id = "/subscriptions/86677b6e-28fc-48e4-8988-5ab9e568eece/resourceGroups/rg-llmserving-e2e-shared/providers/Microsoft.Network/virtualNetworks/llmrelease-shared-vnet/subnets/snet-private-endpoints"
+      id = "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-example-shared/providers/Microsoft.Network/virtualNetworks/llmexample-shared-vnet/subnets/snet-private-endpoints"
     }
   }
   mock_data "azurerm_private_dns_zone" {
     defaults = {
-      id = "/subscriptions/86677b6e-28fc-48e4-8988-5ab9e568eece/resourceGroups/rg-llmserving-e2e-shared/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"
+      id = "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-example-shared/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"
     }
   }
 }
 
 variables {
-  subscription_id              = "86677b6e-28fc-48e4-8988-5ab9e568eece"
+  existing_resource_group_name = "rg-example-shared"
+  operator_target = {
+    subscription_id     = "11111111-1111-4111-8111-111111111111"
+    resource_group_name = "rg-example-shared"
+    resource_prefix     = "llmexample"
+    state_account       = "examplestate123abc"
+    region              = "italynorth"
+    target_tag          = "example-isolated-e2e"
+    campaign_tag        = "example-release"
+    expires_on          = "2030-01-01"
+  }
+  subscription_id              = "11111111-1111-4111-8111-111111111111"
   root_certificate_public_data = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB"
   root_certificate_sha256      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  expires_at                   = "2026-11-05T20:00:00Z"
+  expires_at                   = "2030-01-01T00:00:00Z"
 }
 
 run "private_operator_scope" {

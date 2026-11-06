@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from scripts.tests import operator_fixture  # noqa: F401
+
 import copy
 import importlib.util
 import json
@@ -27,7 +29,7 @@ class ReleaseBundleTests(unittest.TestCase):
         self.archives.mkdir()
         self.records.mkdir()
         self.environment = {
-            "GITHUB_REPOSITORY": "ribumann/llmserving",
+            "GITHUB_REPOSITORY": "example/llmserving",
             "GITHUB_REF": "refs/heads/main",
             "GITHUB_EVENT_NAME": "workflow_dispatch",
             "GITHUB_SHA": "a" * 40,

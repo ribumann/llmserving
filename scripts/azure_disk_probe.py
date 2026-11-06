@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 import json
 import os
@@ -14,12 +16,12 @@ from urllib.request import urlopen
 
 from azure_canary import FALLBACK_TARGET
 
-GROUP = "rg-llmserving-e2e-demo"
+GROUP = setting("demo_group")
 DISK = "disk-llmserving-release-cleanup-probe"
-REGION = "italynorth"
+REGION = setting("region")
 CREATE_WORKFLOW = ".github/workflows/azure-fallback-disk-probe.yml"
 CLEANUP_WORKFLOW = ".github/workflows/azure-fallback-disk-cleanup.yml"
-REPOSITORY = "ribumann/llmserving"
+REPOSITORY = setting("repository")
 MAX_MONTHLY_USD = 10
 
 
@@ -203,8 +205,9 @@ def mask_subject() -> None:
     owner_id = os.environ.get("GITHUB_REPOSITORY_OWNER_ID", "")
     repo_id = os.environ.get("GITHUB_REPOSITORY_ID", "")
     if owner_id.isdecimal() and repo_id.isdecimal():
+        owner, repository = REPOSITORY.split("/")
         print(
-            f"::add-mask::repo:ribumann@{owner_id}/llmserving@{repo_id}"
+            f"::add-mask::repo:{owner}@{owner_id}/{repository}@{repo_id}"
             ":environment:azure-e2e-fallback"
         )
 

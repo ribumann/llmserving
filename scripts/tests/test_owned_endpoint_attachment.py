@@ -1,3 +1,4 @@
+from scripts.tests import operator_fixture  # noqa: F401
 import sys
 import unittest
 from pathlib import Path
@@ -11,8 +12,8 @@ class OwnedEndpointAttachmentTests(unittest.TestCase):
     def fixture(self):
         subnet = bridge.scope.RESOURCES["azurerm_subnet.private_endpoints"]["id"]
         endpoint = bridge.scope.RESOURCES["azurerm_private_endpoint.vault"]["id"]
-        nic = f"{bridge.scope.ROOT}/providers/Microsoft.Network/networkInterfaces/llmrelease-vault-pe.nic.2e3ebfb3-4c17-457c-afb8-882a9cdb1753"
-        ipconfig = f"{nic}/ipConfigurations/privateendpointipconfig.e04a600a-ca43-4e7a-9a26-9d5bdbbdedee"
+        nic = f"{bridge.scope.ROOT}/providers/Microsoft.Network/networkInterfaces/llmexample-vault-pe.nic.99999999-1111-4111-8111-111111111111"
+        ipconfig = f"{nic}/ipConfigurations/privateendpointipconfig.99999999-2222-4222-8222-222222222222"
         records = {
             "azurerm_subnet.private_endpoints": {
                 "properties": {

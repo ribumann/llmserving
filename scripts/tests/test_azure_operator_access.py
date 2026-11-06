@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from scripts.tests import operator_fixture  # noqa: F401
+
 import os
 import sys
 import unittest
@@ -133,7 +135,7 @@ class OperatorCleanupTests(unittest.TestCase):
             finally:
                 self.assertEqual(mutate.call_count, 1)
                 self.assertIn(
-                    "virtualNetworkGateways/llmrelease-operator-vpn",
+                    "virtualNetworkGateways/llmexample-operator-vpn",
                     mutate.call_args.args[-1],
                 )
 

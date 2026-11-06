@@ -27,17 +27,17 @@ does not silently retarget it. Configure these identifiers as same-named
 | `AZURE_CLIENT_ID` | User-assigned login identity with environment-scoped federation |
 | `AZURE_TENANT_ID` | Expected tenant |
 | `AZURE_SUBSCRIPTION_ID` | Exact authorized test subscription |
-| `AZURE_CANARY_RESOURCE_GROUP` | `rg-llmserving-e2e-canary` |
-| `AZURE_CANARY_REGION` | `polandcentral` |
+| `AZURE_CANARY_RESOURCE_GROUP` | `<operator-approved-empty-canary-resource-group>` |
+| `AZURE_CANARY_REGION` | `<operator-approved-region>` |
 
 Federation must trust only the repository's exact observed
 `environment:azure-e2e-fallback` subject, including immutable owner/repository
 IDs where configured, with the approved issuer/audience.
 The login identity requires Contributor only on that pre-existing canary group;
 the workflow does not grant itself permissions. Group tags must be exactly
-`project=llmserving-public-validation`, `managedBy=copilot-release` and
-`target=personal-fallback-e2e`, plus the approved campaign
-`runId=public-release-20261105` and `expiresOn=2026-12-05`.
+the operator-approved project, manager and target values, plus an
+operator-approved run identifier and expiry date. Use the exact values from
+protected operator configuration; do not publish live campaign tag values.
 The fixed canary copies campaign ownership as `releaseRunId`; its own `runId`
 remains the numeric owning GitHub workflow run. Group tags are never changed.
 Secret-backed identifiers are masked from the first runner environment header,
@@ -77,12 +77,10 @@ interpreted as resource absence.
 
 ## Scope and limitations
 
-The fallback exercises have not yet been recorded here. Do not describe a
-reviewed workflow, successful CI or historical primary exchange as new-target
-OIDC/cleanup proof. The operator also reported T4-family quota zero and a
-subscription SKU restriction in Poland Central; generic NC-family quota does
-not establish T4 availability. No quota request, region change or GPU allocation
-is authorized by this canary.
+Do not treat the historical primary-target exchange as new-target
+OIDC/cleanup proof; until separate fallback exercises are recorded, they
+remain unproven. Generic NC-family quota does not establish T4 availability.
+No quota request, region change or GPU allocation is authorized by this canary.
 
 Passing these exercises proves OIDC and cleanup of **this identity only**.
 It does not prove Graph consent, application authentication, GPU availability,

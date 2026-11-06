@@ -1,12 +1,12 @@
 locals {
   group    = var.existing_resource_group_name
-  location = "italynorth"
+  location = var.operator_target.region
   tags = {
     project         = "llmserving-public-validation"
     managedBy       = "copilot-release"
-    target          = "personal-fallback-e2e"
-    runId           = "public-release-20261105"
-    expiresOn       = "2026-12-05"
+    target          = var.operator_target.target_tag
+    runId           = var.operator_target.campaign_tag
+    expiresOn       = var.operator_target.expires_on
     feature         = "azure-llm-serving-demo"
     component       = "operator-access"
     stage           = "release"
@@ -22,7 +22,7 @@ data "azurerm_resource_group" "shared" {
 data "azurerm_client_config" "current" {}
 
 data "azurerm_virtual_network" "shared" {
-  name                = "llmrelease-shared-vnet"
+  name                = "${var.operator_target.resource_prefix}-shared-vnet"
   resource_group_name = local.group
 }
 
@@ -46,7 +46,7 @@ resource "azurerm_subnet" "gateway" {
 }
 
 resource "azurerm_public_ip" "gateway" {
-  name                = "llmrelease-operator-vpn-pip"
+  name                = "${var.operator_target.resource_prefix}-operator-vpn-pip"
   resource_group_name = local.group
   location            = local.location
   allocation_method   = "Static"
@@ -58,7 +58,7 @@ resource "azurerm_public_ip" "gateway" {
 }
 
 resource "azurerm_private_dns_resolver" "operator" {
-  name                = "llmrelease-operator-dns"
+  name                = "${var.operator_target.resource_prefix}-operator-dns"
   resource_group_name = local.group
   location            = local.location
   virtual_network_id  = data.azurerm_virtual_network.shared.id
@@ -81,7 +81,7 @@ resource "azurerm_subnet" "dns" {
 }
 
 resource "azurerm_private_dns_resolver_inbound_endpoint" "operator" {
-  name                    = "llmrelease-operator-dns-inbound"
+  name                    = "${var.operator_target.resource_prefix}-operator-dns-inbound"
   private_dns_resolver_id = azurerm_private_dns_resolver.operator.id
   location                = local.location
   ip_configurations {
@@ -93,7 +93,7 @@ resource "azurerm_private_dns_resolver_inbound_endpoint" "operator" {
 }
 
 resource "azurerm_virtual_network_gateway" "operator" {
-  name                = "llmrelease-operator-vpn"
+  name                = "${var.operator_target.resource_prefix}-operator-vpn"
   resource_group_name = local.group
   location            = local.location
   type                = "Vpn"
@@ -115,21 +115,21 @@ resource "azurerm_virtual_network_gateway" "operator" {
     vpn_client_protocols = ["OpenVPN"]
     vpn_auth_types       = ["Certificate"]
     root_certificate {
-      name             = "llmrelease-operator-root"
+      name             = "${var.operator_target.resource_prefix}-operator-root"
       public_cert_data = var.root_certificate_public_data
     }
   }
 }
 
 resource "azurerm_private_endpoint" "state" {
-  name                = "llmrelease-state-pe"
+  name                = "${var.operator_target.resource_prefix}-state-pe"
   resource_group_name = local.group
   location            = local.location
   subnet_id           = data.azurerm_subnet.endpoints.id
   tags                = local.tags
   private_service_connection {
-    name                           = "llmrelease-state-blob"
-    private_connection_resource_id = "/subscriptions/${var.subscription_id}/resourceGroups/${local.group}/providers/Microsoft.Storage/storageAccounts/llmreleasestate0ea5e6"
+    name                           = "${var.operator_target.resource_prefix}-state-blob"
+    private_connection_resource_id = "/subscriptions/${var.subscription_id}/resourceGroups/${local.group}/providers/Microsoft.Storage/storageAccounts/${var.operator_target.state_account}"
     subresource_names              = ["blob"]
     is_manual_connection           = false
   }

@@ -14,7 +14,7 @@ func main() {
 	client := keyvault.New()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	result, err := client.GetSecret(ctx, "https://llmrelease-kv-0ea5e6.vault.azure.net", "fixture", "")
+	result, err := client.GetSecret(ctx, "https://llmexample-kv-123abc.vault.azure.net", "fixture", "")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Key Vault SDK fixture request failed")
 		os.Exit(1)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from scripts.tests import operator_fixture  # noqa: F401
+
 import base64
 import copy
 import hashlib
@@ -80,7 +82,7 @@ class OperatorAccessPlanTests(unittest.TestCase):
                         "vpn_client_protocols": ["OpenVPN"],
                         "root_certificate": [
                             {
-                                "name": "llmrelease-operator-root",
+                                "name": "llmexample-operator-root",
                                 "public_cert_data": self.target[
                                     "root_certificate_public_data"
                                 ],
@@ -102,7 +104,7 @@ class OperatorAccessPlanTests(unittest.TestCase):
             if address == "azurerm_private_endpoint.state":
                 values["private_service_connection"] = [
                     {
-                        "name": "llmrelease-state-blob",
+                        "name": "llmexample-state-blob",
                         "private_connection_resource_id": guard.ACCOUNT,
                         "subresource_names": ["blob"],
                         "is_manual_connection": False,
@@ -170,6 +172,7 @@ class OperatorAccessPlanTests(unittest.TestCase):
                 for key, value in {
                     "subscription_id": guard.shared.FALLBACK_TARGET.subscription,
                     "existing_resource_group_name": guard.shared.GROUP,
+                    "operator_target": guard.terraform_operator_target(),
                     **self.target,
                 }.items()
             },

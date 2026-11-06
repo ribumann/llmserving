@@ -1,3 +1,4 @@
+from scripts.tests import operator_fixture  # noqa: F401
 import sys
 import unittest
 from pathlib import Path
@@ -169,7 +170,7 @@ class RetainedPlatformTests(unittest.TestCase):
 
     def test_operator_inventory_excludes_verified_topic_from_deletion(self):
         selected = {
-            "expires_at": "2026-11-05T21:55:55Z",
+            "expires_at": "2030-01-01T00:00:00Z",
             "root_certificate_sha256": "a" * 64,
         }
         vnet = {"tags": operator.scope.shared.TAGS, "properties": {"subnets": []}}

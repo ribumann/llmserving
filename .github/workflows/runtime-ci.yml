@@ -15,6 +15,9 @@ on:
 permissions:
   contents: read
 
+env:
+  LLM_SERVING_OPERATOR_CONFIG: '{"repository":"${{ vars.AZURE_OPERATOR_REPOSITORY }}"}'
+
 jobs:
   real-local-api:
     uses: ./.github/workflows/local-fullstack.yml

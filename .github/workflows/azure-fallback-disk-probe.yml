@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   probe:
-    if: github.ref == 'refs/heads/main' && github.repository == 'ribumann/llmserving'
+    if: github.ref == 'refs/heads/main' && github.repository == vars.AZURE_OPERATOR_REPOSITORY && vars.ENABLE_AZURE_OPERATOR_WORKFLOWS == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: azure-e2e-fallback
@@ -26,6 +26,7 @@ jobs:
       contents: read
       id-token: write
     env:
+      LLM_SERVING_OPERATOR_CONFIG: ${{ secrets.LLM_SERVING_OPERATOR_CONFIG }}
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}

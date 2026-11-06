@@ -50,8 +50,8 @@ All three unique family/regional/low-priority rows remain mandatory. The second
 inspection reached this count check, not an Azure quota denial.
 
 The corrected protected inspection
-[42028735853](https://github.com/ribumann/llmserving/actions/runs/42028735853)
-passed at source `f52ce573f7a72c983f66b0dd42a65cb3707575da`.
+[passed](https://github.com/ribumann/llmserving/actions/runs/42028735853)
+at its reviewed source revision.
 All four inspected persistent groups were empty. Family/regional/low-priority
 usage and limits were respectively 0/8, 0/108 and 0/100. The exact SKU retained
 its Zone restrictions; unzoned eligibility and allocation remain unverified.
@@ -151,11 +151,14 @@ reuse a pre-existing persistent group or add groups/roles automatically.
 
 ### Fixed shared-stack native plan scope
 
-The generic retained-group guard is ownership-only. For the isolated fallback
-campaign, `scripts/validate_shared_plan.py` additionally requires the fixed
-subscription, Italy North, `release` stage, `llmrelease` prefix, campaign tags,
-and no public-vault exception. Initial plans must contain exactly the 29
-reviewed shared creates from fresh non-group-owning state. Owned destroy plans
+The generic retained-group guard is ownership-only. For an isolated operator
+deployment, `scripts/validate_shared_plan.py` additionally requires the
+approved subscription, location, stage, prefix, ownership tags, and no
+public-vault exception. Obtain those frozen target values from the protected
+`LLM_SERVING_OPERATOR_CONFIG` JSON; see
+[`OPERATOR_CONFIGURATION.md`](OPERATOR_CONFIGURATION.md). Initial plans must
+contain exactly the 29 reviewed shared creates from fresh non-group-owning
+state. Owned destroy plans
 may contain a subset after partial provisioning, but only pure deletes covering
 every prior managed resource and leaving no managed resources.
 
@@ -188,13 +191,12 @@ before the independent persistence/cleanup gates are complete.
 
 ### Operator-only retained state bootstrap comes first
 
-**Current main-environment status:** the account now exists. Organizational
-governance changed its public network access to **Disabled** at creation.
-Do not rerun the initial three-create gate, reenable public access, request an
-exception, or infer that hosted OIDC grants network reachability. Existing
-account/service recovery is a separately reviewed operator slice. The
-initial-only procedure below is historical first-creation guidance, not the
-next action against this existing account.
+For an existing account whose public network access is **Disabled** by
+governance, do not rerun the initial three-create gate, reenable public access,
+request an exception, or infer that hosted OIDC grants network reachability.
+Existing account/service recovery is a separately reviewed operator slice.
+The initial-only procedure below is for first creation, not existing-account
+recovery.
 
 The reviewed [bootstrap gate](../infra/bootstrap/README.md#initial-saved-plan-execution-gate)
 can create only the account, default blob service and private container. It does
@@ -203,13 +205,13 @@ intentionally retained, with local bootstrap state and `prevent_destroy`, and
 are excluded from shared cleanup. This is not an Azure lock or a tested restore.
 
 Before any independently authorized operator execution, verify fresh ARM
-inventory in the explicit fallback subscription: the named account must be
-absent and the retained group's five campaign tags unchanged. Also require
-typed `nameAvailable=true` from:
+inventory in the explicitly approved subscription: the account name must be
+absent and the retained group's exact approved ownership tags unchanged. Also
+require typed `nameAvailable=true` from:
 
 ```sh
-az storage account check-name --name llmreleasestate0ea5e6 \
-  --subscription 86677b6e-28fc-48e4-8988-5ab9e568eece -o json
+az storage account check-name --name <approved-state-account-name> \
+  --subscription <approved-subscription-id> -o json
 ```
 
 Denied, ambiguous, present or unavailable means **stop**, never adopt. From
@@ -237,12 +239,12 @@ migration, app credentials/consent, shared provisioning or ACA changes.
 
 ### Disabled one-shot shared lifecycle source
 
-**The immediate main-environment route is the local-state bridge below, not
-this remote-backend creator.** Remote lifecycle workflows additionally require
+**The operator-selected route may be the local-state bridge below, not this
+remote-backend creator.** Remote lifecycle workflows additionally require
 `FALLBACK_PRIVATE_STATE_EXECUTOR_READY=true` and a dedicated trusted
-`llmserving-private-state` self-hosted runner. No such runner is provisioned
-by this source. An ACI command container is not an Actions runner. The remote
-path requires the exact approved blob private endpoint and exclusively private
+private-state self-hosted runner. This source does not provision that runner.
+An ACI command container is not an Actions runner. The remote path requires
+the exact approved blob private endpoint and exclusively private
 DNS resolution, while preserving `publicNetworkAccess=Disabled`.
 
 `azure-fallback-shared.yml` and the separate
@@ -252,10 +254,10 @@ operator explicitly records repository variables
 `FALLBACK_STATE_DATA_ACCESS_APPROVED=true` and
 `FALLBACK_SHARED_CLEANUP_ARMED=true`; creation additionally needs
 `FALLBACK_SHARED_CREATION_ENABLED=true`. Do not set these based on inferred
-approval. The operator has authorized needed scoped Azure configuration/RBAC
-in the isolated main subscription; the coordinator owns account creation,
-the exact-account data-role assignment and live state acceptance. Do not arm
-these flags until that acceptance and independent cleanup review are complete.
+approval. An operator must separately authorize the required scoped Azure
+configuration/RBAC; creation, exact-account data-role assignment and live
+state acceptance require independent review. Do not arm these flags until
+that acceptance and independent cleanup review are complete.
 Identity secrets stay in protected, main-only `azure-e2e-fallback`.
 
 The controller requires the existing exact keyless bootstrap account/security
@@ -305,7 +307,7 @@ locking/restore, cancellation cleanup or deployment evidence**. Those live
 proofs and appropriate approval are required before treating the source as an
 operational provision/cleanup gate.
 
-### Executable local shared29 bridge and independent ARM cleanup
+### Executable local shared-layer bridge and independent ARM cleanup
 
 The operator retains authoritative Terraform **1.16.6** local shared state
 while standing up the existing shared network. No blocked blob backend,
@@ -429,8 +431,8 @@ is completed before deleting. Rerunning a creator cannot adopt an existing disk.
 | Reviewed resource manifest | Fixed value |
 | --- | --- |
 | Target | Existing fallback subscription/tenant/OIDC principal only |
-| Parent | Existing campaign-tagged `rg-llmserving-e2e-demo`, preserved |
-| Resource | `disk-llmserving-release-cleanup-probe`, Italy North |
+| Parent | Existing operator-approved demo group, preserved |
+| Resource | `<approved-billable-disk-probe-name>`, approved region |
 | Shape | One empty 4 GiB `Standard_LRS` managed disk, unattached |
 | Access | `DenyAll` network policy; public disk access disabled |
 | Ownership | Exact campaign, purpose, repository, source SHA, run ID and attempt tags |
@@ -542,7 +544,8 @@ the database/GPU inference port to make deployment simpler. Local/self-hosted
 UI and headless API usage are documented in [UI deployment options](UI_DEPLOYMENT.md).
 
 Use the already verified retained shared/control/demo groups and the exact
-approved additional ACA platform group `rg-llmserving-e2e-aca-infra`. Its scope
+approved additional ACA platform group
+`<approved-aca-platform-resource-group>`. Its scope
 approval is not proof of effective create/delete rights, permission for new
 role grants, or evidence that ACA accepts an existing group. Check those exact
 platform behaviors and effective grants before creating a Container Apps
@@ -572,9 +575,9 @@ The smallest existing-stack bring-up still has separate, ordered phases:
    or change allocation policy from differing capability observations.
 
 These are execution phases, not a request for another architecture approval.
-Current incomplete app/secret/callback bootstrap and unverified effective
-platform-group/cleanup permissions are concrete target prerequisites; absence
-of Azure CLI on one machine is not a blocker when protected OIDC or an
+Any incomplete app/secret/callback bootstrap or unverified effective
+platform-group/cleanup permissions remain concrete target prerequisites.
+Absence of Azure CLI on one machine is not a blocker when protected OIDC or an
 authorized isolated CLI profile is available.
 
 ### Credential-free checked artifact candidates
@@ -627,31 +630,29 @@ Terraform state or database contents are bundled.
 ### Consume the retained candidate without rebuilding
 
 `azure-fallback-release-import.yml` is a protected `main`-only manual consumer
-of successful Runtime CI run `42081580674`, attempt `1`, source
-`8348c1b2af70b2607158811fc61c3d4ef6f53c29`. This exact main-head producer
-passed all required runtime, package, image-build and cloud-safety checks. Its
-downloaded Functions ZIP SHA-256 is
-`846332920f503eefee29d17dd22a3a317fe0a61f72e772266a3800563f431387`;
-the fixed reviewed manifest SHA-256 is
-`b3011dc15db6823c87cde660bd2f3dc1690ac710a008f3c4f72f393d1973b0ef`.
-All eight component records match the same run/source/attempt and complete
-manifest. The seven passed Docker config IDs (not registry pull digests) are:
+of a successful, reviewed Runtime CI producer run. The operator must select
+the expected source, run and attempt from trusted Actions metadata, and verify
+the downloaded Functions ZIP and manifest checksums from that run. All eight
+component records must match the same run/source/attempt and complete
+manifest. Compare each Docker config ID (not a registry pull digest) against
+the values in the verified manifest:
 
 | Component | Tested Docker config ID |
 |---|---|
-| `backend` | `sha256:348c02f8f66340ea545e8eeff6978fc5c57086181877bc0b46444e4fb9277a4a` |
-| `frontend` | `sha256:9d500c03c3b6515e57215355cee001a060b16d93ab59c56c98b084fdad6a99b2` |
-| `terraform_runner` | `sha256:6aa8c4e5505bd6377cbb3a68e41b748580bee9f89c1caea7861035415a1cef92` |
-| `model_deployment` | `sha256:025f82fbbdda854db3dfd04b47221b8bebbbaed36d0a53605565283fc69ba4a3` |
-| `evaluation_worker` | `sha256:3bcfe1831503fc163bb7f219e1941b310ce4f382128b8b795eef64db1d3c468f` |
-| `performance_worker` | `sha256:b3f28e7b13f1dc68e40ab9552cbb0f7279e01864091bfe5a7e0ea6d0e1e2e252` |
-| `export_worker` | `sha256:14d1e9d56b4ae735b7b2f0916028077915e7ba8c487b18767e7febbfd26f836d` |
+| `backend` | `<verified-backend-config-id>` |
+| `frontend` | `<verified-frontend-config-id>` |
+| `terraform_runner` | `<verified-terraform-runner-config-id>` |
+| `model_deployment` | `<verified-model-deployment-config-id>` |
+| `evaluation_worker` | `<verified-evaluation-worker-config-id>` |
+| `performance_worker` | `<verified-performance-worker-config-id>` |
+| `export_worker` | `<verified-export-worker-config-id>` |
 
 These are retained checked artifacts, not rebuilt or live-deployed artifacts.
-The expected identity is fixed in reviewed source, never chosen by the
-downloaded manifest. The consumer verifies the exact successful producer
-attempt through GitHub, hashes the manifest and all eight actual downloads,
-then Docker-loads the seven checked images and compares Linux/amd64 config IDs.
+The expected identity is fixed in reviewed source or protected operator
+configuration, never chosen by the downloaded manifest. The consumer verifies
+the exact successful producer attempt through GitHub, hashes the manifest and
+all eight actual downloads, then Docker-loads the seven checked images and
+compares Linux/amd64 config IDs.
 It does not run their application entrypoints or claim new runtime acceptance.
 
 ```sh
@@ -667,8 +668,8 @@ Only after the approved persistence/provisioning/independent-cleanup gates have
 created the shared registry may an authorized operator explicitly select
 `push_to_registry=true`. The same download/hash/Docker-load gate completes
 **before** OIDC login. Publication accepts only the existing
-`llmreleaseacr0ea5e6` Basic registry in `rg-llmserving-e2e-shared`, Italy North,
-with the fixed fallback subscription/principal, campaign/shared/stage tags and
+operator-approved Basic registry in the approved shared resource group and
+region, with the approved subscription/principal and exact ownership tags and
 admin credentials disabled. It never creates or adopts a registry/group, grants
 roles, generates credentials, or falls back to another identity.
 
@@ -721,19 +722,20 @@ cleanup, or supplies the outstanding state-data/auth/ACA permissions.
 These are unmet release requirements, not claims that a single command or the
 existing image-update workflows already implement them. Never turn a blocked
 gate into a success by omitting it or substituting old measurements.
-# Exact one-time shared partial recovery (2026-11-05)
+# Shared partial recovery considerations
 
-The guarded first shared29 apply persisted **27 managed resources**, then
+The previously guarded first shared-layer apply persisted **27 managed resources**, then
 failed creating the NAT public IP: enforced organization policy appended
 `FirstPartyUsage=/Unprivileged`, while the subscription feature
 `Microsoft.Network/AllowBringYourOwnPublicIpAddress` was unregistered.
 The authorized operator registered that required feature without changing,
 exempting or disabling policy. This is not a generic retry approval.
 
-The separately guarded `local-reconcile` operation accepts only the preserved
-canonical snapshot lineage `c5fe615f-a6a1-0d7b-eff8-b17acb8252b2`, serial **29**,
-SHA256 `9ac867489cc393609edc99b2296bb6e3f69633c5d7b6befadb9fe4813c8b48b9`.
-It requires exactly two creates (`azurerm_public_ip.nat` and
+The separately guarded `local-reconcile` operation accepts only the exact
+preserved canonical snapshot independently verified by the operator. Supply
+its expected lineage, serial and checksum only through protected operator
+configuration; never publish private state metadata. It requires exactly two
+creates (`azurerm_public_ip.nat` and
 `azurerm_nat_gateway_public_ip_association.shared`) and all other 27 managed
 resources exact known NOOPs. The native prior state must match a fresh native
 view of the hash-bound canonical state. The original strict29 fresh-create
@@ -756,9 +758,10 @@ full native plan generated after feature registration/provider refresh,
 Terraform **1.16.6**, the same reviewed no-purge override and restricted
 canonical directory. Preserve the existing failure log/checkpoints. The
 independent cleanup must still be armed, with a successful protected-main
-attempt1 no older than 30 minutes and a deadline **no later than
-2026-11-05T21:55:55Z**. Re-arm a read-only check if the evidence is stale; do
-not extend the deadline as part of recovery. No concurrent cleanup/apply.
+attempt1 no older than 30 minutes and the same fixed cleanup deadline recorded
+in protected operator configuration. Re-arm a read-only check if the evidence
+is stale; do not extend the deadline as part of recovery. No concurrent
+cleanup/apply.
 
 ```text
 python <reviewed-source>/scripts/azure_shared_bridge.py local-reconcile \
@@ -776,8 +779,8 @@ Successful scope checks are not a claim that Azure allocation or the
 subsequent application deployment succeeds.
 # Retained platform storage event topic
 
-The actual retained state account acquired one platform-created Event Grid
-system topic, `llmreleasestate0ea5e6-e8ee3cde-435b-41d3-bd0b-ec07e5d98c99`.
+An actual retained state account may acquire a platform-created Event Grid
+system topic, `<approved-state-account-name>-<platform-topic-guid>`.
 Operator evidence identified its creator as the Microsoft.EventGrid
 application and its sole `StorageAntimalwareSubscription` WebHook
 subscription. This is evidence of storage antimalware automation, **not**

@@ -14,9 +14,9 @@ VPN client, persistent proxy setting, host DNS or route change is needed.
 The bundled configuration permits only **CONNECT on port 443** to exactly:
 
 ```
-llmreleasestate0ea5e6.blob.core.windows.net
-llmrelease-kv-0ea5e6.vault.azure.net
-llmreleasefunc6ce138.blob.core.windows.net
+examplestate123abc.blob.core.windows.net
+llmexample-kv-123abc.vault.azure.net
+examplefunc456def.blob.core.windows.net
 ```
 
 No wildcards, suffix subdomains, IP literals, plaintext HTTP, management/login
