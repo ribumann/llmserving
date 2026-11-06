@@ -71,6 +71,8 @@ jobs:
           cp -R functions/function_app.py functions/host.json functions/requirements.txt \
             functions/activities functions/orchestrators functions/orchestration_lib "$package/"
           python -m pip install --target "$package/.python_packages/lib/site-packages" \
+            --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 \
+            --implementation cp --python-version 3.11 --only-binary=:all: \
             -r functions/requirements.txt
           cd "$package"
           python -m zipfile -c "$RUNNER_TEMP/functions.zip" .
@@ -79,12 +81,18 @@ jobs:
         run: |
           set -euo pipefail
           python -m zipfile -e "$RUNNER_TEMP/functions.zip" "$RUNNER_TEMP/functions-smoke"
-          cd "$RUNNER_TEMP/functions-smoke"
-          PYTHONPATH="$PWD/.python_packages/lib/site-packages" python - <<'PY'
+          docker run --rm --network none --platform linux/amd64 -i \
+            --mount "type=bind,source=$RUNNER_TEMP/functions-smoke,target=/app,readonly" \
+            --workdir /app --env PYTHONPATH=/app/.python_packages/lib/site-packages \
+            python:3.11-slim-bullseye python - <<'PY'
+          import _cffi_backend
+          import azure.identity
+          import azure.mgmt.appcontainers
+          from cryptography.hazmat.bindings._rust import x509
           import function_app
           registered = function_app.app.get_functions()
           assert len(registered) >= 8, f"Missing function registrations: {len(registered)}"
-          print(f"Packaged Functions import/registration smoke passed ({len(registered)} functions).")
+          print(f"Packaged Functions native dependency/registration smoke passed ({len(registered)} functions).")
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
