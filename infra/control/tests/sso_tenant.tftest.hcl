@@ -90,6 +90,18 @@ run "external_same_tenant_default" {
   command = plan
   assert {
     condition = (
+      jsondecode(azapi_resource.frontend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "AllowAnonymous"
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.platform.enabled
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.enabled
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.validation.allowedAudiences == [local.sso_client_id]
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.platform.enabled
+      && one([for env in azurerm_container_app.backend.template[0].container[0].env : env.value if env.name == "AUTH_MODE"]) == "entra-jwt"
+    )
+    error_message = "Only the static frontend may allow anonymous visitors; frontend SSO and backend EasyAuth/JWT validation must remain enabled."
+  }
+  assert {
+    condition = (
       length(azurerm_resource_group.control) == 1 && length(data.azurerm_resource_group.control) == 0
       && azurerm_role_assignment.backend_contributor["subscription"].role_definition_name == "Contributor"
       && azurerm_role_assignment.terraform_runner_contributor["subscription"].role_definition_name == "Contributor"

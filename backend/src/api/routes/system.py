@@ -10,6 +10,15 @@ LOGGER = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
 
 
+@router.get("/session")
+def session(request: Request) -> dict[str, object]:
+    # This route deliberately uses the same authentication middleware as every operator API.
+    return with_request_id(
+        {"authenticated": True},
+        getattr(request.state, "request_id", None),
+    )
+
+
 @router.get("/healthz")
 def healthz(request: Request) -> dict[str, str]:
     return with_request_id(
