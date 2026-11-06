@@ -45,7 +45,7 @@ describe('ProvisionPage', () => {
           sizeClass: 'medium',
           description: 'Single GPU Azure profile for 7B checkpoints.',
           expectedModelClass: '7B',
-          regions: ['eastus', 'southcentralus'],
+          regions: ['eastus', 'southcentralus', 'italynorth'],
           resourceAssumptions: ['1x Standard_NC24ads_A100_v4'],
           capacityRequirements: ['GPU quota'],
           configurableInputs: [
@@ -55,6 +55,14 @@ describe('ProvisionPage', () => {
               required: false,
               defaultValue: true,
               description: 'Enable Azure Monitor.',
+            },
+            { name: 'vmSizeOverride', type: 'string', required: false, defaultValue: '' },
+            {
+              name: 'vmPriority',
+              type: 'enum',
+              required: true,
+              defaultValue: 'Spot',
+              options: ['Spot', 'Regular'],
             },
           ],
           knownLimitations: ['Depends on GPU capacity in-region.'],
@@ -176,6 +184,7 @@ describe('ProvisionPage', () => {
     expect(mockedPreviewEnvironment).toHaveBeenCalledWith({
       profileId: 'azure-single-gpu-7b',
       regionOverride: undefined,
+      configurableInputs: { enableMonitoring: true, vmSizeOverride: null, vmPriority: 'Spot' },
     });
 
     expect(await screen.findByText(/recommended region:/i)).toBeInTheDocument();
@@ -191,6 +200,8 @@ describe('ProvisionPage', () => {
         name: undefined,
         inputs: {
           enableMonitoring: true,
+          vmSizeOverride: null,
+          vmPriority: 'Spot',
         },
       });
       expect(mockedGetEnvironment).toHaveBeenCalledWith('env-123');
@@ -202,5 +213,61 @@ describe('ProvisionPage', () => {
       'href',
       '/environments/env-123',
     );
+  });
+
+  it('previews and provisions the same selected region, VM size and priority, and invalidates changes', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <ProvisionPage />
+      </MemoryRouter>,
+    );
+    await user.selectOptions(await screen.findByRole('combobox', { name: /cloud deployment profile/i }), 'azure-single-gpu-7b');
+    await user.selectOptions(screen.getByRole('combobox', { name: /model catalog entry/i }), 'llama-7b');
+    await user.selectOptions(screen.getByRole('combobox', { name: /provisioning region/i }), 'italynorth');
+    await user.type(screen.getByRole('textbox', { name: 'vmSizeOverride' }), 'Standard_NC4as_T4_v3');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'vmPriority' }), 'Regular');
+    await user.click(screen.getByRole('button', { name: /preview region recommendation/i }));
+
+    const inputs = {
+      enableMonitoring: true,
+      vmSizeOverride: 'Standard_NC4as_T4_v3',
+      vmPriority: 'Regular',
+    };
+    expect(mockedPreviewEnvironment).toHaveBeenLastCalledWith({
+      profileId: 'azure-single-gpu-7b',
+      regionOverride: 'italynorth',
+      configurableInputs: inputs,
+    });
+    const confirm = await screen.findByRole('button', { name: /confirm provisioning/i });
+    expect(confirm).toBeEnabled();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'vmPriority' }), 'Spot');
+    expect(confirm).toBeDisabled();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'vmPriority' }), 'Regular');
+    expect(confirm).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: /preview region recommendation/i }));
+    await user.click(await screen.findByRole('button', { name: /confirm provisioning/i }));
+    expect(mockedProvisionEnvironment).toHaveBeenCalledWith({
+      profileId: 'azure-single-gpu-7b',
+      region: 'italynorth',
+      name: undefined,
+      inputs,
+    });
+  });
+
+  it('does not accept an obsolete in-flight preview after inputs change', async () => {
+    const user = userEvent.setup();
+    let resolvePreview!: (value: Awaited<ReturnType<typeof previewEnvironment>>) => void;
+    const result = await mockedPreviewEnvironment({ profileId: 'azure-single-gpu-7b' });
+    mockedPreviewEnvironment.mockReset();
+    mockedPreviewEnvironment.mockReturnValue(new Promise((resolve) => { resolvePreview = resolve; }));
+    render(<MemoryRouter><ProvisionPage /></MemoryRouter>);
+    await user.selectOptions(await screen.findByRole('combobox', { name: /cloud deployment profile/i }), 'azure-single-gpu-7b');
+    await user.selectOptions(screen.getByRole('combobox', { name: /model catalog entry/i }), 'llama-7b');
+    await user.click(screen.getByRole('button', { name: /preview region recommendation/i }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'vmPriority' }), 'Regular');
+    resolvePreview(result);
+    await waitFor(() => expect(screen.getByRole('button', { name: /preview region recommendation/i })).toBeEnabled());
+    expect(screen.queryByRole('button', { name: /confirm provisioning/i })).not.toBeInTheDocument();
   });
 });

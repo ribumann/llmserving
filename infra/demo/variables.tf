@@ -13,6 +13,12 @@ variable "shared_state_path" {
   default     = "../shared/terraform.tfstate"
 }
 
+variable "expected_region" {
+  description = "Preflighted region, which must match the shared network location. Null preserves legacy manual workflows."
+  type        = string
+  default     = null
+}
+
 variable "environment_id" {
   description = "Demo Environment id (data-model.md); used to name rg-llm-demo-{environmentId} (FR-074)."
   type        = string

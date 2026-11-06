@@ -28,6 +28,13 @@ separate states. Database readiness is also independent of API process liveness.
 
 Preflight and Terraform resolve the same effective SKU using the existing
 `profileSizeClass` mapping (small/medium/large) unless `vmSizeOverride` is set.
+The provisioning UI offers Italy North for the Azure 3B profile, including existing
+persisted profiles, and passes the chosen VM size override and Spot/Regular priority
+to both preview and creation. Changing these inputs requires a new preview. The
+selected region must match the shared Terraform network's location: the API passes
+the preflighted region to Terraform, which rejects a mismatch before resource
+creation. Selecting a region does not create or move a network, and quota/SKU
+signals do not guarantee physical allocation capacity.
 Profile defaults are merged with request `configurableInputs` in both paths.
 The preview endpoint accepts the same optional inputs as creation. Invalid
 non-string/empty SKU overrides fail explicitly rather than selecting another VM.

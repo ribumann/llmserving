@@ -86,6 +86,7 @@ export interface RegionAssessment {
 export interface EnvironmentPreviewRequest {
   profileId: string;
   regionOverride?: string;
+  configurableInputs?: Record<string, string | number | boolean | null>;
 }
 
 export interface EnvironmentPreviewResponse extends RequestIdEnvelope {
@@ -217,7 +218,7 @@ export interface EnvironmentProvisionRequest {
   profileId: string;
   region: string;
   name?: string;
-  inputs?: Record<string, string | number | boolean>;
+  inputs?: Record<string, string | number | boolean | null>;
 }
 
 export interface AcceptedOperation extends RequestIdEnvelope {

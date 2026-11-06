@@ -81,20 +81,53 @@ export async function listProfiles(): Promise<ListProfilesResponse> {
           ? 'Run the demo narrative against a local Ollama runtime with no Azure access.'
           : `Azure profile targeting ${profile.vmSku}.`,
       expectedModelClass: profile.modelSizeClass,
-      regions: profile.eligibleRegions,
+      regions:
+        profile.profileId === 'azure-single-gpu-3b'
+          ? Array.from(new Set([...profile.eligibleRegions, 'italynorth']))
+          : profile.eligibleRegions,
       resourceAssumptions:
         profile.provider === 'local'
           ? ['Presenter-managed hardware', 'Ollama installed and running locally']
           : [profile.vmSku],
       capacityRequirements: profile.knownLimitations,
-      configurableInputs: Object.entries(profile.configurableInputs)
-        .filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value))
-        .map(([name, value]) => ({
-          name,
-          type: inferInputType(value),
-          required: false,
-          defaultValue: value as string | number | boolean,
-        })),
+      configurableInputs: [
+        ...Object.entries(profile.configurableInputs)
+          .filter(
+            ([name, value]) =>
+              ['string', 'number', 'boolean'].includes(typeof value) &&
+              (profile.provider !== 'azure' || !['vmSizeOverride', 'vmPriority'].includes(name)),
+          )
+          .map(([name, value]) => ({
+            name,
+            type: inferInputType(value),
+            required: false,
+            defaultValue: value as string | number | boolean,
+          })),
+        ...(profile.provider === 'azure'
+          ? [
+              {
+                name: 'vmSizeOverride',
+                type: 'string' as const,
+                required: false,
+                defaultValue:
+                  typeof profile.configurableInputs.vmSizeOverride === 'string'
+                    ? profile.configurableInputs.vmSizeOverride
+                    : '',
+                description: 'Optional Azure VM SKU override; leave empty to use the profile size class.',
+              },
+              {
+                name: 'vmPriority',
+                type: 'enum' as const,
+                required: true,
+                defaultValue:
+                  typeof profile.configurableInputs.vmPriority === 'string'
+                    ? profile.configurableInputs.vmPriority
+                    : 'Spot',
+                options: ['Spot', 'Regular'],
+              },
+            ]
+          : []),
+      ],
       knownLimitations: profile.knownLimitations,
     })),
   };

@@ -346,6 +346,8 @@ def create_environment(
             inputs=payload.configurableInputs,
         )
     )
+    if profile.provider == ProviderType.AZURE:
+        terraform_variables["expected_region"] = selected_region
 
     environment = DemoEnvironment(
         environmentId=environment_id,

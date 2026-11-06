@@ -168,6 +168,14 @@ function getInputValue(
   return rawValue;
 }
 
+function effectiveInputs(inputs: Record<string, ProfileInputValue>) {
+  const result: Record<string, ProfileInputValue | null> = { ...inputs };
+  if (result.vmSizeOverride === '') {
+    result.vmSizeOverride = null;
+  }
+  return result;
+}
+
 function isLocalProfile(profile?: CloudDeploymentProfile) {
   return profile?.provider === 'local';
 }
@@ -195,6 +203,8 @@ export default function ProvisionPage() {
   const [previewError, setPreviewError] = useState<string>();
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewedRegion, setPreviewedRegion] = useState('');
+  const [previewedInputs, setPreviewedInputs] = useState('');
+  const [previewedGeneration, setPreviewedGeneration] = useState(0);
   const [operation, setOperation] = useState<AcceptedOperation | undefined>(
     initialStoredProvisioning?.operation,
   );
@@ -209,6 +219,7 @@ export default function ProvisionPage() {
   );
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const skipNextProfileReset = useRef(Boolean(initialStoredProvisioning));
+  const previewGeneration = useRef(0);
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId),
@@ -228,9 +239,15 @@ export default function ProvisionPage() {
     [compatibleModels, selectedModelId],
   );
 
-  const previewIsCurrent = Boolean(preview && selectedRegion && selectedRegion === previewedRegion);
+  const previewIsCurrent = Boolean(
+    preview &&
+      selectedRegion &&
+      selectedRegion === previewedRegion &&
+      previewedGeneration === previewGeneration.current &&
+      previewedInputs === JSON.stringify(effectiveInputs(profileInputs)),
+  );
   const canPreview = Boolean(selectedProfileId && selectedModelId);
-  const canConfirm = Boolean(previewIsCurrent && selectedRegion && !provisioning);
+  const canConfirm = Boolean(previewIsCurrent && selectedRegion && !provisioning && !previewLoading);
 
   useEffect(() => {
     let cancelled = false;
@@ -392,8 +409,11 @@ export default function ProvisionPage() {
       return;
     }
 
+    const generation = ++previewGeneration.current;
+    const inputs = effectiveInputs(profileInputs);
     setPreviewLoading(true);
     setPreviewError(undefined);
+    setPreview(undefined);
 
     try {
       const requestedRegion =
@@ -404,22 +424,30 @@ export default function ProvisionPage() {
       const response = await previewEnvironment({
         profileId: selectedProfileId,
         regionOverride: requestedRegion,
+        configurableInputs: inputs,
       });
 
+      if (generation !== previewGeneration.current) {
+        return;
+      }
       const resolvedRegion = requestedRegion ?? response.recommendedRegion;
 
       setPreview(response);
       setSelectedRegion(resolvedRegion);
       setPreviewedRegion(resolvedRegion);
+      setPreviewedInputs(JSON.stringify(inputs));
+      setPreviewedGeneration(generation);
     } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : 'Preview failed.');
+      if (generation === previewGeneration.current) {
+        setPreviewError(error instanceof Error ? error.message : 'Preview failed.');
+      }
     } finally {
       setPreviewLoading(false);
     }
   }
 
   async function handleProvision() {
-    if (!selectedProfileId || !selectedRegion) {
+    if (!selectedProfileId || !selectedRegion || !canConfirm) {
       return;
     }
 
@@ -431,7 +459,7 @@ export default function ProvisionPage() {
         profileId: selectedProfileId,
         region: selectedRegion,
         name: environmentName.trim() || undefined,
-        inputs: Object.keys(profileInputs).length > 0 ? profileInputs : undefined,
+        inputs: effectiveInputs(profileInputs),
       });
 
       if (!response.environmentId) {
@@ -484,7 +512,10 @@ export default function ProvisionPage() {
                 <Select
                   aria-label="Cloud deployment profile"
                   value={selectedProfileId}
-                  onChange={(event) => setSelectedProfileId(event.target.value)}
+                  onChange={(event) => {
+                    previewGeneration.current += 1;
+                    setSelectedProfileId(event.target.value);
+                  }}
                 >
                   <option value="">Select a profile</option>
                   {profiles.map((profile) => (
@@ -525,7 +556,10 @@ export default function ProvisionPage() {
                   aria-label={isLocalProfile(selectedProfile) ? 'Runtime location' : 'Provisioning region'}
                   disabled={!selectedProfile}
                   value={selectedRegion}
-                  onChange={(event) => setSelectedRegion(event.target.value)}
+                  onChange={(event) => {
+                    previewGeneration.current += 1;
+                    setSelectedRegion(event.target.value);
+                  }}
                 >
                   <option value="">
                     {isLocalProfile(selectedProfile)
@@ -593,6 +627,12 @@ export default function ProvisionPage() {
                 ready as soon as the configured Ollama endpoint responds.
               </StatusMessage>
             ) : null}
+            {selectedProfile?.provider === 'azure' ? (
+              <StatusMessage intent="info">
+                Azure VM placement uses the shared network's region. Select the region matching
+                that network; a region recommendation does not move or create a regional network.
+              </StatusMessage>
+            ) : null}
 
             {selectedProfile?.configurableInputs.length ? (
               <InfoPanel title="Profile inputs">
@@ -603,23 +643,25 @@ export default function ProvisionPage() {
                         <Switch
                           aria-label={input.name}
                           checked={Boolean(profileInputs[input.name])}
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            previewGeneration.current += 1;
                             setProfileInputs((existing) => ({
                               ...existing,
                               [input.name]: event.target.checked,
-                            }))
-                          }
+                            }));
+                          }}
                         />
                       ) : input.type === 'enum' ? (
                         <Select
                           aria-label={input.name}
                           value={String(profileInputs[input.name] ?? input.defaultValue ?? '')}
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            previewGeneration.current += 1;
                             setProfileInputs((existing) => ({
                               ...existing,
                               [input.name]: event.target.value,
-                            }))
-                          }
+                            }));
+                          }}
                         >
                           <option value="">Select {input.name}</option>
                           {input.options?.map((option) => (
@@ -633,12 +675,13 @@ export default function ProvisionPage() {
                           aria-label={input.name}
                           type={input.type === 'number' ? 'number' : 'text'}
                           value={String(profileInputs[input.name] ?? input.defaultValue ?? '')}
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            previewGeneration.current += 1;
                             setProfileInputs((existing) => ({
                               ...existing,
                               [input.name]: getInputValue(input, event.target.value),
-                            }))
-                          }
+                            }));
+                          }}
                         />
                       )}
                     </Field>
@@ -671,7 +714,7 @@ export default function ProvisionPage() {
               {preview.advisoryMessage ? <Body1>{preview.advisoryMessage}</Body1> : null}
               {!previewIsCurrent ? (
                 <StatusMessage intent="warning">
-                  The selected region changed after the last preview. Refresh the preview before
+                  The selected region or profile inputs changed after the last preview. Refresh the preview before
                   confirming provisioning so quota and capacity are revalidated.
                 </StatusMessage>
               ) : null}
@@ -738,7 +781,7 @@ export default function ProvisionPage() {
                   <Body1>
                     {isLocalProfile(selectedProfile)
                       ? 'The preview confirms local runtime assumptions and records readiness guidance before provisioning.'
-                      : 'The preview preserves recommendation evidence and uncertainty so presenters can explain why a fallback region may be necessary before provisioning.'}
+                      : 'The preview preserves quota and SKU evidence and uncertainty. The selected region must match the shared network location.'}
                   </Body1>
                   <ul className={styles.list}>
                     {preview.assessments
