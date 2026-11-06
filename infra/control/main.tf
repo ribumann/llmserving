@@ -533,6 +533,10 @@ resource "azurerm_container_app" "backend" {
         value = local.internal_api_audience
       }
       env {
+        name  = "INTERNAL_API_ALLOWED_IDENTITY_RESOURCE_IDS"
+        value = jsonencode(local.internal_callback_identity_resource_ids)
+      }
+      env {
         name  = "TF_STATE_STORAGE_ACCOUNT"
         value = azapi_resource.tfstate_storage.name
       }
@@ -1289,9 +1293,14 @@ locals {
 # `<name>.azurewebsites.net`, and ARM resource IDs are computable from subscription/resource
 # group/name), so this avoids the cycle while resolving to the same values.
 locals {
-  functions_app_name         = "${var.name_prefix}-functions-${local.unique_suffix}"
-  functions_fqdn             = "${local.functions_app_name}.azurewebsites.net"
-  functions_resource_id      = "${local.control_scope_id}/providers/Microsoft.Web/sites/${local.functions_app_name}"
+  functions_app_name    = "${var.name_prefix}-functions-${local.unique_suffix}"
+  functions_fqdn        = "${local.functions_app_name}.azurewebsites.net"
+  functions_resource_id = "${local.control_scope_id}/providers/Microsoft.Web/sites/${local.functions_app_name}"
+  internal_callback_identity_resource_ids = concat(
+    [local.functions_resource_id],
+    [for identity in azurerm_user_assigned_identity.jobs :
+    "${local.control_scope_id}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${identity.name}"]
+  )
   functions_package_blob_url = var.functions_package_sha256 == null ? null : "https://${azapi_resource.functions_storage.name}.blob.core.windows.net/${azapi_resource.functions_packages[0].name}/functions-${var.functions_package_sha256}.zip"
   job_scope_ids              = { for key, name in local.job_names : key => "${local.control_scope_id}/providers/Microsoft.App/jobs/${name}" }
 }
@@ -1393,6 +1402,7 @@ resource "azapi_resource" "backend_auth_config" {
       globalValidation = {
         unauthenticatedClientAction = "RedirectToLoginPage"
         redirectToProvider          = "azureactivedirectory"
+        excludedPaths               = ["/internal/workflows", "/internal/workflows/*"]
       }
       identityProviders = {
         azureActiveDirectory = {

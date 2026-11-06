@@ -81,6 +81,25 @@ class EntraTokenVerifier:
 class InternalTokenValidator(EntraTokenVerifier):
     """Validates audience-restricted managed-identity tokens for internal callbacks."""
 
+    def __init__(
+        self,
+        *,
+        tenant_id: str,
+        audience: str,
+        allowed_identity_resource_ids: list[str],
+        jwks_client_factory: Callable[[str], SigningKeyProvider] | None = None,
+    ) -> None:
+        super().__init__(
+            tenant_id=tenant_id, audience=audience, jwks_client_factory=jwks_client_factory
+        )
+        self._allowed_identity_resource_ids = frozenset(
+            value.strip().casefold().rstrip("/")
+            for value in allowed_identity_resource_ids
+            if value.strip()
+        )
+        if not self._allowed_identity_resource_ids:
+            raise ValueError("Internal callbacks require a managed-identity resource allowlist.")
+
     def validate(self, token: str) -> InternalCaller:
         try:
             claims = self.decode(token)
@@ -90,6 +109,16 @@ class InternalTokenValidator(EntraTokenVerifier):
         subject = str(claims.get("oid") or claims.get("sub") or "")
         if not subject:
             raise InternalAuthError("Internal service token is missing a subject claim.")
+        identity_resource_id = claims.get("xms_mirid")
+        if not isinstance(identity_resource_id, str) or not identity_resource_id:
+            raise InternalAuthError("A managed-identity resource claim is required.")
+        if identity_resource_id.casefold().rstrip("/") not in self._allowed_identity_resource_ids:
+            raise ApiError(
+                status_code=403,
+                code="internal_identity_not_allowed",
+                message="This managed identity is not allowed to call internal workflows.",
+                details={},
+            )
         return InternalCaller(
             subject=subject,
             app_id=claims.get("appid") or claims.get("azp"),
@@ -98,11 +127,16 @@ class InternalTokenValidator(EntraTokenVerifier):
 
 
 def build_internal_token_validator(settings: Settings) -> InternalTokenValidator | None:
-    if not settings.azure_tenant_id or not settings.internal_api_audience:
+    if (
+        not settings.azure_tenant_id
+        or not settings.internal_api_audience
+        or not settings.internal_api_allowed_identity_resource_ids
+    ):
         return None
     return InternalTokenValidator(
         tenant_id=settings.azure_tenant_id,
         audience=settings.internal_api_audience,
+        allowed_identity_resource_ids=settings.internal_api_allowed_identity_resource_ids,
     )
 
 

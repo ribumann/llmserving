@@ -95,10 +95,23 @@ run "external_same_tenant_default" {
       && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.enabled
       && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.validation.allowedAudiences == [local.sso_client_id]
       && jsondecode(azapi_resource.backend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.globalValidation.excludedPaths == ["/internal/workflows", "/internal/workflows/*"]
       && jsondecode(azapi_resource.backend_auth_config[0].body).properties.platform.enabled
       && one([for env in azurerm_container_app.backend.template[0].container[0].env : env.value if env.name == "AUTH_MODE"]) == "entra-jwt"
     )
     error_message = "Only the static frontend may allow anonymous visitors; frontend SSO and backend EasyAuth/JWT validation must remain enabled."
+  }
+  assert {
+    condition = (
+      jsondecode(one([for env in azurerm_container_app.backend.template[0].container[0].env :
+      env.value if env.name == "INTERNAL_API_ALLOWED_IDENTITY_RESOURCE_IDS"])) == local.internal_callback_identity_resource_ids
+      && length(local.internal_callback_identity_resource_ids) == 6
+      && contains(local.internal_callback_identity_resource_ids, local.functions_resource_id)
+      && alltrue([for identity in azurerm_user_assigned_identity.jobs :
+        contains(local.internal_callback_identity_resource_ids,
+      "${local.control_scope_id}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${identity.name}")])
+    )
+    error_message = "Callbacks must allow only this deployment's Functions identity and five job identities."
   }
   assert {
     condition = (
