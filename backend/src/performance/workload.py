@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from src.domain.performance_workload import PerformanceWorkload
-from src.performance.llmperf_runner import vllm_warmup_request_count
+from src.performance.llmperf_runner import vllm_warmup_settings
 
 
 class PerformanceWorkloadValidationError(ValueError):
@@ -31,7 +31,7 @@ def validate_performance_workload_for_run(
     )
     if engine_id == "vllm":
         try:
-            vllm_warmup_request_count(workload.warmup)
+            vllm_warmup_settings(workload.warmup)
         except ValueError as exc:
             raise PerformanceWorkloadValidationError(
                 "invalid_performance_workload",

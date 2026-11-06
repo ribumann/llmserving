@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from time import monotonic
 from typing import Any
 from uuid import uuid4
 
@@ -19,19 +21,23 @@ DEFAULT_UNITS = {
 }
 
 
-def vllm_warmup_request_count(warmup: Mapping[str, Any] | None) -> int:
+def vllm_warmup_settings(warmup: Mapping[str, Any] | None) -> tuple[int, float]:
     payload = dict(warmup or {})
     count = payload.get("requestCount", 0)
+    duration = payload.get("durationSeconds", 0)
     if (
-        "durationSeconds" in payload
-        or type(count) is not int
+        type(count) is not int
         or count < 0
-        or (payload and "requestCount" not in payload)
+        or type(duration) not in (int, float)
+        or not math.isfinite(duration)
+        or duration < 0
+        or (payload and not ({"requestCount", "durationSeconds"} & payload.keys()))
     ):
         raise ValueError(
-            "vLLM warm-up requires a non-negative integer requestCount; duration is unsupported."
+            "vLLM warm-up requires a non-negative integer requestCount and/or "
+            "a finite non-negative durationSeconds."
         )
-    return count
+    return count, float(duration)
 
 
 class PerformanceRunOverloadError(RuntimeError):
@@ -56,9 +62,17 @@ class LlmPerfRunner:
         workload: Mapping[str, Any],
         model_id: str,
     ) -> dict[str, Any]:
-        warmup_count = vllm_warmup_request_count(workload.get("warmup"))
+        warmup_count, warmup_duration = vllm_warmup_settings(workload.get("warmup"))
         warmup_evidence = None
-        if warmup_count:
+        if warmup_duration:
+            warmup_evidence = self._run_duration_warmup(
+                base_url=base_url,
+                workload=workload,
+                model_id=model_id,
+                count=warmup_count,
+                duration=warmup_duration,
+            )
+        elif warmup_count:
             warmup_workload = {
                 **workload,
                 "concurrency": 1,
@@ -66,30 +80,8 @@ class LlmPerfRunner:
                 "completionCriteria": {"targetCompletedRequests": warmup_count},
                 "_warmupPhase": True,
             }
-            try:
-                warmup = self._evaluator(
-                    base_url=base_url, workload=warmup_workload, model_id=model_id
-                )
-            except PerformanceRunOverloadError as exc:
-                # Warm-up results are never partial measured results.
-                raise PerformanceRunOverloadError(f"LLMPerf warm-up failed: {exc}") from exc
-            completed = warmup.get("results_num_completed_requests")
-            started = warmup.get("results_num_requests_started")
-            errors = warmup.get("results_number_errors")
-            if (
-                bool(warmup.get("overloaded"))
-                or str(warmup.get("status") or "").lower() in {"overload", "incomplete", "failed"}
-                or type(completed) is not int
-                or type(started) is not int
-                or type(errors) is not int
-                or completed != warmup_count
-                or started != warmup_count
-                or errors != 0
-            ):
-                raise PerformanceRunOverloadError(
-                    "LLMPerf warm-up failed or did not complete all configured requests."
-                )
-            warmup_evidence = {"completedRequests": completed, "failedRequests": errors}
+            self._run_warmup_batch(base_url, warmup_workload, model_id, warmup_count)
+            warmup_evidence = {"completedRequests": warmup_count, "failedRequests": 0}
         raw = self._evaluator(base_url=base_url, workload=workload, model_id=model_id)
         normalized = _normalize_performance_result(
             raw=raw,
@@ -110,6 +102,72 @@ class LlmPerfRunner:
                 partial_result=normalized,
             )
         return normalized
+
+    def _run_warmup_batch(
+        self, base_url: str, workload: Mapping[str, Any], model_id: str, count: int
+    ) -> None:
+        try:
+            warmup = self._evaluator(base_url=base_url, workload=workload, model_id=model_id)
+        except PerformanceRunOverloadError as exc:
+            raise PerformanceRunOverloadError(f"LLMPerf warm-up failed: {exc}") from exc
+        completed = warmup.get("results_num_completed_requests")
+        started = warmup.get("results_num_requests_started")
+        errors = warmup.get("results_number_errors")
+        if (
+            bool(warmup.get("overloaded"))
+            or str(warmup.get("status") or "").lower() in {"overload", "incomplete", "failed"}
+            or type(completed) is not int
+            or type(started) is not int
+            or type(errors) is not int
+            or completed != count
+            or started != count
+            or errors != 0
+        ):
+            raise PerformanceRunOverloadError(
+                "LLMPerf warm-up failed or did not complete all configured requests."
+            )
+
+    def _run_duration_warmup(
+        self,
+        *,
+        base_url: str,
+        workload: Mapping[str, Any],
+        model_id: str,
+        count: int,
+        duration: float,
+    ) -> dict[str, Any]:
+        # Measure the interval between successful completions, excluding the first
+        # CLI's startup. Each bounded batch uses upstream's normal prompt/profile.
+        batch = {
+            **workload,
+            "concurrency": 1,
+            "durationOrRequestCount": {"requestCount": 1},
+            "completionCriteria": {"targetCompletedRequests": 1},
+            "_warmupPhase": True,
+        }
+        timeout = int(dict(workload.get("safetyLimits") or {}).get("timeoutSeconds") or 600) + 60
+        deadline = monotonic() + timeout
+        batch["_warmupTimeoutSeconds"] = timeout
+        self._run_warmup_batch(base_url, batch, model_id, 1)
+        started = monotonic()
+        completed = 1
+        while True:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise PerformanceRunOverloadError("LLMPerf duration warm-up exceeded its deadline.")
+            batch["_warmupTimeoutSeconds"] = remaining
+            self._run_warmup_batch(base_url, batch, model_id, 1)
+            completed += 1
+            now = monotonic()
+            if now > deadline:
+                raise PerformanceRunOverloadError("LLMPerf duration warm-up exceeded its deadline.")
+            elapsed = now - started
+            if elapsed >= duration and completed >= count:
+                return {
+                    "completedRequests": completed,
+                    "failedRequests": 0,
+                    "elapsedSeconds": elapsed,
+                }
 
     def _default_evaluator(
         self,
@@ -138,6 +196,8 @@ class LlmPerfRunner:
             # --timeout CLI flag so a hung/orphaned tool can never block a
             # worker thread (and the environment lock it holds) forever.
             timeout_seconds = int(safety_limits.get("timeoutSeconds") or 600) + 60
+            if workload.get("_warmupTimeoutSeconds") is not None:
+                timeout_seconds = min(timeout_seconds, float(workload["_warmupTimeoutSeconds"]))
             try:
                 completed = subprocess.run(
                     command,

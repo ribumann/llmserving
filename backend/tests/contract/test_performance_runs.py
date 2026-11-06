@@ -173,11 +173,11 @@ def test_performance_run_validation_errors_follow_contract() -> None:
 @pytest.mark.parametrize(
     "warmup",
     [
-        {"durationSeconds": 5},
-        {"durationSeconds": 5, "requestCount": 2},
         {"requestCount": -1},
         {"requestCount": 1.5},
         {"requestCount": True},
+        {"durationSeconds": -1},
+        {"durationSeconds": True},
     ],
 )
 def test_vllm_unsupported_warmup_is_rejected_before_run(warmup) -> None:
@@ -193,3 +193,19 @@ def test_vllm_unsupported_warmup_is_rejected_before_run(warmup) -> None:
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_performance_workload"
     assert response.json()["error"]["details"]["field"] == "warmup"
+
+
+@pytest.mark.parametrize(
+    "warmup", [{"durationSeconds": 5}, {"durationSeconds": 5, "requestCount": 2}]
+)
+def test_vllm_duration_warmup_remains_valid(warmup) -> None:
+    session = MemorySession()
+    session.seed_defaults()
+    _prepare_ready_deployment(session)
+    session.performance_workloads["workload-default"].warmup = warmup
+    response = _build_client(session).post(
+        "/environments/env-demo/runs",
+        headers={"X-Demo-User": "presenter@example.com"},
+        json={"runType": "performance", "testDefinitionRef": "workload-default"},
+    )
+    assert response.status_code == 202
