@@ -87,9 +87,15 @@ python -m pytest -q tests
 python -c 'import function_app; assert len(function_app.app.get_functions()) >= 8'
 ```
 
-The Functions ZIP includes dependencies under `.python_packages/lib/site-packages`
-and is smoke-tested after extraction. It is an ordinary CI artifact, not proof
-of Azure host deployment. It expires after seven days.
+The Functions ZIP includes dependencies under `.python_packages/lib/site-packages`.
+Packaging selects binary wheels for CPython 3.11, Linux AMD64 and a glibc 2.28
+baseline (also accepting compatible manylinux2014 wheels), rather than using
+the newer CI runner's native platform. After ZIP extraction, a network-isolated
+Python 3.11 Debian Bullseye container imports the native cryptography/cffi and
+Azure identity/Container Apps dependencies, then enumerates function registrations.
+This catches ABI failures hidden by registration-only imports on the build host.
+The ZIP is an ordinary CI artifact, not proof of Azure host deployment. It
+expires after seven days.
 
 Worker unit tests isolate the Terraform runner's managed-identity login from
 Terraform command behavior; dedicated tests separately assert missing-identity

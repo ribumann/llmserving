@@ -252,6 +252,21 @@ class ReleaseBundleTests(unittest.TestCase):
             workflow,
         )
 
+    def test_functions_package_uses_compatible_wheels_and_native_runtime_smoke(self):
+        source = (ROOT / ".github/workflows/runtime-ci.yml").read_text()
+        functions = source.split("\n  functions:", 1)[1].split("\n  mocked-browser:", 1)[0]
+        self.assertIn("--platform manylinux_2_28_x86_64", functions)
+        self.assertIn("--platform manylinux2014_x86_64", functions)
+        self.assertIn("--implementation cp --python-version 3.11 --only-binary=:all:", functions)
+        self.assertIn("--network none --platform linux/amd64", functions)
+        self.assertIn("python:3.11-slim-bullseye python -", functions)
+        self.assertIn("import _cffi_backend", functions)
+        self.assertIn("import azure.identity", functions)
+        self.assertIn("import azure.mgmt.appcontainers", functions)
+        self.assertIn("from cryptography.hazmat.bindings._rust import x509", functions)
+        self.assertLess(functions.index("functions-smoke"), functions.index("import azure.identity"))
+        self.assertLess(functions.index("import azure.identity"), functions.index("upload-artifact"))
+
     def test_browser_ci_installs_are_bounded_and_do_not_download_missing_tools(self):
         for name in ("local-fullstack.yml", "runtime-ci.yml", "frontend.yml"):
             source = (ROOT / ".github/workflows" / name).read_text()
