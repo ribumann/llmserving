@@ -2,6 +2,17 @@
 
 This frontend is a Vite + React + TypeScript shell for the Azure LLM Serving Demo operator UI.
 
+The static shell and workflow guide are public. Live pages mount only after
+the backend verifies `/session` using its normal operator authentication.
+Signed-out visitors can navigate the workflow and use **Sign in with Microsoft**;
+live environments, configuration, history, reports and all operational actions
+remain private. There are no public sample results or invented historical runs.
+An expired or forbidden session returns the UI to an explanatory protected state.
+
+This is not a read-only release mode: authorized operators retain the full
+workflow, including billable actions. A future public historical showcase needs
+a separately approved, sanitized dataset and server-side execution restrictions.
+
 Local Vite, the self-hosted Nginx image and Azure Container Apps use the same
 application. Container Apps is currently the only implemented cloud UI host;
 a second cloud host and standalone local-to-cloud Entra login are not supplied.

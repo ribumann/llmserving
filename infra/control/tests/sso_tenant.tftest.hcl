@@ -90,6 +90,18 @@ run "external_same_tenant_default" {
   command = plan
   assert {
     condition = (
+      jsondecode(azapi_resource.frontend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "AllowAnonymous"
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.platform.enabled
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.enabled
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.validation.allowedAudiences == [local.sso_client_id]
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.platform.enabled
+      && one([for env in azurerm_container_app.backend.template[0].container[0].env : env.value if env.name == "AUTH_MODE"]) == "entra-jwt"
+    )
+    error_message = "Only the static frontend may allow anonymous visitors; frontend SSO and backend EasyAuth/JWT validation must remain enabled."
+  }
+  assert {
+    condition = (
       length(azurerm_resource_group.control) == 1 && length(data.azurerm_resource_group.control) == 0
       && azurerm_role_assignment.backend_contributor["subscription"].role_definition_name == "Contributor"
       && azurerm_role_assignment.terraform_runner_contributor["subscription"].role_definition_name == "Contributor"
@@ -667,12 +679,16 @@ run "frontend_token_store_relays_signed_token_without_backend_auth_changes" {
       && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.login.tokenStore.enabled
       && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.login.tokenStore.azureBlobStorage.sasUrlSettingName == "frontend-token-store-sas"
       && one([for secret in azurerm_container_app.frontend.secret : secret.key_vault_secret_id if secret.name == "frontend-token-store-sas"]) == var.frontend_token_store_sas_secret_id
-      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "AllowAnonymous"
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.platform.enabled
+      && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.enabled
       && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.validation.allowedAudiences == [local.sso_client_id]
       && !contains(keys(jsondecode(azapi_resource.backend_auth_config[0].body).properties), "login")
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.platform.enabled
       && one([for env in azurerm_container_app.backend.template[0].container[0].env : env.value if env.name == "AUTH_MODE"]) == "entra-jwt"
     )
-    error_message = "Frontend alone must enable documented signed-token relay using a vault reference, preserving independent backend JWT validation and Easy Auth."
+    error_message = "The public frontend shell must retain signed-token relay and SSO using a vault reference, while backend Easy Auth and independent JWT validation remain required."
   }
 }
 

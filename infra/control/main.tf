@@ -1424,8 +1424,9 @@ resource "azapi_resource" "frontend_auth_config" {
         enabled = true
       }
       globalValidation = {
-        unauthenticatedClientAction = "RedirectToLoginPage"
-        redirectToProvider          = "azureactivedirectory"
+        # Only the static frontend is public. Nginx and the backend independently
+        # require a verified operator token for every /api request.
+        unauthenticatedClientAction = "AllowAnonymous"
       }
       identityProviders = {
         azureActiveDirectory = {

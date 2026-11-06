@@ -15,6 +15,11 @@ test('quickstart scenario 1 provision flow', async ({ page }) => {
     const url = new URL(request.url());
     const { pathname } = url;
 
+    if (pathname === '/session') {
+      await fulfillJson(route, 200, { authenticated: true });
+      return;
+    }
+
     if (pathname === '/profiles' && request.method() === 'GET') {
       await fulfillJson(
         route,

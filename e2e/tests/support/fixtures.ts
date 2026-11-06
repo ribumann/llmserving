@@ -151,6 +151,7 @@ export async function fulfillRunCatalog(route: Route): Promise<boolean> {
   if (route.request().method() !== 'GET') return false;
   const { pathname } = new URL(route.request().url());
   const responses: Record<string, Record<string, unknown>> = {
+    '/session': { authenticated: true },
     '/golden-datasets': {
       goldenDatasets: [{
         goldenDatasetId: 'golden-demo-v1', name: 'Demo golden', version: 1,
