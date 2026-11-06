@@ -172,6 +172,11 @@ class ReleaseBundleTests(unittest.TestCase):
         self.assertIn("package_release:", source)
         self.assertIn("default: false", source)
         self.assertIn(
+            """LLM_SERVING_OPERATOR_CONFIG: '{"repository":${{ toJSON(github.repository) }}}'""",
+            source,
+        )
+        self.assertNotIn("vars.AZURE_OPERATOR_REPOSITORY", source)
+        self.assertIn(
             "needs: [real-local-api, jobs, functions, mocked-browser, images]", source
         )
         self.assertIn("pattern: release-record-*-${{ github.run_attempt }}", source)

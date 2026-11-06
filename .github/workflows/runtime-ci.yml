@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 env:
-  LLM_SERVING_OPERATOR_CONFIG: '{"repository":"${{ vars.AZURE_OPERATOR_REPOSITORY }}"}'
+  LLM_SERVING_OPERATOR_CONFIG: '{"repository":${{ toJSON(github.repository) }}}'
 
 jobs:
   real-local-api:
