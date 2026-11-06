@@ -9,7 +9,9 @@ from common import azure_demo_vm
 from conftest import load_worker_entrypoint
 
 
-def test_saved_group_targets_ip_power_and_run_command_without_renaming_resources():
+def test_saved_group_targets_ip_power_and_run_command_without_renaming_resources(
+    monkeypatch,
+):
     network = MagicMock()
     network.network_interfaces.get.return_value.ip_configurations = [
         SimpleNamespace(private_ip_address="10.0.1.5")
@@ -45,6 +47,17 @@ def test_saved_group_targets_ip_power_and_run_command_without_renaming_resources
     compute.virtual_machines.begin_start.assert_called_once_with(
         "rg-retained", "saved-demo123-vm"
     )
+    monkeypatch.setattr(
+        azure_demo_vm.uuid, "uuid4", lambda: SimpleNamespace(hex="retained")
+    )
+    compute.virtual_machines.begin_run_command.return_value.result.return_value = {
+        "value": [
+            {
+                "code": "ComponentStatus/StdOut/succeeded",
+                "message": "LLMSERVING_RUN_OK_retained\n",
+            }
+        ]
+    }
     azure_demo_vm.run_command_on_vm(
         "sub",
         "demo123",

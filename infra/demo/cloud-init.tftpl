@@ -1,13 +1,83 @@
 #cloud-config
-package_update: true
-package_upgrade: false
-
-packages:
-  - ca-certificates
-  - curl
-  - gnupg
-
 write_files:
+  # Avoid cc_package_update_upgrade_install: Azure driver/security extensions
+  # legitimately contend for APT. All package work belongs to this bounded script.
+  - path: /opt/llmserving/bootstrap.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      export LC_ALL=C
+      state=/opt/llmserving
+      mkdir -p "$state/hf-cache"
+      rm -f "$state/bootstrap.ready" "$state/bootstrap.failed"
+      stage=prerequisites
+      log=$(mktemp)
+      lock_retries=0
+      trap 'rc=$?; rm -f "$log"; if [ "$rc" -ne 0 ]; then
+        echo "GPU bootstrap failed at $stage (exit $rc)." >&2
+        touch "$state/bootstrap.failed"
+      fi' EXIT
+
+      apt_retry() {
+        local attempt rc
+        for attempt in $(seq 1 30); do
+          if apt-get -o DPkg::Lock::Timeout=0 \
+            -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+            -o Acquire::Retries=0 -o APT::Update::Error-Mode=any "$@" >"$log" 2>&1; then
+            return 0
+          else
+            rc=$?
+          fi
+          # Retry lock acquisition only. Never remove lock files, kill their
+          # owners, reset cloud-init, or interfere with the security extensions.
+          if ! grep -Eq 'Could not get lock.*(held by process|Resource temporarily unavailable)' "$log"; then
+            echo "APT failed at $stage (exit $rc; not lock contention)." >&2
+            return "$rc"
+          fi
+          if [ "$attempt" -eq 30 ] || [ "$lock_retries" -ge 60 ]; then
+            echo "APT lock retry budget exhausted at $stage." >&2
+            return "$rc"
+          fi
+          echo "Waiting for APT lock at $stage ($attempt/30)."
+          lock_retries=$((lock_retries + 1))
+          sleep 10
+        done
+      }
+
+      apt_retry update
+      apt_retry install -y ca-certificates curl gnupg
+      stage=docker
+      # Explicit official Ubuntu repository: unlike the convenience installer,
+      # every apt operation here uses our lock-only retry contract.
+      install -m 0755 -d /etc/apt/keyrings
+      curl --connect-timeout 15 --max-time 60 -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+      chmod a+r /etc/apt/keyrings/docker.gpg
+      . /etc/os-release
+      printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu %s stable\n' \
+        "$(dpkg --print-architecture)" "$VERSION_CODENAME" > /etc/apt/sources.list.d/docker.list
+      apt_retry update
+      apt_retry install -y docker-ce docker-ce-cli containerd.io
+      systemctl enable --now docker
+      stage=nvidia-container-toolkit
+      curl --connect-timeout 15 --max-time 60 -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+        | gpg --batch --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      curl --connect-timeout 15 --max-time 60 -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+        | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+        > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+      apt_retry update
+      apt_retry install -y nvidia-container-toolkit
+      nvidia-ctk runtime configure --runtime=docker
+      systemctl restart docker
+      stage=docker-readiness
+      docker info >/dev/null
+      # Optional cache warming is bounded and is not a readiness requirement.
+      timeout --kill-after=10s 120 docker pull ${vllm_image} || true
+      touch "$state/bootstrap.ready"
+      echo "GPU runtime bootstrap ready."
+
   # Deliberately does NOT accept a Hugging Face token or model repo as a template parameter: FR-082
   # requires the HF credential to only ever exist in the model_deployment Container Apps Job's own
   # process memory (FR-082/FR-083), never in Terraform state (custom_data is persisted to state
@@ -23,6 +93,11 @@ write_files:
       # cloud-init. Usage: run-vllm.sh <model_repo> <hf_token> [extra_args...]
       set -euo pipefail
 
+      if [ ! -f /opt/llmserving/bootstrap.ready ] || [ -f /opt/llmserving/bootstrap.failed ]; then
+        echo "GPU runtime bootstrap is not ready; model startup refused." >&2
+        exit 1
+      fi
+
       model_repo="$1"
       hf_token="$2"
       shift 2 || true
@@ -36,6 +111,11 @@ write_files:
         echo "Waiting for NVIDIA driver... ($i/60)"
         sleep 10
       done
+      if ! nvidia-smi >/dev/null 2>&1; then
+        echo "NVIDIA driver readiness timed out; model startup refused." >&2
+        exit 1
+      fi
+      docker info >/dev/null
 
       docker rm -f llmserving-vllm >/dev/null 2>&1 || true
 
@@ -54,17 +134,6 @@ write_files:
         "$@"
 
 runcmd:
-  - mkdir -p /opt/llmserving/hf-cache
-  # Install Docker Engine (official convenience script, per Docker's documented install path).
-  - curl -fsSL https://get.docker.com | sh
-  - systemctl enable --now docker
-  # Install the NVIDIA Container Toolkit so Docker can pass GPUs through to containers.
-  - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-  - curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-  - apt-get update
-  - apt-get install -y nvidia-container-toolkit
-  - nvidia-ctk runtime configure --runtime=docker
-  - systemctl restart docker
-  # Pre-pull the vLLM image so the first model_deployment run-command invocation doesn't pay the
-  # image-pull cost on top of the model download.
-  - docker pull ${vllm_image} || true
+  # Never time out/kill apt or dpkg mid-transaction. Lock retries and network
+  # waits are bounded above; the model job has its own readiness wait deadline.
+  - [bash, /opt/llmserving/bootstrap.sh]

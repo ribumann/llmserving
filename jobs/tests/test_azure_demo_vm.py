@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from common import azure_demo_vm
 from common.azure_demo_vm import demo_resource_names, resolve_private_ip, vllm_base_url
 
 
@@ -40,7 +41,9 @@ def test_resolve_private_ip_returns_first_ip_configuration() -> None:
     client = _FakeNetworkClient(_FakeNic([_FakeIpConfig("10.0.1.5")]))
     ip = resolve_private_ip("sub-1", "demo123", client=client)
     assert ip == "10.0.1.5"
-    assert client.network_interfaces.calls == [("rg-llm-demo-demo123", "llm-demo123-nic")]
+    assert client.network_interfaces.calls == [
+        ("rg-llm-demo-demo123", "llm-demo123-nic")
+    ]
 
 
 def test_resolve_private_ip_raises_when_no_ip_configurations() -> None:
@@ -73,7 +76,9 @@ class _FakeVirtualMachines:
         self._result = result
         self.calls: list[tuple[str, str, dict]] = []
 
-    def begin_run_command(self, resource_group: str, vm_name: str, parameters: dict) -> _FakePoller:
+    def begin_run_command(
+        self, resource_group: str, vm_name: str, parameters: dict
+    ) -> _FakePoller:
         self.calls.append((resource_group, vm_name, parameters))
         return _FakePoller(self._result)
 
@@ -83,20 +88,39 @@ class _FakeComputeClient:
         self.virtual_machines = _FakeVirtualMachines(result)
 
 
-def test_run_command_on_vm_targets_correct_resource_and_blocks_on_result() -> None:
+def test_run_command_on_vm_targets_correct_resource_and_blocks_on_result(
+    monkeypatch,
+) -> None:
     from common.azure_demo_vm import run_command_on_vm
 
-    client = _FakeComputeClient(result="run-command-output")
+    monkeypatch.setattr(
+        azure_demo_vm.uuid, "uuid4", lambda: type("Id", (), {"hex": "fixed"})()
+    )
+    output = {
+        "value": [
+            {
+                "code": "ComponentStatus/StdOut/succeeded",
+                "message": "\nLLMSERVING_RUN_OK_fixed\n",
+            }
+        ]
+    }
+    client = _FakeComputeClient(result=output)
     result = run_command_on_vm(
-        "sub-1", "demo123", script_lines=["/opt/llmserving/run-vllm.sh a b"], client=client
+        "sub-1",
+        "demo123",
+        script_lines=["/opt/llmserving/run-vllm.sh a b"],
+        client=client,
     )
 
-    assert result == "run-command-output"
+    assert result is output
     resource_group, vm_name, parameters = client.virtual_machines.calls[0]
     assert resource_group == "rg-llm-demo-demo123"
     assert vm_name == "llm-demo123-vm"
     assert parameters["command_id"] == "RunShellScript"
-    assert parameters["script"] == ["/opt/llmserving/run-vllm.sh a b"]
+    assert "set -euo pipefail" in parameters["script"][0]
+    assert "/opt/llmserving/run-vllm.sh a b" in parameters["script"][0]
+    assert parameters["script"][0].endswith("|| exit $?")
+    assert "LLMSERVING_RUN_OK_fixed" in parameters["script"][1]
 
 
 class _FakeStatus:
@@ -139,8 +163,12 @@ def test_ensure_vm_running_starts_deallocated_vm() -> None:
     power_state = ensure_vm_running("sub-1", "demo123", client=client)
 
     assert power_state == "PowerState/deallocated"
-    assert client.virtual_machines.instance_view_calls == [("rg-llm-demo-demo123", "llm-demo123-vm")]
-    assert client.virtual_machines.begin_start_calls == [("rg-llm-demo-demo123", "llm-demo123-vm")]
+    assert client.virtual_machines.instance_view_calls == [
+        ("rg-llm-demo-demo123", "llm-demo123-vm")
+    ]
+    assert client.virtual_machines.begin_start_calls == [
+        ("rg-llm-demo-demo123", "llm-demo123-vm")
+    ]
 
 
 def test_ensure_vm_running_does_not_restart_a_running_vm() -> None:
@@ -160,4 +188,6 @@ def test_ensure_vm_running_starts_vm_when_power_state_unknown() -> None:
     power_state = ensure_vm_running("sub-1", "demo123", client=client)
 
     assert power_state == "PowerState/unknown"
-    assert client.virtual_machines.begin_start_calls == [("rg-llm-demo-demo123", "llm-demo123-vm")]
+    assert client.virtual_machines.begin_start_calls == [
+        ("rg-llm-demo-demo123", "llm-demo123-vm")
+    ]

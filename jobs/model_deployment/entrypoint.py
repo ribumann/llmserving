@@ -57,6 +57,22 @@ from common.telemetry import configure_job_telemetry  # noqa: E402
 from common.vllm_client import check_health  # noqa: E402
 
 RUN_VLLM_SCRIPT_PATH = "/opt/llmserving/run-vllm.sh"
+BOOTSTRAP_WAIT_SCRIPT = """\
+# Terraform VM provisioning does not imply cloud-init/runtime readiness.
+for attempt in $(seq 1 150); do
+  if [ -f /opt/llmserving/bootstrap.failed ]; then
+    echo "GPU runtime bootstrap failed; model startup refused." >&2
+    exit 1
+  fi
+  if [ -f /opt/llmserving/bootstrap.ready ] && [ -x /opt/llmserving/run-vllm.sh ]; then
+    break
+  fi
+  sleep 10
+done
+if [ ! -f /opt/llmserving/bootstrap.ready ] || [ ! -x /opt/llmserving/run-vllm.sh ]; then
+  echo "Timed out waiting for GPU runtime bootstrap; model startup refused." >&2
+  exit 1
+fi"""
 
 
 def _build_script_lines(
@@ -70,7 +86,7 @@ def _build_script_lines(
     )
     if quoted_args:
         command = f"{command} {quoted_args}"
-    return [command]
+    return [BOOTSTRAP_WAIT_SCRIPT, command]
 
 
 def run(
