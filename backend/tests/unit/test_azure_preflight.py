@@ -67,6 +67,7 @@ def evaluate(
     family="standardNCT4Family",
     include_spot=True,
     low_priority_capable="True",
+    restrictions=(),
 ):
     entries = [
         SimpleNamespace(
@@ -90,7 +91,7 @@ def evaluate(
     sku = SimpleNamespace(
         name="Standard_NC16as_T4_v3",
         locations=["eastus2"],
-        restrictions=[],
+        restrictions=list(restrictions),
         capabilities=[
             SimpleNamespace(name="vCPUs", value=vcpus),
             SimpleNamespace(name="LowPriorityCapable", value=low_priority_capable),
@@ -128,6 +129,88 @@ def test_spot_is_blocked_by_sku_capability_despite_sufficient_quota() -> None:
 
 def test_regular_does_not_require_spot_capability() -> None:
     assert evaluate(priority="Regular", low_priority_capable="False").available is True
+
+
+def test_zone_only_restrictions_do_not_block_unzoned_regional_placement() -> None:
+    zone_restriction = SimpleNamespace(
+        type="Zone",
+        reason_code="NotAvailableForSubscription",
+        values=["1", "2", "3"],
+    )
+
+    result = evaluate(priority="Regular", restrictions=[zone_restriction])
+
+    assert result.available is True
+    assert result.sku.available is True
+    assert result.sku.restrictions == ["Zone:NotAvailableForSubscription:1, 2, 3"]
+    assert any("does not select a zone" in item for item in result.sku.evidence)
+
+
+def test_location_restriction_blocks_regional_placement() -> None:
+    location_restriction = SimpleNamespace(
+        type="Location",
+        reason_code="NotAvailableForSubscription",
+        values=["eastus2"],
+    )
+
+    result = evaluate(priority="Regular", restrictions=[location_restriction])
+
+    assert result.available is False
+    assert result.sku.available is False
+    assert any(
+        "Location:NotAvailableForSubscription:eastus2" in item for item in result.sku.evidence
+    )
+
+
+def test_location_restriction_for_another_region_does_not_block_target_region() -> None:
+    location_restriction = SimpleNamespace(
+        type="Location",
+        reason_code="NotAvailableForSubscription",
+        values=["italynorth"],
+    )
+
+    result = evaluate(priority="Regular", restrictions=[location_restriction])
+
+    assert result.available is True
+    assert result.sku.available is True
+
+
+def test_unknown_sku_restriction_fails_closed() -> None:
+    unknown_restriction = SimpleNamespace(
+        type="FutureRestriction",
+        reason_code="NotAvailableForSubscription",
+        values=["unknown"],
+    )
+
+    result = evaluate(priority="Regular", restrictions=[unknown_restriction])
+
+    assert result.available is False
+    assert result.sku.available is False
+    assert any(
+        "FutureRestriction:NotAvailableForSubscription:unknown" in item
+        for item in result.sku.evidence
+    )
+
+
+def test_zone_only_sku_restriction_does_not_bypass_insufficient_quota() -> None:
+    zone_restriction = SimpleNamespace(
+        type="Zone",
+        reason_code="NotAvailableForSubscription",
+        values=["1", "2", "3"],
+    )
+
+    result = evaluate(
+        priority="Regular",
+        usage=8,
+        limit=8,
+        regional_usage=108,
+        regional_limit=108,
+        restrictions=[zone_restriction],
+    )
+
+    assert result.sku.available is True
+    assert result.quota.available is False
+    assert result.available is False
 
 
 @pytest.mark.parametrize("capability", [None, "invalid", ""])

@@ -306,7 +306,12 @@ class AzureCapacityPreflight:
                 evidence=[f"{vm_size} is not listed in Azure resource SKUs for {region}."],
             )
 
-        restrictions = self._restriction_messages(getattr(sku_entry, "restrictions", []) or [])
+        raw_restrictions = list(getattr(sku_entry, "restrictions", []) or [])
+        restrictions = self._restriction_messages(raw_restrictions)
+        zonal_restrictions = [
+            item for item in raw_restrictions if str(getattr(item, "type", "")).casefold() == "zone"
+        ]
+        blocking_restrictions = self._blocking_restrictions(raw_restrictions, region=region)
         raw_vcpus = next(
             (
                 getattr(item, "value", None)
@@ -331,10 +336,19 @@ class AzureCapacityPreflight:
             for zone in list(getattr(location_info, "zones", []) or [])
         ]
 
-        available = False if restrictions else True
+        available = not blocking_restrictions
         evidence = [f"{vm_size} is listed for {region}."] if available else []
-        if restrictions:
-            evidence.append(f"{vm_size} is restricted in {region}: {'; '.join(restrictions)}")
+        if blocking_restrictions:
+            evidence.append(
+                f"{vm_size} is restricted in {region}: "
+                f"{'; '.join(self._restriction_messages(blocking_restrictions))}"
+            )
+        elif zonal_restrictions:
+            evidence.append(
+                f"{vm_size} reports zone-specific restrictions in {region}; "
+                "this deployment does not select a zone, so they do not block "
+                "regional placement."
+            )
         if priority == "Spot":
             capability = next(
                 (
@@ -395,6 +409,26 @@ class AzureCapacityPreflight:
                 f"{restriction_type or 'restriction'}:{reason_code or 'unknown'}:{detail}"
             )
         return messages
+
+    @staticmethod
+    def _blocking_restrictions(restrictions: Iterable[Any], *, region: str) -> list[Any]:
+        blocking: list[Any] = []
+        for restriction in restrictions:
+            restriction_type = str(getattr(restriction, "type", "")).casefold()
+            if restriction_type == "zone":
+                continue
+            if restriction_type == "location":
+                values = list(getattr(restriction, "values", None) or [])
+                restriction_info = getattr(restriction, "restriction_info", None)
+                locations = list(getattr(restriction_info, "locations", None) or [])
+                restricted_locations = values or locations
+                if restricted_locations and not any(
+                    str(location).casefold() == region.casefold()
+                    for location in restricted_locations
+                ):
+                    continue
+            blocking.append(restriction)
+        return blocking
 
     @staticmethod
     def _usage_name(entry: Any) -> str | None:
