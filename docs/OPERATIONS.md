@@ -44,6 +44,37 @@ succeed. A failed stage writes `bootstrap.failed` and emits a stage/exit-code
 diagnostic without dumping command output. Optional immutable-image cache warming
 has a separate 120-second limit and is not required for readiness.
 
+The managed NVIDIA extension must **not overlap cloud-init**. A VM resource
+reporting provisioned does not establish that cloud-init has finished. The
+`GpuBootstrapGate` Custom Script v2 extension observes `cloud-init status --wait`
+with a 25-minute deadline, then requires the real `bootstrap.ready` and absence
+of `bootstrap.failed`. Terraform explicitly creates the NVIDIA extension only
+after this gate succeeds. Timeout stops only the status observer, never
+cloud-init or its package transactions. Cloud-init errors (including degraded
+exit status), missing readiness and driver-extension failures remain terminal;
+neither extension suppresses failures. The gate never writes readiness markers.
+
+This orders our repository/keyring/index updates and package installs before
+the managed driver's own APT operations. Concurrent first-boot evidence included
+a missing Ubuntu InRelease file/weak-security diagnostic and, on another boot,
+unavailable Ubuntu dependencies during `nvidia-open` installation. Neither
+message proves lock contention, a trust-policy problem, or a particular index
+mutator. Our bootstrap refreshes indexes but does not explicitly delete APT
+lists. Ordering removes this known overlap; it does not prove that the external
+repository/dependency issue is resolved. Do not bypass APT trust checks, ignore
+uninstallable dependencies, suppress extension errors, or count a late automatic
+retry as successful provisioning after a terminal application failure.
+
+The [documented NVIDIA settings](https://learn.microsoft.com/azure/virtual-machines/extensions/hpccompute-gpu-linux#settings)
+have no cloud-init ordering hook. The gate uses the supported
+[Custom Script v2 inline script](https://learn.microsoft.com/azure/virtual-machines/extensions/custom-script-linux#property-script)
+on the existing VM, covered by existing VM extension permissions; no new
+identity, role, network exposure or external script download is introduced.
+Policy-managed agents retain their independent scheduling and protections.
+Fresh Azure/GPU acceptance is still required: local contracts cannot guarantee
+external package availability, policy-agent serialization or extension versions
+selected by the existing minor auto-upgrade policy.
+
 The model job waits up to 25 minutes for explicit bootstrap readiness, failing
 immediately on `bootstrap.failed`. The launcher independently refuses startup
 without readiness and requires a working GPU driver (up to 10 minutes) and Docker

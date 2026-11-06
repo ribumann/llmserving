@@ -82,6 +82,10 @@ if [ "${SLEEP_BOOTSTRAP:-0}" = 1 ] && [ "$n" = 1 ]; then bash bootstrap.sh; fi
 shift; shift
 exec "$@"
 """,
+        "cloud-init": """\
+if [ "${CLOUD_INIT_COMPLETE_BOOTSTRAP:-0}" = 1 ]; then bash bootstrap.sh; fi
+exit "${CLOUD_INIT_STATUS:-0}"
+""",
         "curl": """\
 if [ "${CURL_FAIL:-0}" = 1 ]; then exit 22; fi
 echo 'deb https://synthetic stable main'
@@ -264,6 +268,94 @@ def test_model_start_requires_actual_driver_readiness(shell):
     assert result.returncode != 0
     assert "driver readiness timed out" in result.stderr
     assert not (shell.root / "model-started").exists()
+
+
+def bootstrap_gate():
+    return TEMPLATE.with_name("bootstrap-gate.sh").read_text(encoding="utf-8")
+
+
+def test_managed_driver_has_explicit_bootstrap_gate_dependency():
+    source = TEMPLATE.with_name("main.tf").read_text(encoding="utf-8")
+    driver = source.split(
+        'resource "azurerm_virtual_machine_extension" "nvidia_driver" {', 1
+    )[1]
+    assert re.search(
+        r"depends_on\s*=\s*\[azurerm_virtual_machine_extension.bootstrap_gate\]", driver
+    )
+    gate = source.split(
+        'resource "azurerm_virtual_machine_extension" "bootstrap_gate" {', 1
+    )[1].split("# Installs the NVIDIA", 1)[0]
+    assert 'script = filebase64("${path.module}/bootstrap-gate.sh")' in gate
+    assert "azurerm_linux_virtual_machine.demo.id" in gate
+    assert "nvidia_driver" not in gate  # No dependency cycle.
+
+
+def test_gate_waits_for_real_bootstrap_without_running_driver_early(shell):
+    result = shell.run(bootstrap_gate(), CLOUD_INIT_COMPLETE_BOOTSTRAP=1, APT_LOCKS=1)
+    assert result.returncode == 0, result.stderr
+    assert "managed NVIDIA driver installation may start" in result.stdout
+    assert (shell.root / "state/bootstrap.ready").exists()
+    events = (shell.root / "events").read_text()
+    assert events.index("cloud-init status --wait") < events.index("apt-get ")
+    assert events.index("apt-get ") < events.index("docker info")
+
+
+@pytest.mark.parametrize("status", [1, 2, 127])
+def test_gate_propagates_cloud_init_failure_even_with_stale_ready_marker(shell, status):
+    (shell.root / "state/bootstrap.ready").touch()
+    result = shell.run(bootstrap_gate(), CLOUD_INIT_STATUS=status)
+    assert result.returncode == status
+    assert "cloud-init failed or readiness wait timed out" in result.stderr
+    assert "installation may start" not in result.stdout
+
+
+@pytest.mark.parametrize("markers", [[], ["failed"], ["ready", "failed"]])
+def test_gate_rejects_missing_or_failed_bootstrap_despite_cloud_init_success(
+    shell, markers
+):
+    for marker in markers:
+        (shell.root / f"state/bootstrap.{marker}").touch()
+    result = shell.run(bootstrap_gate())
+    assert result.returncode == 1
+    assert "successful runtime bootstrap was not confirmed" in result.stderr
+
+
+def test_gate_propagates_actual_bootstrap_failure(shell):
+    result = shell.run(
+        bootstrap_gate(), CLOUD_INIT_COMPLETE_BOOTSTRAP=1, APT_FAIL_MATCH="update"
+    )
+    assert result.returncode == 100
+    assert (shell.root / "state/bootstrap.failed").exists()
+    assert not (shell.root / "state/bootstrap.ready").exists()
+    assert "installation may start" not in result.stdout
+
+
+def test_gate_timeout_only_terminates_status_observer(shell):
+    # Execute real GNU timeout, shortening only its deadline for this test.
+    # The simulated package transaction is a sibling, not a child of the
+    # observer, matching cloud-init's independent systemd service.
+    assert "timeout --kill-after=10s 1500 cloud-init status --wait" in bootstrap_gate()
+    gate = bootstrap_gate().replace(
+        "timeout --kill-after=10s 1500", '"/usr/bin/timeout" --kill-after=1s 0.1s'
+    )
+    (shell.root / "bin/cloud-init").write_text(
+        "#!/bin/sh\nexec /usr/bin/sleep 5\n", encoding="utf-8", newline="\n"
+    )
+    script = (
+        # Keep the sibling alive until explicitly released, rather than relying
+        # on process startup timing (particularly slow under Windows Git Bash).
+        'trap "touch package-finish" EXIT\n'
+        "(while [ ! -f package-finish ]; do /usr/bin/sleep 1; done; "
+        "touch package-survived) &\npackage_pid=$!\n"
+        "set +e\n(\n" + gate + "\n)\nrc=$?\nset -e\n"
+        'kill -0 "$package_pid"\ntouch package-finish\nwait "$package_pid"\nexit "$rc"\n'
+    )
+    result = shell.run(script)
+    # GNU timeout returns 137 if its KILL fallback was needed (seen on Git Bash).
+    assert result.returncode in {124, 137}, result.stderr
+    assert f"readiness wait timed out (exit {result.returncode})" in result.stderr
+    assert (shell.root / "package-survived").exists()
+    assert not (shell.root / "state/bootstrap.ready").exists()
 
 
 @pytest.mark.parametrize(
