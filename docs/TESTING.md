@@ -88,7 +88,21 @@ network or cloud operation is performed. These tests cover lock-only retries,
 retry exhaustion, terminal failures, idempotent readiness, startup gating and
 Bash fail-fast. `tests/test_run_command_contract.py` covers SDK objects and classic
 combined streams, unique/exact stdout markers, benign stderr and secret-safe
-failures. Run the focused set or the full worker suite from `jobs/`:
+failures.
+
+The bootstrap tests also execute the shipped Custom Script gate: full cloud-init
+completion precedes permission to start the managed driver; cloud-init nonzero
+statuses, bootstrap failure and missing/contradictory readiness all fail closed.
+A real shortened GNU timeout verifies that only the status observer stops while
+an independent simulated package operation survives. Native demo Terraform tests
+assert the exact embedded script, supported handler, ownership tags, unchanged
+managed NVIDIA settings and unsuppressed failures. `terraform graph -type=plan`
+must contain the dependency chain `nvidia_driver -> bootstrap_gate -> demo VM`;
+source regressions additionally guard the explicit dependency and absence of a
+reverse edge. These are ordering/failure contracts, not third-party dependency
+resolution or live GPU acceptance.
+
+Run the focused set or the full worker suite from `jobs/`:
 
 ```sh
 python -m pytest -q tests/test_gpu_bootstrap.py tests/test_run_command_contract.py tests/test_azure_demo_vm.py tests/test_model_deployment.py tests/test_retained_vm_scope.py

@@ -138,8 +138,28 @@ resource "azurerm_linux_virtual_machine" "demo" {
   }))
 }
 
-# Installs the NVIDIA GPU driver required for the NC-series accelerator before the vLLM container
-# (started by cloud-init) attempts to use the GPU.
+# VM provisioning returns before cloud-init finishes. NVIDIA's managed installer
+# also uses APT and cannot safely overlap our Docker/toolkit package operations.
+# Its documented settings have no cloud-init ordering hook, so use a read-only
+# Custom Script v2 observer before creating the driver extension. No downloads,
+# model inputs, credentials, policy changes or package-process termination.
+resource "azurerm_virtual_machine_extension" "bootstrap_gate" {
+  name                        = "GpuBootstrapGate"
+  virtual_machine_id          = azurerm_linux_virtual_machine.demo.id
+  publisher                   = "Microsoft.Azure.Extensions"
+  type                        = "CustomScript"
+  type_handler_version        = "2.1"
+  auto_upgrade_minor_version  = true
+  failure_suppression_enabled = false
+  tags                        = local.common_tags
+
+  settings = jsonencode({
+    script = filebase64("${path.module}/bootstrap-gate.sh")
+  })
+}
+
+# Installs the NVIDIA GPU driver only after cloud-init and runtime bootstrap
+# succeed. vLLM is started later by the model job, never by cloud-init.
 #
 # `settings` is required: without it the extension's public settings are empty, its install
 # script defaults to InstallMethod 0 (legacy direct .deb download keyed off a DRIVER_URL setting)
@@ -150,13 +170,16 @@ resource "azurerm_linux_virtual_machine" "demo" {
 # package. installCUDA is set to false because this VM only needs the driver + nvidia-container-
 # toolkit for Docker GPU passthrough, not the full host-level CUDA toolkit.
 resource "azurerm_virtual_machine_extension" "nvidia_driver" {
-  name                       = "NvidiaGpuDriverLinux"
-  virtual_machine_id         = azurerm_linux_virtual_machine.demo.id
-  publisher                  = "Microsoft.HpcCompute"
-  type                       = "NvidiaGpuDriverLinux"
-  type_handler_version       = "1.9"
-  auto_upgrade_minor_version = true
-  tags                       = local.common_tags
+  depends_on = [azurerm_virtual_machine_extension.bootstrap_gate]
+
+  name                        = "NvidiaGpuDriverLinux"
+  virtual_machine_id          = azurerm_linux_virtual_machine.demo.id
+  publisher                   = "Microsoft.HpcCompute"
+  type                        = "NvidiaGpuDriverLinux"
+  type_handler_version        = "1.9"
+  auto_upgrade_minor_version  = true
+  failure_suppression_enabled = false
+  tags                        = local.common_tags
 
   settings = jsonencode({
     InstallMethod = 1

@@ -47,6 +47,27 @@ run "managed_default" {
     condition     = azurerm_linux_virtual_machine.demo.priority == "Spot" && azurerm_linux_virtual_machine.demo.eviction_policy == "Deallocate" && azurerm_linux_virtual_machine.demo.max_bid_price == -1
     error_message = "Omitted allocation priority must preserve existing Spot behavior."
   }
+  assert {
+    condition = (
+      azurerm_virtual_machine_extension.bootstrap_gate.name == "GpuBootstrapGate"
+      && azurerm_virtual_machine_extension.bootstrap_gate.publisher == "Microsoft.Azure.Extensions"
+      && azurerm_virtual_machine_extension.bootstrap_gate.type == "CustomScript"
+      && azurerm_virtual_machine_extension.bootstrap_gate.type_handler_version == "2.1"
+      && jsondecode(azurerm_virtual_machine_extension.bootstrap_gate.settings).script == filebase64("${path.module}/bootstrap-gate.sh")
+      && !coalesce(azurerm_virtual_machine_extension.bootstrap_gate.failure_suppression_enabled, false)
+      && !coalesce(azurerm_virtual_machine_extension.nvidia_driver.failure_suppression_enabled, false)
+    )
+    error_message = "First boot must use the shipped bounded observer without suppressing gate or NVIDIA failures."
+  }
+  assert {
+    condition = (
+      azurerm_virtual_machine_extension.nvidia_driver.publisher == "Microsoft.HpcCompute"
+      && azurerm_virtual_machine_extension.nvidia_driver.type == "NvidiaGpuDriverLinux"
+      && jsondecode(azurerm_virtual_machine_extension.nvidia_driver.settings).InstallMethod == 1
+      && !jsondecode(azurerm_virtual_machine_extension.nvidia_driver.settings).installCUDA
+    )
+    error_message = "Ordering must preserve managed NVIDIA driver installation and existing driver settings."
+  }
 }
 
 run "regular_allocation" {
@@ -109,7 +130,7 @@ run "retained_group" {
     error_message = "GPU allocation must remain regional unless a supported availability zone is explicitly selected."
   }
   assert {
-    condition     = azurerm_linux_virtual_machine.demo.tags["managedBy"] == "copilot-release" && azurerm_network_interface.demo.tags["project"] == "owned-test" && azurerm_virtual_machine_extension.nvidia_driver.tags["environmentId"] == "demo123"
+    condition     = azurerm_linux_virtual_machine.demo.tags["managedBy"] == "copilot-release" && azurerm_network_interface.demo.tags["project"] == "owned-test" && azurerm_virtual_machine_extension.nvidia_driver.tags["environmentId"] == "demo123" && azurerm_virtual_machine_extension.bootstrap_gate.tags["managedBy"] == "copilot-release" && azurerm_virtual_machine_extension.bootstrap_gate.tags["environmentId"] == "demo123"
     error_message = "Owned resource tags must preserve operator tags and enforce the environment id."
   }
 }
