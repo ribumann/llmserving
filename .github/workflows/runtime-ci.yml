@@ -141,6 +141,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Build real image without registry credentials or push
+        timeout-minutes: ${{ matrix.image == 'frontend' && 10 || 45 }}
         env:
           IMAGE: ${{ matrix.image }}
         shell: bash

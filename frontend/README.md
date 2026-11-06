@@ -88,3 +88,8 @@ The real-image smoke uses a synthetic loopback upstream to check path/header
 transport and missing-token rejection. It does not validate an Entra session.
 Actual platform ID-token injection and authenticated browser requests remain a
 separate release gate; see [authentication prerequisites](../docs/AUTHENTICATION.md).
+
+Container builds use the locked local TypeScript/Vite binaries, never `npx`
+downloads as a fallback for an incomplete install. Registry fetches are bounded
+and logged; missing build tools fail the install layer explicitly. A registry
+TLS/network failure must be repaired without disabling certificate verification.
