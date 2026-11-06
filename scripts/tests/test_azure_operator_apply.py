@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from scripts.tests import operator_fixture  # noqa: F401
+
 import json
 import os
 import sys
@@ -131,7 +133,7 @@ class OperatorApplyTests(unittest.TestCase):
             selected = {
                 "root_certificate_public_data": "public",
                 "root_certificate_sha256": "a" * 64,
-                "expires_at": "2026-11-05T21:55:55Z",
+                "expires_at": "2030-01-01T00:00:00Z",
             }
             target = root / "target.json"
             target.write_text(json.dumps(selected))
@@ -178,7 +180,7 @@ class OperatorApplyTests(unittest.TestCase):
                     {
                         "root_certificate_public_data": "public",
                         "root_certificate_sha256": "a" * 64,
-                        "expires_at": "2026-11-05T21:55:55Z",
+                        "expires_at": "2030-01-01T00:00:00Z",
                     }
                 )
             )

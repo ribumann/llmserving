@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 from functools import partial
 from pathlib import Path
@@ -30,12 +32,12 @@ def expected_resources() -> dict[str, dict]:
             **fields,
         }
 
-    vnet = f"{ROOT}/providers/Microsoft.Network/virtualNetworks/llmrelease-shared-vnet"
+    vnet = f"{ROOT}/providers/Microsoft.Network/virtualNetworks/{setting('resource_prefix')}-shared-vnet"
     add(
         "virtual_network",
         "shared",
-        "llmrelease-shared-vnet",
-        "Microsoft.Network/virtualNetworks/llmrelease-shared-vnet",
+        f"{setting('resource_prefix')}-shared-vnet",
+        f"Microsoft.Network/virtualNetworks/{setting('resource_prefix')}-shared-vnet",
     )
     for label in ("containerapps", "functions", "data", "private_endpoints", "gpu"):
         name = f"snet-{label.replace('_', '-')}"
@@ -43,27 +45,27 @@ def expected_resources() -> dict[str, dict]:
             "subnet",
             label,
             name,
-            f"Microsoft.Network/virtualNetworks/llmrelease-shared-vnet/subnets/{name}",
+            f"Microsoft.Network/virtualNetworks/{setting('resource_prefix')}-shared-vnet/subnets/{name}",
             tagged=False,
-            virtual_network_name="llmrelease-shared-vnet",
+            virtual_network_name=f"{setting('resource_prefix')}-shared-vnet",
         )
     add(
         "network_security_group",
         "gpu",
-        "llmrelease-gpu-nsg",
-        "Microsoft.Network/networkSecurityGroups/llmrelease-gpu-nsg",
+        f"{setting('resource_prefix')}-gpu-nsg",
+        f"Microsoft.Network/networkSecurityGroups/{setting('resource_prefix')}-gpu-nsg",
     )
     add(
         "public_ip",
         "nat",
-        "llmrelease-shared-nat-pip",
-        "Microsoft.Network/publicIPAddresses/llmrelease-shared-nat-pip",
+        f"{setting('resource_prefix')}-shared-nat-pip",
+        f"Microsoft.Network/publicIPAddresses/{setting('resource_prefix')}-shared-nat-pip",
     )
     add(
         "nat_gateway",
         "shared",
-        "llmrelease-shared-natgw",
-        "Microsoft.Network/natGateways/llmrelease-shared-natgw",
+        f"{setting('resource_prefix')}-shared-natgw",
+        f"Microsoft.Network/natGateways/{setting('resource_prefix')}-shared-natgw",
     )
     for label, zone in (
         ("postgres", "privatelink.postgres.database.azure.com"),
@@ -75,7 +77,7 @@ def expected_resources() -> dict[str, dict]:
         add(
             "private_dns_zone", label, zone, f"Microsoft.Network/privateDnsZones/{zone}"
         )
-        name = f"llmrelease-{label}-link"
+        name = f"{setting('resource_prefix')}-{label}-link"
         add(
             "private_dns_zone_virtual_network_link",
             label,
@@ -95,8 +97,8 @@ def expected_resources() -> dict[str, dict]:
     add(
         "key_vault",
         "shared",
-        "llmrelease-kv-0ea5e6",
-        "Microsoft.KeyVault/vaults/llmrelease-kv-0ea5e6",
+        f"{setting('resource_prefix')}-kv-{setting('resource_suffix')}",
+        f"Microsoft.KeyVault/vaults/{setting('resource_prefix')}-kv-{setting('resource_suffix')}",
         tenant_id=FALLBACK_TARGET.tenant,
         enable_rbac_authorization=True,
         public_network_access_enabled=False,
@@ -104,21 +106,21 @@ def expected_resources() -> dict[str, dict]:
     add(
         "private_endpoint",
         "vault",
-        "llmrelease-vault-pe",
-        "Microsoft.Network/privateEndpoints/llmrelease-vault-pe",
+        f"{setting('resource_prefix')}-vault-pe",
+        f"Microsoft.Network/privateEndpoints/{setting('resource_prefix')}-vault-pe",
         subnet_id=f"{vnet}/subnets/snet-private-endpoints",
     )
     add(
         "log_analytics_workspace",
         "shared",
-        "llmrelease-law",
-        "Microsoft.OperationalInsights/workspaces/llmrelease-law",
+        f"{setting('resource_prefix')}-law",
+        f"Microsoft.OperationalInsights/workspaces/{setting('resource_prefix')}-law",
     )
     add(
         "application_insights",
         "shared",
-        "llmrelease-appi",
-        "Microsoft.Insights/components/llmrelease-appi",
+        f"{setting('resource_prefix')}-appi",
+        f"Microsoft.Insights/components/{setting('resource_prefix')}-appi",
         workspace_id=resources["azurerm_log_analytics_workspace.shared"]["id"],
     )
     return resources
@@ -250,7 +252,7 @@ def validate_endpoint(
             known = equal(selected, expected)
             unknown = selected is None
             if (
-                value.get("name") != "llmrelease-vault-psc"
+                value.get("name") != f"{setting('resource_prefix')}-vault-psc"
                 or value.get("is_manual_connection") is not False
                 or value.get("subresource_names") != ["vault"]
             ):
@@ -318,7 +320,7 @@ def validate_values(
                 public_ip = RESOURCES[bindings["public_ip_address_id"]]["id"]
                 allowed_ids = {
                     f"{gateway}|{public_ip}",
-                    f"{gateway}/publicIPAddresses/llmrelease-shared-nat-pip",
+                    f"{gateway}/publicIPAddresses/{setting('resource_prefix')}-shared-nat-pip",
                 }
             if not any(equal(values.get("id"), value) for value in allowed_ids):
                 raise PlanRejected(
@@ -415,7 +417,7 @@ def validate_fixed_shared(
         "subscription_id": FALLBACK_TARGET.subscription,
         "location": REGION,
         "stage": "release",
-        "name_prefix": "llmrelease",
+        "name_prefix": setting("resource_prefix"),
         "tags": FALLBACK_TARGET.group_tags,
         "key_vault_allowed_ip_ranges": [],
     }.items():

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from scripts.tests import operator_fixture  # noqa: F401
+
 import copy
 import sys
 import unittest
@@ -59,7 +61,7 @@ class SharedPlanTests(unittest.TestCase):
             if address == "azurerm_private_endpoint.vault":
                 values["private_service_connection"] = [
                     {
-                        "name": "llmrelease-vault-psc",
+                        "name": "llmexample-vault-psc",
                         "is_manual_connection": False,
                         "subresource_names": ["vault"],
                         "private_connection_resource_id": (
@@ -180,7 +182,7 @@ class SharedPlanTests(unittest.TestCase):
                     "existing_resource_group_name": guard.GROUP,
                     "location": guard.REGION,
                     "stage": "release",
-                    "name_prefix": "llmrelease",
+                    "name_prefix": "llmexample",
                     "tags": guard.FALLBACK_TARGET.group_tags,
                     "key_vault_allowed_ip_ranges": [],
                 }.items()

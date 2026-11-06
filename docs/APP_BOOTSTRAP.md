@@ -7,22 +7,24 @@ adds one credential to the fixed existing app and writes it privately to Key
 Vault. The helper creates no app, service principal, permission/consent grant,
 role, DNS record or infrastructure resource.
 
-The fixed target is subscription `86677b6e-28fc-48e4-8988-5ab9e568eece`,
-tenant `ecd6dfda-d2ce-47a8-9901-e35f31fe18dd` and the explicitly approved isolated
-app `962740a1-be3e-454f-87c3-537ed1f02b78`. Never substitute a production app.
-Domain ownership of `liberatetheinnerchild.net` does not establish an operator's
-Entra UPN domain. The confirmed admin UPN is
-`admin@MngEnvMCAP621318.onmicrosoft.com`; explicitly allow its actual domain.
-Any additional user domains must be separately selected by the operator.
+The target subscription, tenant, isolated application, operator UPN and allowed
+email domains are explicit operator inputs; no live identifiers or personal
+domains are defaults. Load the required protected `LLM_SERVING_OPERATOR_CONFIG`
+JSON with its explicit frozen keys before using these tools; see
+[`OPERATOR_CONFIGURATION.md`](OPERATOR_CONFIGURATION.md) for the contract.
+Never substitute a production app. The operator must explicitly approve the
+UPN and its actual Entra domain; any additional user domains must be separately
+selected by the operator.
 Custom DNS is optional and is not required for initial Azure default-domain deployment.
-Historical resource/workflow names are unchanged.
+Resource and workflow names come from the approved operator configuration.
 
 ## Input contract
 
-Create a local JSON file with exactly these fields. Replace every placeholder
-with reviewed release outputs; registry **pull** digests are not Docker config
-digests. The ZIP is resolved relative to this JSON file. No credential belongs
-in this file or in Terraform inputs.
+Create a protected local JSON file with exactly these fields. Replace every
+placeholder with reviewed release outputs or explicit operator-approved
+values; registry **pull** digests are not Docker config digests. The ZIP is
+resolved relative to this JSON file. No credential belongs in this file or in
+Terraform inputs.
 
 ```json
 {
@@ -39,8 +41,8 @@ in this file or in Terraform inputs.
   },
   "functions_zip": "functions.zip",
   "functions_sha256": "<reviewed ZIP SHA-256>",
-  "allowed_email_domains": ["mngenvmcap621318.onmicrosoft.com"],
-  "operator_upn": "admin@MngEnvMCAP621318.onmicrosoft.com"
+  "allowed_email_domains": ["<operator-approved-email-domain>"],
+  "operator_upn": "<operator-approved-upn>"
 }
 ```
 
@@ -86,11 +88,12 @@ dependencies, state availability, permissions or authentication.
    exists for initial app secret resolution. Easy Auth stays enabled, but
    interactive sign-in fails closed until final callbacks are configured.
 5. After CAE creation, `preview-callbacks` reads its real `defaultDomain` and
-   computes exactly `llmrelease-{frontend,backend}.<defaultDomain>`. The separately
-   approved `set-callbacks` route updates those two URLs and enables ID-token
-   issuance. There is no CAE/app/auth dependency cycle and no temporary anonymous
-   app. An interrupted full apply may leave a readable CAE; completing auth
-   configuration is not permission to skip recovery/review of that apply.
+   computes each approved frontend/backend app name under `<defaultDomain>`.
+   The separately approved `set-callbacks` route updates those two URLs and
+   enables ID-token issuance. There is no CAE/app/auth dependency cycle and no
+   temporary anonymous app. An interrupted full apply may leave a readable
+   CAE; completing auth configuration is not permission to skip recovery/review
+   of that apply.
 6. Upload the verified Functions ZIP to its digest-named private host-storage
    blob, then restart/sync triggers as described below. The helper emits the
    checked `functions_package_sha256` Terraform input; Terraform creates the
@@ -104,9 +107,9 @@ operator action is phase 1, then preview and the approved `create-secret` comman
 Use the operator's own existing Azure CLI login, not a transferred credential
 cache. The script performs fixed-resource GETs during preview. Azure/Graph
 errors fail closed without copying raw diagnostics into logs.
-Graph reads and writes use the operator-confirmed application object ID
-`7bde2219-78f9-4d81-9707-38646a3775bb`; preview verifies that its returned `id`
-and `appId` match that object and the fixed client ID. The plain object-ID URL
+Graph reads and writes use the operator-confirmed application object ID from
+the protected configuration; preview verifies that its returned `id` and
+`appId` match the approved object and client IDs. The plain object-ID URL
 avoids the alternate-key selector's command-shell metacharacters on Windows.
 
 ```sh
@@ -156,9 +159,9 @@ explicitly revoke only that new credential before previewing/creating again:
 
 ```sh
 az rest --method POST \
-  --url "https://graph.microsoft.com/v1.0/applications(appId='962740a1-be3e-454f-87c3-537ed1f02b78')/removePassword" \
+  --url "https://graph.microsoft.com/v1.0/applications(appId='<approved-client-id>')/removePassword" \
   --body '{"keyId":"<only-the-new-recovery-key-id>"}' \
-  --subscription 86677b6e-28fc-48e4-8988-5ab9e568eece \
+  --subscription <approved-subscription-id> \
   --only-show-errors --output none
 ```
 
@@ -167,6 +170,10 @@ before any retry; the helper will refuse a second initial credential when the
 first is visible. This is not a transactional two-service operation. Use the
 explicit expiry in rotation monitoring; never let a 90-day credential expire
 without a separately approved rotation.
+
+The angle-bracket values in command examples are documentation placeholders,
+not literal arguments. Substitute only operator-approved values from the
+protected configuration.
 
 Alternatively, supply
 the separately approved credential over an already-open, operator-owned pipe
@@ -290,18 +297,18 @@ operator upload access, use the reviewed outputs for account/app names:
 ```sh
 python scripts/app_bootstrap.py validate --inputs /protected/app-inputs.json
 az storage blob upload --auth-mode login --overwrite false \
-  --account-name <functions_storage_account_name> \
+  --account-name <approved-functions-storage-account-name> \
   --container-name functions-packages --name functions-<reviewed-sha256>.zip \
   --file /protected/functions.zip \
-  --subscription 86677b6e-28fc-48e4-8988-5ab9e568eece \
+  --subscription <approved-subscription-id> \
   --only-show-errors --output none
-az functionapp restart --resource-group rg-llmserving-e2e-control \
+az functionapp restart --resource-group <approved-control-resource-group> \
   --name <functions_app_name> \
-  --subscription 86677b6e-28fc-48e4-8988-5ab9e568eece \
+  --subscription <approved-subscription-id> \
   --only-show-errors --output none
 az rest --method POST \
-  --url "https://management.azure.com/subscriptions/86677b6e-28fc-48e4-8988-5ab9e568eece/resourceGroups/rg-llmserving-e2e-control/providers/Microsoft.Web/sites/<functions_app_name>/syncfunctiontriggers?api-version=2022-03-01" \
-  --subscription 86677b6e-28fc-48e4-8988-5ab9e568eece \
+  --url "https://management.azure.com/subscriptions/<approved-subscription-id>/resourceGroups/<approved-control-resource-group>/providers/Microsoft.Web/sites/<functions_app_name>/syncfunctiontriggers?api-version=2022-03-01" \
+  --subscription <approved-subscription-id> \
   --only-show-errors --output none
 ```
 

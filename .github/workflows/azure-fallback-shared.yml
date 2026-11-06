@@ -13,13 +13,14 @@ concurrency:
 jobs:
   provision:
     if: >-
-      github.repository == 'ribumann/llmserving' &&
+      github.repository == vars.AZURE_OPERATOR_REPOSITORY && vars.ENABLE_AZURE_OPERATOR_WORKFLOWS == 'true' &&
       github.ref == 'refs/heads/main' &&
       vars.FALLBACK_STATE_DATA_ACCESS_APPROVED == 'true' &&
       vars.FALLBACK_SHARED_CLEANUP_ARMED == 'true' &&
       vars.FALLBACK_SHARED_CREATION_ENABLED == 'true' &&
-      vars.FALLBACK_PRIVATE_STATE_EXECUTOR_READY == 'true'
-    runs-on: [self-hosted, linux, x64, llmserving-private-state]
+      vars.FALLBACK_PRIVATE_STATE_EXECUTOR_READY == 'true' &&
+      vars.AZURE_OPERATOR_RUNNER_LABEL != ''
+    runs-on: [self-hosted, linux, x64, "${{ vars.AZURE_OPERATOR_RUNNER_LABEL }}"]
     environment: azure-e2e-fallback
     timeout-minutes: 45
     permissions:
@@ -27,6 +28,7 @@ jobs:
       actions: read
       id-token: write
     env:
+      LLM_SERVING_OPERATOR_CONFIG: ${{ secrets.LLM_SERVING_OPERATOR_CONFIG }}
       GH_TOKEN: ${{ github.token }}
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 import hashlib
 import json
@@ -121,7 +123,7 @@ def identity(*, protected: bool) -> None:
         "type": "servicePrincipal",
     }:
         raise shared.SharedError("Independent bridge cleanup requires the exact UAMI.")
-    for group in (shared.GROUP, "rg-llmserving-e2e-control", "rg-llmserving-e2e-demo"):
+    for group in (shared.GROUP, setting("control_group"), setting("demo_group")):
         record = az("group", "show", "--name", group)
         identifier = f"/subscriptions/{shared.FALLBACK_TARGET.subscription}/resourceGroups/{group}"
         if (
@@ -483,7 +485,7 @@ def local_apply(
         shared.inventory(None)
     deleted = az("keyvault", "list-deleted", "--resource-type", "vault")
     if not isinstance(deleted, list) or any(
-        not isinstance(item, dict) or item.get("name") == "llmrelease-kv-0ea5e6"
+        not isinstance(item, dict) or item.get("name") == f"{setting('resource_prefix')}-kv-{setting('resource_suffix')}"
         for item in deleted
     ):
         raise shared.SharedError(

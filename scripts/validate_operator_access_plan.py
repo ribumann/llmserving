@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting, terraform_operator_target
+
 import argparse
 import base64
 import hashlib
@@ -13,33 +15,33 @@ import validate_shared_plan as shared
 from validate_retained_group_plan import PlanRejected, run_saved_plan, validate_plan
 
 ROOT = shared.ROOT
-VNET = f"{ROOT}/providers/Microsoft.Network/virtualNetworks/llmrelease-shared-vnet"
+VNET = f"{ROOT}/providers/Microsoft.Network/virtualNetworks/{setting('resource_prefix')}-shared-vnet"
 ZONE = f"{ROOT}/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"
-ACCOUNT = f"{ROOT}/providers/Microsoft.Storage/storageAccounts/llmreleasestate0ea5e6"
+ACCOUNT = f"{ROOT}/providers/Microsoft.Storage/storageAccounts/{setting('state_account')}"
 RESOURCES = {
     "azurerm_subnet.gateway": {
         "id": f"{VNET}/subnets/GatewaySubnet",
         "name": "GatewaySubnet",
-        "virtual_network_name": "llmrelease-shared-vnet",
+        "virtual_network_name": f"{setting('resource_prefix')}-shared-vnet",
         "address_prefixes": ["10.20.30.0/27"],
         "default_outbound_access_enabled": False,
     },
     "azurerm_subnet.dns": {
         "id": f"{VNET}/subnets/snet-operator-dns",
         "name": "snet-operator-dns",
-        "virtual_network_name": "llmrelease-shared-vnet",
+        "virtual_network_name": f"{setting('resource_prefix')}-shared-vnet",
         "address_prefixes": ["10.20.31.0/28"],
         "default_outbound_access_enabled": False,
     },
     "azurerm_public_ip.gateway": {
-        "id": f"{ROOT}/providers/Microsoft.Network/publicIPAddresses/llmrelease-operator-vpn-pip",
-        "name": "llmrelease-operator-vpn-pip",
+        "id": f"{ROOT}/providers/Microsoft.Network/publicIPAddresses/{setting('resource_prefix')}-operator-vpn-pip",
+        "name": f"{setting('resource_prefix')}-operator-vpn-pip",
         "allocation_method": "Static",
         "sku": "Standard",
     },
     "azurerm_virtual_network_gateway.operator": {
-        "id": f"{ROOT}/providers/Microsoft.Network/virtualNetworkGateways/llmrelease-operator-vpn",
-        "name": "llmrelease-operator-vpn",
+        "id": f"{ROOT}/providers/Microsoft.Network/virtualNetworkGateways/{setting('resource_prefix')}-operator-vpn",
+        "name": f"{setting('resource_prefix')}-operator-vpn",
         "type": "Vpn",
         "vpn_type": "RouteBased",
         "sku": "VpnGw1AZ",
@@ -48,17 +50,17 @@ RESOURCES = {
         "enable_bgp": False,
     },
     "azurerm_private_dns_resolver.operator": {
-        "id": f"{ROOT}/providers/Microsoft.Network/dnsResolvers/llmrelease-operator-dns",
-        "name": "llmrelease-operator-dns",
+        "id": f"{ROOT}/providers/Microsoft.Network/dnsResolvers/{setting('resource_prefix')}-operator-dns",
+        "name": f"{setting('resource_prefix')}-operator-dns",
         "virtual_network_id": VNET,
     },
     "azurerm_private_dns_resolver_inbound_endpoint.operator": {
-        "id": f"{ROOT}/providers/Microsoft.Network/dnsResolvers/llmrelease-operator-dns/inboundEndpoints/llmrelease-operator-dns-inbound",
-        "name": "llmrelease-operator-dns-inbound",
+        "id": f"{ROOT}/providers/Microsoft.Network/dnsResolvers/{setting('resource_prefix')}-operator-dns/inboundEndpoints/{setting('resource_prefix')}-operator-dns-inbound",
+        "name": f"{setting('resource_prefix')}-operator-dns-inbound",
     },
     "azurerm_private_endpoint.state": {
-        "id": f"{ROOT}/providers/Microsoft.Network/privateEndpoints/llmrelease-state-pe",
-        "name": "llmrelease-state-pe",
+        "id": f"{ROOT}/providers/Microsoft.Network/privateEndpoints/{setting('resource_prefix')}-state-pe",
+        "name": f"{setting('resource_prefix')}-state-pe",
         "subnet_id": f"{VNET}/subnets/snet-private-endpoints",
     },
 }
@@ -155,7 +157,7 @@ def validate_values(
             )
         certificate = single(clients.get("root_certificate"))
         if (
-            certificate.get("name") != "llmrelease-operator-root"
+            certificate.get("name") != f"{setting('resource_prefix')}-operator-root"
             or certificate.get("public_cert_data")
             != target["root_certificate_public_data"]
         ):
@@ -190,7 +192,7 @@ def validate_values(
     elif address == "azurerm_private_endpoint.state":
         connection = single(values.get("private_service_connection"))
         if (
-            connection.get("name") != "llmrelease-state-blob"
+            connection.get("name") != f"{setting('resource_prefix')}-state-blob"
             or not shared.equal(
                 connection.get("private_connection_resource_id"), ACCOUNT
             )
@@ -271,6 +273,8 @@ def validate(plan: object, group: str, *, operation: str, target: dict) -> None:
         )
     for name, value in {
         "subscription_id": shared.FALLBACK_TARGET.subscription,
+        "existing_resource_group_name": shared.GROUP,
+        "operator_target": terraform_operator_target(),
         **target,
     }.items():
         if (

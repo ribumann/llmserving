@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from scripts.tests import operator_fixture  # noqa: F401
+
 import ast
 import json
 import os
@@ -505,10 +507,10 @@ class ReleaseImportTests(unittest.TestCase):
         source = (
             ROOT / ".github/workflows/azure-fallback-release-import.yml"
         ).read_text()
-        self.assertEqual(consumer.CANDIDATE_RUN, "42081580674")
+        self.assertEqual(consumer.CANDIDATE_RUN, "123456789")
         self.assertEqual(consumer.CANDIDATE_ATTEMPT, "1")
         self.assertEqual(
-            consumer.CANDIDATE_SHA, "8348c1b2af70b2607158811fc61c3d4ef6f53c29"
+            consumer.CANDIDATE_SHA, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         )
         implementation = ast.parse(
             (ROOT / "scripts/azure_release_import.py").read_text()
@@ -524,17 +526,17 @@ class ReleaseImportTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            ast.literal_eval(manifest_pin),
-            "b3011dc15db6823c87cde660bd2f3dc1690ac710a008f3c4f72f393d1973b0ef",
+            ast.unparse(manifest_pin),
+            "setting('candidate_manifest_sha256')",
         )
         self.assertIn("default: false", source)
         self.assertIn("environment: azure-e2e-fallback", source)
         self.assertIn("persist-credentials: false", source)
         self.assertIn("cancel-in-progress: false", source)
-        self.assertIn(f"run-id: {consumer.CANDIDATE_RUN}", source)
-        self.assertIn("name: release-manifest-1", source)
-        self.assertIn("pattern: release-image-*-1", source)
-        self.assertIn(f"name: functions-{consumer.CANDIDATE_SHA}", source)
+        self.assertIn("run-id: ${{ fromJSON(env.LLM_SERVING_OPERATOR_CONFIG).candidate_run }}", source)
+        self.assertIn("name: release-manifest-${{ fromJSON(env.LLM_SERVING_OPERATOR_CONFIG).candidate_attempt }}", source)
+        self.assertIn("pattern: release-image-*-${{ fromJSON(env.LLM_SERVING_OPERATOR_CONFIG).candidate_attempt }}", source)
+        self.assertIn("name: functions-${{ fromJSON(env.LLM_SERVING_OPERATOR_CONFIG).candidate_sha }}", source)
         self.assertLess(
             source.index("Docker-load/config IDs without Azure access"),
             source.index("uses: azure/login@"),

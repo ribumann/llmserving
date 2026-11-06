@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from scripts.tests import operator_fixture  # noqa: F401
+
 import copy
 import sys
 import unittest
@@ -238,16 +240,18 @@ class SharedReconcileTests(unittest.TestCase):
                 bridge.recovery_state(metadata)
 
     def test_recovery_inventory_fails_closed_before_mutation(self):
-        from datetime import UTC, datetime
+        from datetime import timedelta
+
+        deadline = bridge.shared.utc(guard.DEADLINE)
 
         with patch.object(
-            bridge, "configuration", return_value=datetime(2026, 11, 5, 22, tzinfo=UTC)
+            bridge, "configuration", return_value=deadline + timedelta(minutes=1)
         ), patch.object(bridge, "az") as azure:
             with self.assertRaises(bridge.shared.SharedError):
                 bridge.recovery_inventory()
             azure.assert_not_called()
         with patch.object(
-            bridge, "configuration", return_value=datetime(2026, 11, 5, 21, tzinfo=UTC)
+            bridge, "configuration", return_value=deadline - timedelta(minutes=1)
         ), patch.object(
             bridge, "az", return_value={"properties": {"state": "NotRegistered"}}
         ), patch.object(

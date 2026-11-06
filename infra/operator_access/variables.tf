@@ -1,8 +1,8 @@
 variable "subscription_id" {
   type = string
   validation {
-    condition     = var.subscription_id == "86677b6e-28fc-48e4-8988-5ab9e568eece"
-    error_message = "Only the isolated main subscription is supported."
+    condition     = var.subscription_id == var.operator_target.subscription_id
+    error_message = "Subscription must exactly match the independently reviewed operator target."
   }
 }
 
@@ -33,10 +33,34 @@ variable "expires_at" {
   }
 }
 variable "existing_resource_group_name" {
-  type    = string
-  default = "rg-llmserving-e2e-shared"
+  type = string
   validation {
-    condition     = var.existing_resource_group_name == "rg-llmserving-e2e-shared"
-    error_message = "Only the retained main shared group is supported."
+    condition     = var.existing_resource_group_name == var.operator_target.resource_group_name
+    error_message = "Resource group must exactly match the independently reviewed operator target."
+  }
+}
+
+variable "operator_target" {
+  description = "Independent reviewed exact target; must match the private Python operator configuration."
+  type = object({
+    subscription_id     = string
+    resource_group_name = string
+    resource_prefix     = string
+    state_account       = string
+    region              = string
+    target_tag          = string
+    campaign_tag        = string
+    expires_on          = string
+  })
+  validation {
+    condition = (
+      can(regex("^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$", var.operator_target.subscription_id)) &&
+      var.operator_target.subscription_id != "00000000-0000-0000-0000-000000000000" &&
+      alltrue([for value in [var.operator_target.resource_group_name, var.operator_target.resource_prefix, var.operator_target.target_tag, var.operator_target.campaign_tag] : can(regex("^[a-z][a-z0-9-]{1,39}$", value))]) &&
+      can(regex("^[a-z0-9]{3,24}$", var.operator_target.state_account)) &&
+      can(regex("^[a-z]{3,30}$", var.operator_target.region)) &&
+      can(regex("^20[0-9]{2}-[0-9]{2}-[0-9]{2}$", var.operator_target.expires_on))
+    )
+    error_message = "Supply explicit, well-formed operator target identifiers, names, region and expiry."
   }
 }

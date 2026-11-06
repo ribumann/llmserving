@@ -20,6 +20,15 @@ build/
 .impeccable/
 
 # Terraform (infra/shared/, infra/control/, infra/demo/)
+# Cover operator/bootstrap modules too; never stage private plans or inputs.
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.tfplan
+tfplan
 infra/shared/.terraform/
 infra/shared/.terraform.lock.hcl
 infra/shared/*.tfstate

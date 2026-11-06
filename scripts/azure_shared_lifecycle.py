@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 import copy
 import hashlib
@@ -28,16 +30,16 @@ from azure_release_import import (
 from azure_retained_platform import preserve_external_nsg, preserve_storage_topic
 from validate_retained_group_plan import PlanRejected
 
-REPOSITORY = "ribumann/llmserving"
+REPOSITORY = setting("repository")
 CREATE_WORKFLOW = ".github/workflows/azure-fallback-shared.yml"
 CLEANUP_WORKFLOW = ".github/workflows/azure-fallback-shared-cleanup.yml"
-ACCOUNT = "llmreleasestate0ea5e6"
+ACCOUNT = setting("state_account")
 CONTAINER = "tfstate"
 STATE_KEY = "shared.tfstate"
 OWNER_KEY = "shared-owner.json"
 ACCOUNT_ID = f"{scope.ROOT}/providers/Microsoft.Storage/storageAccounts/{ACCOUNT}"
 STATE_ENDPOINT_ID = (
-    f"{scope.ROOT}/providers/Microsoft.Network/privateEndpoints/llmrelease-state-pe"
+    f"{scope.ROOT}/providers/Microsoft.Network/privateEndpoints/{setting('resource_prefix')}-state-pe"
 )
 STATE_SUBNET_ID = scope.RESOURCES["azurerm_subnet.private_endpoints"]["id"]
 SOURCE_FILES = {"main.tf", "variables.tf", "providers.tf", "outputs.tf"}
@@ -268,7 +270,7 @@ def stage_module(destination: Path, owner: dict) -> str:
             "subscription_id": FALLBACK_TARGET.subscription,
             "location": REGION,
             "stage": "release",
-            "name_prefix": "llmrelease",
+            "name_prefix": setting("resource_prefix"),
             "existing_resource_group_name": GROUP,
             "tags": {**FALLBACK_TARGET.group_tags, **owner_tags(owner)},
             "key_vault_allowed_ip_ranges": [],
@@ -412,7 +414,7 @@ def validate_scope() -> None:
         or account["user"].get("name") != FALLBACK_TARGET.client
     ):
         raise SharedError("Shared lifecycle caller is not the fixed protected UAMI.")
-    for group in (GROUP, "rg-llmserving-e2e-control", "rg-llmserving-e2e-demo"):
+    for group in (GROUP, setting("control_group"), setting("demo_group")):
         value = az("group", "show", "--name", group)
         expected = (
             f"/subscriptions/{FALLBACK_TARGET.subscription}/resourceGroups/{group}"
@@ -559,7 +561,7 @@ def validate_private_state_route(properties: dict) -> None:
 
 
 def dependencies_absent() -> None:
-    for group in ("rg-llmserving-e2e-control", "rg-llmserving-e2e-demo"):
+    for group in (setting("control_group"), setting("demo_group")):
         resources = az("resource", "list", "--resource-group", group)
         if not isinstance(resources, list) or resources:
             raise SharedError(

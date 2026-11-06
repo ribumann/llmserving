@@ -58,27 +58,29 @@ roles to work around denial.
 Inputs are `subscription_id`, `location`, `stage`, `name_prefix`,
 `existing_resource_group_name`, and `tags`. Identity/tenant selection comes
 from the independently approved provider authentication environment, not
-embedded campaign identities. Account naming deliberately matches shared's
-actual suffix:
+embedded campaign identities. Before using operator tools, load the required
+protected `LLM_SERVING_OPERATOR_CONFIG` JSON with its explicit frozen keys;
+see [`docs/OPERATOR_CONFIGURATION.md`](../../docs/OPERATOR_CONFIGURATION.md)
+for the contract. Do not copy live target identifiers, names, state metadata or
+campaign tags into public documentation. Account naming deliberately matches
+shared's suffix convention:
 
 ```hcl
 "${name_prefix}state${substr(md5("${subscription_id}-${stage}"), 0, 6)}"
 ```
 
-The current operator proposal (not defaults or permission to apply) is
-subscription `86677b6e-28fc-48e4-8988-5ab9e568eece`, deployment tenant
-`ecd6dfda-d2ce-47a8-9901-e35f31fe18dd`, location `italynorth`, stage `release`,
-prefix `llmrelease`, existing group `rg-llmserving-e2e-shared`. This computes
-**`llmreleasestate0ea5e6` (21 characters)** and container **`tfstate`**, distinct
-from shared's `llmreleaseacr0ea5e6`. Preserve the exact campaign tags:
+Set subscription, tenant, location, stage, prefix, existing group and exact
+ownership tags only from reviewed operator inputs. The resulting account name
+and container name are operator-specific outputs, not public defaults.
+Preserve the exact approved tag map:
 
 ```hcl
 tags = {
-  project   = "llmserving-public-validation"
-  managedBy = "copilot-release"
-  target    = "personal-fallback-e2e"
-  runId     = "public-release-20261105"
-  expiresOn = "2026-12-05"
+  project   = "<approved-project-tag>"
+  managedBy = "<approved-owner-tag>"
+  target    = "<approved-target-tag>"
+  runId     = "<approved-run-id>"
+  expiresOn = "<approved-expiry-date>"
 }
 ```
 

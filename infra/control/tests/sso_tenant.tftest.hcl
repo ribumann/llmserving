@@ -562,7 +562,7 @@ run "rejects_blank_retained_group" {
 run "release_job_names_preserve_valid_names_and_shorten_only_overlong_names" {
   command = plan
   variables {
-    name_prefix = "llmrelease"
+    name_prefix = "llmexample"
   }
   assert {
     condition = (
@@ -570,12 +570,12 @@ run "release_job_names_preserve_valid_names_and_shorten_only_overlong_names" {
         length(name) <= 32 && can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", name))
       ])
       && length(toset(values(local.job_names))) == length(local.jobs)
-      && local.job_names["performance_worker"] == "llmrelease-job-performa-${substr(sha256("llmrelease-job-performance-worker"), 0, 8)}"
+      && local.job_names["performance_worker"] == "llmexample-job-performa-${substr(sha256("llmexample-job-performance-worker"), 0, 8)}"
       && alltrue([for key, name in local.full_job_names :
         key == "performance_worker" || local.job_names[key] == name
       ])
-      && azurerm_container_app.backend.name == "llmrelease-backend"
-      && azurerm_container_app.frontend.name == "llmrelease-frontend"
+      && azurerm_container_app.backend.name == "llmexample-backend"
+      && azurerm_container_app.frontend.name == "llmexample-frontend"
       && alltrue([for key, job in azurerm_container_app_job.jobs : job.name == local.job_names[key]])
       && alltrue([for key, scope in local.job_scope_ids :
         scope == "${local.control_scope_id}/providers/Microsoft.App/jobs/${local.job_names[key]}"

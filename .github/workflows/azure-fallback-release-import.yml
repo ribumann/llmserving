@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   consume:
-    if: github.ref == 'refs/heads/main' && github.repository == 'ribumann/llmserving'
+    if: github.ref == 'refs/heads/main' && github.repository == vars.AZURE_OPERATOR_REPOSITORY && vars.ENABLE_AZURE_OPERATOR_WORKFLOWS == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: azure-e2e-fallback
@@ -27,6 +27,7 @@ jobs:
       actions: read
       id-token: write
     env:
+      LLM_SERVING_OPERATOR_CONFIG: ${{ secrets.LLM_SERVING_OPERATOR_CONFIG }}
       GH_TOKEN: ${{ github.token }}
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -42,26 +43,26 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           github-token: ${{ github.token }}
-          repository: ribumann/llmserving
-          run-id: 42081580674
-          name: release-manifest-1
+          repository: ${{ vars.AZURE_OPERATOR_REPOSITORY }}
+          run-id: ${{ fromJSON(env.LLM_SERVING_OPERATOR_CONFIG).candidate_run }}
+          name: release-manifest-${{ fromJSON(env.LLM_SERVING_OPERATOR_CONFIG).candidate_attempt }}
           path: ${{ runner.temp }}/candidate
       - name: Download only the seven fixed attempt image archives
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           github-token: ${{ github.token }}
-          repository: ribumann/llmserving
-          run-id: 42081580674
-          pattern: release-image-*-1
+          repository: ${{ vars.AZURE_OPERATOR_REPOSITORY }}
+          run-id: ${{ fromJSON(env.LLM_SERVING_OPERATOR_CONFIG).candidate_run }}
+          pattern: release-image-*-${{ fromJSON(env.LLM_SERVING_OPERATOR_CONFIG).candidate_attempt }}
           merge-multiple: true
           path: ${{ runner.temp }}/candidate
       - name: Download the same-source Functions package for complete bundle verification
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           github-token: ${{ github.token }}
-          repository: ribumann/llmserving
-          run-id: 42081580674
-          name: functions-8348c1b2af70b2607158811fc61c3d4ef6f53c29
+          repository: ${{ vars.AZURE_OPERATOR_REPOSITORY }}
+          run-id: ${{ fromJSON(env.LLM_SERVING_OPERATOR_CONFIG).candidate_run }}
+          name: functions-${{ fromJSON(env.LLM_SERVING_OPERATOR_CONFIG).candidate_sha }}
           path: ${{ runner.temp }}/candidate
       - name: Verify actual downloaded hashes and Docker-load/config IDs without Azure access
         run: >-

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from scripts.tests import operator_fixture  # noqa: F401
+
 import subprocess
 import sys
 import textwrap
@@ -155,8 +157,13 @@ class FallbackCanaryWorkflowTests(unittest.TestCase):
             with self.subTest(workflow=filename):
                 self.assertIn("environment: azure-e2e-fallback\n", source)
                 self.assertIn("github.ref == 'refs/heads/main'", source)
-                self.assertIn("github.repository == 'ribumann/llmserving'", source)
-                self.assertNotIn("${{ vars.", source)
+                self.assertIn("github.repository == vars.AZURE_OPERATOR_REPOSITORY", source)
+                self.assertIn("vars.ENABLE_AZURE_OPERATOR_WORKFLOWS == 'true'", source)
+                self.assertIn(
+                    "LLM_SERVING_OPERATOR_CONFIG: ${{ secrets.LLM_SERVING_OPERATOR_CONFIG }}",
+                    source,
+                )
+                self.assertNotIn("${{ vars.AZURE_CLIENT_ID", source)
                 self.assertIn(CHECKOUT, source)
                 self.assertIn(LOGIN, source)
                 self.assertIn("persist-credentials: false", source)
@@ -258,7 +265,7 @@ class FallbackCanaryWorkflowTests(unittest.TestCase):
             with self.subTest(workflow=filename):
                 environment = dict.fromkeys(self.keys, "test-value")
                 environment.update(
-                    GITHUB_REPOSITORY="ribumann/llmserving",
+                    GITHUB_REPOSITORY="example/llmserving",
                     GITHUB_REPOSITORY_OWNER_ID="123",
                     GITHUB_REPOSITORY_ID="456",
                 )
@@ -276,7 +283,7 @@ class FallbackCanaryWorkflowTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0)
                 self.assertIn(
-                    "::add-mask::repo:ribumann@123/llmserving@456:environment:azure-e2e-fallback",
+                    "::add-mask::repo:example@123/llmserving@456:environment:azure-e2e-fallback",
                     result.stdout.splitlines(),
                 )
 

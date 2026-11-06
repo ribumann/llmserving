@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from operator_config import setting
+
 import argparse
 import json
 import os
@@ -17,16 +19,14 @@ from azure_canary import FALLBACK_TARGET
 from azure_disk_probe import mask_subject
 
 WORKFLOW = ".github/workflows/azure-fallback-release-import.yml"
-CANDIDATE_RUN = "42081580674"
-CANDIDATE_ATTEMPT = "1"
-CANDIDATE_SHA = "8348c1b2af70b2607158811fc61c3d4ef6f53c29"
-CANDIDATE_MANIFEST_SHA256 = (
-    "b3011dc15db6823c87cde660bd2f3dc1690ac710a008f3c4f72f393d1973b0ef"
-)
-GROUP = "rg-llmserving-e2e-shared"
-REGISTRY = "llmreleaseacr0ea5e6"
+CANDIDATE_RUN = setting("candidate_run")
+CANDIDATE_ATTEMPT = setting("candidate_attempt")
+CANDIDATE_SHA = setting("candidate_sha")
+CANDIDATE_MANIFEST_SHA256 = setting("candidate_manifest_sha256")
+GROUP = setting("shared_group")
+REGISTRY = setting("registry_name")
 LOGIN_SERVER = f"{REGISTRY}.azurecr.io"
-REGION = "italynorth"
+REGION = setting("region")
 TAG = f"tested-{CANDIDATE_SHA}"
 
 
