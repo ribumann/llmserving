@@ -3,7 +3,7 @@ from __future__ import annotations
 from scripts.tests import operator_fixture
 
 import ast
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import json
 import os
@@ -35,8 +35,14 @@ class OperatorConfigurationTests(unittest.TestCase):
 
     def test_workflow_masks_identifiers_without_masking_single_digit_counters(self):
         output = StringIO()
-        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}), redirect_stdout(output):
+        stdout = StringIO()
+        with (
+            patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}),
+            redirect_stderr(output),
+            redirect_stdout(stdout),
+        ):
             config.setting("subscription_id")
+        self.assertEqual(stdout.getvalue(), "")
         lines = output.getvalue().splitlines()
         self.assertIn("::add-mask::" + operator_fixture.CONFIG["subscription_id"], lines)
         for key in ("candidate_attempt", "shared_serial", "operator_serial"):

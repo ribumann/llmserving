@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from functools import lru_cache
 
 UUID = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
@@ -78,7 +79,7 @@ def _configuration() -> dict[str, str]:
     if os.environ.get("GITHUB_ACTIONS") == "true":
         for key, value in values.items():
             if key not in {"candidate_attempt", "shared_serial", "operator_serial"}:
-                print(f"::add-mask::{value}")
+                print(f"::add-mask::{value}", file=sys.stderr)
     return values
 
 
