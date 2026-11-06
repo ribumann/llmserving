@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from src.domain.performance_workload import PerformanceWorkload
+from src.performance.llmperf_runner import vllm_warmup_settings
 
 
 class PerformanceWorkloadValidationError(ValueError):
@@ -14,7 +15,9 @@ class PerformanceWorkloadValidationError(ValueError):
         self.details = details or {}
 
 
-def validate_performance_workload_for_run(workload: PerformanceWorkload) -> None:
+def validate_performance_workload_for_run(
+    workload: PerformanceWorkload, *, engine_id: str | None = None
+) -> None:
     if workload.concurrency < 1:
         raise PerformanceWorkloadValidationError(
             "invalid_performance_workload",
@@ -26,6 +29,15 @@ def validate_performance_workload_for_run(workload: PerformanceWorkload) -> None
         value=workload.warmup,
         workload_id=workload.workloadId,
     )
+    if engine_id == "vllm":
+        try:
+            vllm_warmup_settings(workload.warmup)
+        except ValueError as exc:
+            raise PerformanceWorkloadValidationError(
+                "invalid_performance_workload",
+                str(exc),
+                {"workloadId": workload.workloadId, "field": "warmup"},
+            ) from exc
     _require_input_profile(workload.inputProfile, workload_id=workload.workloadId)
     _require_duration_fields(
         field_name="durationOrRequestCount",

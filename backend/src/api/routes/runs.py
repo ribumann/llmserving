@@ -358,7 +358,7 @@ def create_run(
                 details={"testDefinitionRef": payload.testDefinitionRef},
             )
         try:
-            validate_performance_workload_for_run(definition)
+            validate_performance_workload_for_run(definition, engine_id=revision.engineId)
         except PerformanceWorkloadValidationError as exc:
             raise ApiError(
                 status_code=400,

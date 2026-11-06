@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+import src.performance.llmperf_runner as runner_module
 from fastapi.testclient import TestClient
 from src.api.app import create_app
 from src.domain.deployment_revision import DeploymentRevision
@@ -62,12 +63,28 @@ def _prepare_ready_deployment(session: MemorySession) -> None:
 
 
 @pytest.mark.integration
-def test_performance_flow_runs_workload_end_to_end() -> None:
+@pytest.mark.parametrize("duration_warmup", [False, True])
+def test_performance_flow_runs_workload_end_to_end(monkeypatch, duration_warmup) -> None:
     session = MemorySession()
     session.seed_defaults()
     _prepare_ready_deployment(session)
+    if duration_warmup:
+        session.performance_workloads["workload-default"].warmup = {"durationSeconds": 2}
+    clock = [0.0]
+    monkeypatch.setattr(runner_module, "monotonic", lambda: clock[0])
+    phases = []
 
-    def evaluator(**_kwargs):
+    def evaluator(**kwargs):
+        if kwargs["workload"].get("_warmupPhase"):
+            phases.append("warmup")
+            clock[0] += 1
+            count = kwargs["workload"]["durationOrRequestCount"]["requestCount"]
+            return {
+                "results_num_completed_requests": count,
+                "results_num_requests_started": count,
+                "results_number_errors": 0,
+            }
+        phases.append("measured")
         return {
             "metrics": {
                 "timeToFirstTokenMs": {"p50": 15.5, "p95": 22.0},
@@ -142,6 +159,19 @@ def test_performance_flow_runs_workload_end_to_end() -> None:
     assert payload["metrics"]["timeToFirstTokenMs"] == {"p50": 15.5, "p95": 22.0}
     assert payload["metrics"]["throughputTokensPerSec"] == 188.4
     assert payload["requestFailures"] == {"count": 1, "total": 20, "rate": 0.05}
+    if duration_warmup:
+        assert phases == ["warmup", "warmup", "measured"]
+        assert payload["testConditions"]["warmupExecution"] == {
+            "completedRequests": 2,
+            "failedRequests": 0,
+            "elapsedSeconds": 2,
+        }
+    else:
+        assert phases == ["warmup", "measured"]
+        assert payload["testConditions"]["warmupExecution"] == {
+            "completedRequests": 2,
+            "failedRequests": 0,
+        }
     assert payload["acceleratorUtilization"] == {
         "available": True,
         "details": {

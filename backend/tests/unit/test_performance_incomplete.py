@@ -9,7 +9,7 @@ from src.domain.enums import DeploymentRevisionState
 from src.domain.inference_configuration import InferenceConfiguration
 from src.domain.model_configuration import ModelConfiguration
 from src.evaluation.run_quality import QualityRunOrchestrator
-from src.performance.llmperf_runner import PerformanceRunOverloadError
+from src.performance.llmperf_runner import LlmPerfRunner, PerformanceRunOverloadError
 from src.persistence.db import get_db_session
 from tests.support.demo_backend import FakeProvider, MemorySession, MemorySessionContext
 
@@ -69,6 +69,24 @@ class NoDataOverloadPerformanceRunner:
         raise PerformanceRunOverloadError(
             "LLMPerf crashed before producing any output.",
             partial_result=None,
+        )
+
+
+class WarmupFailurePerformanceRunner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, *, engine, deployment_revision_id: str, workload):  # noqa: ANN001
+        def evaluator(**_kwargs):
+            self.calls += 1
+            return {
+                "results_num_completed_requests": 1,
+                "results_num_requests_started": 2,
+                "results_number_errors": 1,
+            }
+
+        return LlmPerfRunner(evaluator=evaluator).run(
+            base_url="http://inference", workload=workload, model_id="model"
         )
 
 
@@ -194,3 +212,39 @@ def test_performance_overload_with_no_partial_data_is_failed_not_incomplete() ->
     assert report.status_code == 200
     payload = report.json()
     assert payload["performance"] is None
+
+
+def test_warmup_failure_propagates_as_failed_without_measured_report() -> None:
+    session = MemorySession()
+    session.seed_defaults()
+    _prepare_ready_deployment(session)
+    runner = WarmupFailurePerformanceRunner()
+    app = create_app()
+    app.state.provider_adapter = FakeProvider(session)
+    app.state.session_factory = lambda: MemorySessionContext(session)
+    app.state.telemetry = None
+    app.state.quality_run_orchestrator = QualityRunOrchestrator(
+        session_factory=app.state.session_factory,
+        provider=app.state.provider_adapter,
+        telemetry=None,
+        performance_runner=runner,
+        executor=ImmediateExecutor(),
+    )
+
+    def override_db():
+        yield session
+
+    app.dependency_overrides[get_db_session] = override_db
+    client = TestClient(app)
+    headers = {"X-Demo-User": "presenter@example.com"}
+    created = client.post(
+        "/environments/env-demo/runs",
+        headers=headers,
+        json={"runType": "performance", "testDefinitionRef": "workload-default"},
+    )
+    run_id = created.json()["runId"]
+    run = client.get(f"/environments/env-demo/runs/{run_id}", headers=headers)
+    report = client.get(f"/environments/env-demo/runs/{run_id}/report", headers=headers)
+    assert run.json()["status"] == "failed"
+    assert report.json()["performance"] is None
+    assert runner.calls == 1
