@@ -102,6 +102,11 @@ Terraform command behavior; dedicated tests separately assert missing-identity
 and denied-login failures stop before Terraform and that successful login uses
 only `az login --identity`. Production authentication is not disabled for tests.
 
+Saved-state ownership checks also accept the demo module's root
+`terraform_data.region_guard` from Terraform's built-in provider, so later
+apply/destroy operations can read the module's own state. Other managed
+`terraform_data` names, nested modules, and foreign providers remain rejected.
+
 Terraform state regressions also exercise rejected partial/cloud configuration,
 denied identity/download/upload, malformed state, BlobNotFound versus missing
 container, required destroy state, state-owner mismatch, partial apply failure/

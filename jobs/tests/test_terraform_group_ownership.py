@@ -230,3 +230,64 @@ def test_invalid_state_mode_is_explicit(tmp_path, mode):
     state(tmp_path, mode=mode)
     with pytest.raises(entrypoint.TerraformRunError, match="ownership mode"):
         entrypoint._validate_group_ownership(tmp_path, "demo123", {})
+
+
+def _region_guard_state(path, **overrides):
+    state(path, resource_type="terraform_data")
+    filename = path / "terraform.tfstate"
+    payload = json.loads(filename.read_text())
+    payload["resources"][0].update(
+        {
+            "name": "region_guard",
+            "provider": 'provider["terraform.io/builtin/terraform"]',
+            **overrides,
+        }
+    )
+    filename.write_text(json.dumps(payload))
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_builtin_root_region_guard_is_allowed(tmp_path, retained):
+    _region_guard_state(tmp_path)
+    variables = {"existing_resource_group_name": "rg-retained"} if retained else {}
+    entrypoint._validate_group_ownership(tmp_path, "demo123", variables)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"name": "unrelated"},
+        {"module": "module.foreign"},
+        {"provider": 'provider["registry.terraform.io/hashicorp/null"]'},
+        {"mode": "unknown"},
+    ],
+)
+def test_other_terraform_data_cannot_bypass_ownership(tmp_path, overrides):
+    _region_guard_state(tmp_path, **overrides)
+    with pytest.raises(entrypoint.TerraformRunError, match="Unexpected managed"):
+        entrypoint._validate_group_ownership(tmp_path, "demo123", {})
+
+
+def test_region_guard_does_not_skip_other_resource_ownership(tmp_path):
+    _region_guard_state(tmp_path)
+    filename = tmp_path / "terraform.tfstate"
+    payload = json.loads(filename.read_text())
+    payload["resources"].append(
+        {
+            "mode": "managed",
+            "type": "azurerm_linux_virtual_machine",
+            "name": "demo",
+            "instances": [
+                {
+                    "attributes": {
+                        "name": "llm-other-vm",
+                        "resource_group_name": "rg-llm-demo-demo123",
+                        "tags": {"environmentId": "demo123"},
+                    }
+                }
+            ],
+        }
+    )
+    filename.write_text(json.dumps(payload))
+    with pytest.raises(entrypoint.TerraformRunError, match="environment owner"):
+        entrypoint._validate_group_ownership(tmp_path, "demo123", {})
