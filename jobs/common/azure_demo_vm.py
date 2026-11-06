@@ -15,6 +15,8 @@ never need `azure-mgmt-network`/`azure-mgmt-compute` actually installed.
 from __future__ import annotations
 
 import re
+import shlex
+import uuid
 from typing import Any
 
 
@@ -142,7 +144,10 @@ def run_command_on_vm(
     client: Any | None = None,
 ) -> Any:
     """Invokes the Azure VM Run Command extension (RunShellScript) on the demo VM
-    and blocks until it completes, returning the SDK's run-command result.
+    and blocks until it completes, returning the SDK's run-command result only
+    after a fresh stdout marker confirms Bash success. Missing/malformed results
+    and SDK errors raise a fixed, output-free RuntimeError: Azure provisioning
+    status and stderr presence are not the script's exit status.
 
     Used by `model_deployment` to invoke `/opt/llmserving/run-vllm.sh` with the
     model repo/HF token as transient parameters (cloud-init.tftpl) - never via
@@ -152,9 +157,51 @@ def run_command_on_vm(
         environment_id, name_prefix, resource_group_name=resource_group_name
     )
     compute_client = client or _default_compute_client(subscription_id, credential)
-    poller = compute_client.virtual_machines.begin_run_command(
-        resource_group,
-        vm_name,
-        {"command_id": "RunShellScript", "script": script_lines},
-    )
-    return poller.result()
+    # Classic RunShellScript can report ProvisioningState/succeeded even when
+    # the shell exits 127. Run in explicit Bash (the extension may use /bin/sh),
+    # with a separate parent that only prints a fresh marker on successful exit.
+    # In particular, an explicit `exit 0` in the supplied script must still work.
+    marker = f"LLMSERVING_RUN_OK_{uuid.uuid4().hex}"
+    script = "set -euo pipefail\n" + "\n".join(script_lines)
+    wrapped = [
+        f"bash -c {shlex.quote(script)} || exit $?",
+        f"printf '\\n%s\\n' {shlex.quote(marker)}",
+    ]
+    try:
+        poller = compute_client.virtual_machines.begin_run_command(
+            resource_group,
+            vm_name,
+            {"command_id": "RunShellScript", "script": wrapped},
+        )
+        result = poller.result()
+        # SDK objects and their REST/dict equivalent both occur in callers/tests.
+        values = result.get("value", []) if isinstance(result, dict) else result.value
+        stdout: list[str] = []
+        for value in values or []:
+            code = value.get("code", "") if isinstance(value, dict) else value.code
+            message = (
+                value.get("message", "") if isinstance(value, dict) else value.message
+            )
+            if not isinstance(message, str):
+                continue
+            if code == "ComponentStatus/StdOut/succeeded":
+                stdout.append(message)
+            elif code == "ProvisioningState/succeeded":
+                # Classic Linux Run Command combines the streams in one message.
+                # Never accept a marker found only in stderr or in the preamble.
+                before, separator, _stderr = message.partition("\n[stderr]")
+                _prefix, start, output = before.partition("[stdout]\n")
+                if separator and start:
+                    stdout.append(output)
+        if sum(output.splitlines().count(marker) for output in stdout) != 1:
+            raise ValueError("Missing or ambiguous completion marker")
+    except Exception:
+        # SDK exceptions and extension streams can include the entire script,
+        # including a transient HF token. Do not retain them as exception context.
+        pass
+    else:
+        return result
+    raise RuntimeError(
+        "VM Run Command did not confirm successful script completion; "
+        "command and output withheld."
+    ) from None

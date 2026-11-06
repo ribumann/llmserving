@@ -24,6 +24,43 @@ selected server rather than assuming permanent pause.
 
 ## GPU, quota and memory
 
+### GPU VM bootstrap and model-start failures
+
+Terraform provisioning success does not prove that the GPU runtime is ready.
+`infra/demo/cloud-init.tftpl` installs prerequisites, Docker and the NVIDIA
+Container Toolkit in one fail-fast `/opt/llmserving/bootstrap.sh`, rather than
+the early cloud-init package module. It retries only native APT lock-acquisition
+errors: at most 30 attempts per operation, with 10-second waits and a shared
+60-wait budget (10 minutes) across all package stages. Package network requests
+have 30-second transport timeouts and no automatic acquisition retries.
+APT/dpkg transactions are never forcibly timed out or killed. An idle
+`unattended-upgr` process alone is **not** evidence of contention. Never remove
+lock files, terminate package/security processes, disable agents or globally
+reset cloud-init to work around contention.
+
+The script clears stale readiness before each invocation and writes
+`/opt/llmserving/bootstrap.ready` only after runtime configuration and `docker info`
+succeed. A failed stage writes `bootstrap.failed` and emits a stage/exit-code
+diagnostic without dumping command output. Optional immutable-image cache warming
+has a separate 120-second limit and is not required for readiness.
+
+The model job waits up to 25 minutes for explicit bootstrap readiness, failing
+immediately on `bootstrap.failed`. The launcher independently refuses startup
+without readiness and requires a working GPU driver (up to 10 minutes) and Docker
+daemon before starting vLLM. Readiness markers are not a substitute for subsequent
+model health checks. Old VMs without this bootstrap contract fail closed; this
+change does not automatically repair/replay cloud-init on existing machines.
+Any recovery is a separately approved operator action, not a PR deployment.
+
+Classic Azure RunShellScript can report `ProvisioningState/succeeded` for a failed
+shell command. The shared job helper now requires an exact fresh per-invocation
+stdout completion marker, emitted only after explicit fail-fast Bash succeeds.
+Benign stderr is allowed; missing, truncated, stale or stderr-only markers fail
+before model health polling. SDK failures and unconfirmed completion produce a
+fixed output-free error. Do not copy Run Command inputs, raw SDK exceptions or
+stdout/stderr into logs, callbacks or reports: transient model credentials may
+appear there. This is a credential-free tested contract, not live GPU acceptance.
+
 GPU deallocation stops VM compute billing, not disk, snapshot, network/NAT,
 registry, database or monitoring charges. A stopped-but-allocated VM may still
 incur compute charges. Deallocation releases physical capacity: later startup

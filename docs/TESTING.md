@@ -80,6 +80,24 @@ Use separate Python environments for backend and jobs: their current Azure
 Compute SDK ranges differ. Runtime CI installs every worker's requirements in
 the job-test environment, and Functions in its own job.
 
+The worker suite includes `tests/test_gpu_bootstrap.py`, which executes the
+shipped cloud-init Bash and Run Command wrapper with synthetic commands and
+temporary filesystem roots. Bash is required (Git Bash on Windows); absence
+fails coverage rather than silently skipping it. No package install, GPU,
+network or cloud operation is performed. These tests cover lock-only retries,
+retry exhaustion, terminal failures, idempotent readiness, startup gating and
+Bash fail-fast. `tests/test_run_command_contract.py` covers SDK objects and classic
+combined streams, unique/exact stdout markers, benign stderr and secret-safe
+failures. Run the focused set or the full worker suite from `jobs/`:
+
+```sh
+python -m pytest -q tests/test_gpu_bootstrap.py tests/test_run_command_contract.py tests/test_azure_demo_vm.py tests/test_model_deployment.py tests/test_retained_vm_scope.py
+python -m pytest -q tests
+```
+
+These are executable local contract tests, not authenticated Azure/GPU
+acceptance or permission to replay cloud-init or deploy.
+
 ```sh
 cd functions
 python -m pip install pytest pytest-asyncio -r requirements.txt

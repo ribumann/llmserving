@@ -13,9 +13,10 @@ def test_build_script_lines_never_includes_hf_token_as_separate_diagnostic() -> 
     lines = entrypoint._build_script_lines(
         "meta-llama/Llama-3-8B", "hf_secret123", ["--max-model-len", "4096"]
     )
-    assert len(lines) == 1
-    assert "hf_secret123" in lines[0]  # present in the command sent to the VM...
-    assert lines[0].startswith("/opt/llmserving/run-vllm.sh")
+    assert len(lines) == 2
+    assert "hf_secret123" not in lines[0]
+    assert "hf_secret123" in lines[1]  # present only in the transient command...
+    assert lines[1].startswith("/opt/llmserving/run-vllm.sh")
 
 
 def test_build_script_lines_forwards_revision_flag_after_extra_args() -> None:
@@ -31,8 +32,8 @@ def test_build_script_lines_forwards_revision_flag_after_extra_args() -> None:
         ["--max-model-len", "4096"],
         revision="refs/pr/12/head",
     )
-    assert len(lines) == 1
-    assert lines[0] == (
+    assert len(lines) == 2
+    assert lines[1] == (
         "/opt/llmserving/run-vllm.sh meta-llama/Llama-3-8B hf_secret123 "
         "--max-model-len 4096 --revision refs/pr/12/head"
     )
@@ -40,7 +41,7 @@ def test_build_script_lines_forwards_revision_flag_after_extra_args() -> None:
 
 def test_build_script_lines_defaults_revision_to_main() -> None:
     lines = entrypoint._build_script_lines("meta-llama/Llama-3-8B", "hf_secret123", [])
-    assert lines[0] == (
+    assert lines[1] == (
         "/opt/llmserving/run-vllm.sh meta-llama/Llama-3-8B hf_secret123 --revision main"
     )
 
@@ -79,7 +80,10 @@ def test_run_success_ensures_vm_running_then_dispatches_and_polls_health() -> No
         "wf-1",
         status="completed",
         phase="completed",
-        diagnostics={"vllmBaseUrl": "http://10.0.1.5:8000", "modelRepo": "meta-llama/Llama-3-8B"},
+        diagnostics={
+            "vllmBaseUrl": "http://10.0.1.5:8000",
+            "modelRepo": "meta-llama/Llama-3-8B",
+        },
     )
 
 
@@ -114,7 +118,8 @@ def test_run_reports_periodic_progress_during_a_long_health_check_wait() -> None
     progress_calls = [
         call
         for call in callback.report_progress.call_args_list
-        if call.kwargs.get("phase") == "waiting-for-vllm-health" and call.kwargs.get("diagnostics")
+        if call.kwargs.get("phase") == "waiting-for-vllm-health"
+        and call.kwargs.get("diagnostics")
     ]
     assert len(progress_calls) >= 1
     assert progress_calls[0].kwargs["diagnostics"] == {"attempt": 2, "maxAttempts": 20}
@@ -144,6 +149,42 @@ def test_run_raises_when_health_check_never_succeeds() -> None:
     callback.complete_workflow.assert_not_called()
 
 
+def test_failed_run_command_never_enters_health_polling() -> None:
+    callback = MagicMock()
+    resolve = MagicMock()
+    healthy = MagicMock()
+    sleep = MagicMock()
+    with pytest.raises(RuntimeError, match="script completion"):
+        entrypoint.run(
+            workflow_id="wf",
+            subscription_id="sub",
+            environment_id="demo",
+            model_repo="synthetic/model",
+            hf_token="synthetic-secret",
+            name_prefix="llm",
+            extra_args=[],
+            health_check_attempts=120,
+            health_check_interval_seconds=15,
+            callback=callback,
+            ensure_running=MagicMock(),
+            dispatch_run_command=MagicMock(
+                side_effect=RuntimeError(
+                    "VM Run Command did not confirm script completion"
+                )
+            ),
+            resolve_ip=resolve,
+            is_healthy=healthy,
+            sleep=sleep,
+        )
+    resolve.assert_not_called()
+    healthy.assert_not_called()
+    sleep.assert_not_called()
+    assert not any(
+        call.kwargs.get("phase") == "waiting-for-vllm-health"
+        for call in callback.report_progress.call_args_list
+    )
+
+
 def test_main_never_leaks_hf_token_into_failure_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -157,7 +198,9 @@ def test_main_never_leaks_hf_token_into_failure_diagnostics(
     callback = MagicMock()
     callback.__enter__ = MagicMock(return_value=callback)
     callback.__exit__ = MagicMock(return_value=False)
-    monkeypatch.setattr(entrypoint, "WorkflowCallbackClient", MagicMock(return_value=callback))
+    monkeypatch.setattr(
+        entrypoint, "WorkflowCallbackClient", MagicMock(return_value=callback)
+    )
     monkeypatch.setattr(
         entrypoint, "run", MagicMock(side_effect=RuntimeError("vLLM never came up"))
     )
