@@ -265,6 +265,9 @@ class QualityRunOrchestrator:
         with self._session_factory() as session:
             snapshot = self._run_snapshot(session, context)
             cases = [dict(case) for case in list(snapshot["testDefinition"].get("cases") or [])]
+            generation_settings = dict(
+                (snapshot.get("inferenceConfiguration") or {}).get("generationSettings") or {}
+            )
 
         engine = self._provider.get_engine_adapter(context.engineId)
         for index, case in enumerate(cases):
@@ -273,7 +276,7 @@ class QualityRunOrchestrator:
                 return
 
             prompt_input = str(case["input"])
-            parameters = dict(case.get("parameters") or {})
+            parameters = {**generation_settings, **dict(case.get("parameters") or {})}
             try:
                 if hasattr(engine, "submitPromptWithParameters"):
                     response = engine.submitPromptWithParameters(

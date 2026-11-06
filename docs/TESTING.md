@@ -187,6 +187,10 @@ negative authentication, cancellation, reports and local environment teardown.
 Golden failures are recorded honestly rather than requiring a tiny model to
 achieve a predetermined quality score. One real warmup precedes each measured
 performance workload and is excluded from throughput counts/timing.
+Golden execution merges the accepted inference snapshot's generation settings
+with each case's explicit overrides. Queued runs must not read later configuration
+or dataset edits; `tests/integration/test_run_input_snapshots.py` covers precedence,
+token limits, temperature and snapshot preservation.
 
 These are fixed-prompt CPU smoke workloads, not standardized LLMPerf results,
 benchmark acceptance or Azure release acceptance. The hosted workflow separately
