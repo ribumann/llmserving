@@ -24,9 +24,7 @@ class RetainedPlatformTests(unittest.TestCase):
                     "defaultSecurityRules": [
                         {"name": name} for name in platform.DEFAULT_NSG_RULE_NAMES
                     ],
-                    "subnets": (
-                        [{"id": subnet}] if "-containerapps-" in identifier else None
-                    ),
+                    "subnets": [{"id": subnet.upper()}],
                 },
             }
             with patch.object(platform, "az", return_value=metadata) as read:
@@ -40,6 +38,11 @@ class RetainedPlatformTests(unittest.TestCase):
                     "--url",
                     f"https://management.azure.com{identifier}?api-version=2023-09-01",
                 )
+            for empty in (None, []):
+                metadata["properties"]["subnets"] = empty
+                with patch.object(platform, "az", return_value=metadata):
+                    self.assertTrue(platform.preserve_external_nsg({"id": identifier}))
+            metadata["properties"]["subnets"] = [{"id": subnet}]
             for mutation in (
                 "tags",
                 "type",

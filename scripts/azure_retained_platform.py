@@ -73,13 +73,7 @@ def preserve_external_nsg(record: dict) -> bool:
         or {rule.get("name") for rule in rules} != DEFAULT_NSG_RULE_NAMES
     ):
         raise ReleaseImportError("External NSG default rule identities differ.")
-    if identifier != next(
-        item for item in EXTERNAL_NSGS if item.endswith("-containerapps-nsg-italynorth")
-    ):
-        if subnets not in (None, []):
-            raise ReleaseImportError("External NSG must remain exactly unattached.")
-        return True
-    if (
+    if subnets not in (None, []) and (
         not isinstance(subnets, list)
         or len(subnets) != 1
         or not isinstance(subnets[0], dict)
