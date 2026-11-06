@@ -104,6 +104,17 @@ later combined revision. They establish genuine tool execution/result mapping,
 not representative performance, model-quality success, production memory sizing,
 GPU streams or authenticated Azure acceptance.
 
+For vLLM performance runs, `testConditions.warmup` in older reports is only the
+configured setting, not proof it ran. Historical GPU runs, including the 25/50
+request Qwen runs, remain provisional for their configured warm-up counts even
+when earlier requests had warmed the model. New runs execute count-based warm-up
+separately through pinned LLMPerf with concurrency one and the same model and
+input/output profile; a failed, timed-out, or incomplete warm-up fails the run
+before measurement. `testConditions.warmupExecution` records observed successful
+and failed counts only after verification. Warm-up metrics are excluded from the
+measured run. Duration-based vLLM warm-up is rejected rather than ignored.
+These changes do not alter or retroactively validate stored reports.
+
 ## Blocked or not yet demonstrated
 
 ### Performance-worker packaging boundary

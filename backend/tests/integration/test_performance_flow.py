@@ -67,7 +67,13 @@ def test_performance_flow_runs_workload_end_to_end() -> None:
     session.seed_defaults()
     _prepare_ready_deployment(session)
 
-    def evaluator(**_kwargs):
+    def evaluator(**kwargs):
+        if kwargs["workload"]["durationOrRequestCount"]["requestCount"] == 2:
+            return {
+                "results_num_completed_requests": 2,
+                "results_num_requests_started": 2,
+                "results_number_errors": 0,
+            }
         return {
             "metrics": {
                 "timeToFirstTokenMs": {"p50": 15.5, "p95": 22.0},
@@ -142,6 +148,10 @@ def test_performance_flow_runs_workload_end_to_end() -> None:
     assert payload["metrics"]["timeToFirstTokenMs"] == {"p50": 15.5, "p95": 22.0}
     assert payload["metrics"]["throughputTokensPerSec"] == 188.4
     assert payload["requestFailures"] == {"count": 1, "total": 20, "rate": 0.05}
+    assert payload["testConditions"]["warmupExecution"] == {
+        "completedRequests": 2,
+        "failedRequests": 0,
+    }
     assert payload["acceleratorUtilization"] == {
         "available": True,
         "details": {
