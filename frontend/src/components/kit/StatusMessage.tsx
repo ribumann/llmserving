@@ -1,4 +1,9 @@
-import { MessageBar, MessageBarBody, MessageBarTitle, makeStyles } from '@fluentui/react-components';
+import {
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+  makeStyles,
+} from '@fluentui/react-components';
 import type { ReactNode } from 'react';
 
 export type StatusIntent = 'info' | 'warning' | 'error' | 'success';
@@ -17,7 +22,11 @@ const useStyles = makeStyles({
  * Replacement for the legacy `.status-banner status-{info,warning,error,success}` divs.
  * Maps directly onto Fluent's MessageBar intents.
  */
-export default function StatusMessage({ intent = 'info', title, children }: StatusMessageProps) {
+export default function StatusMessage({
+  intent = 'info',
+  title,
+  children,
+}: StatusMessageProps) {
   const styles = useStyles();
   return (
     <MessageBar intent={intent}>

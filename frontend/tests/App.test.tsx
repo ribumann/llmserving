@@ -154,6 +154,7 @@ describe('App public and operator shell', () => {
     expect(
       fetchMock.mock.calls.map(([url]) => new URL(url).pathname).sort(),
     ).toEqual(['/public/environments', '/session']);
+    expect(screen.queryByText('Learning environment')).not.toBeInTheDocument();
   });
 
   it.each([
@@ -376,6 +377,9 @@ describe('App public and operator shell', () => {
       fetchMock.mock.calls.map(([url]) => new URL(url).pathname),
     ).toContain('/environments');
     expect(screen.getByRole('link', { name: 'Sign out' })).toBeInTheDocument();
+    expect(screen.queryByText('Operator workspace')).not.toBeInTheDocument();
+    expect(screen.queryByText('Public workflow guide')).not.toBeInTheDocument();
+    expect(screen.queryByText('Learning environment')).not.toBeInTheDocument();
   });
 
   it('removes private operator data immediately when access expires', async () => {

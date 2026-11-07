@@ -25,6 +25,7 @@ import {
   RouterLink,
   SectionCard,
   StatusMessage,
+  formatMetricValue,
 } from '../components/kit';
 
 const useStyles = makeStyles({
@@ -45,10 +46,6 @@ const useStyles = makeStyles({
 
 function formatPercent(value: number) {
   return `${(value * 100).toFixed(1)}%`;
-}
-
-function formatMetricValue(value: number) {
-  return Number.isInteger(value) ? value.toString() : value.toFixed(1);
 }
 
 function formatRecordValue(value: unknown) {

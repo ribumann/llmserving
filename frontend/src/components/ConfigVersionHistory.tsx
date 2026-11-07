@@ -96,7 +96,7 @@ export default function ConfigVersionHistory({
   return (
     <SectionCard
       title="Configuration version history"
-      description="Every save creates a new immutable version. Re-select an earlier version to redeploy it explicitly."
+      description="Select an earlier version to use it in a deployment."
     >
       {loading ? <LoadingState label="Loading configuration history…" /> : null}
       {error ? (

@@ -205,6 +205,15 @@ describe('DeployPage', () => {
       });
     });
 
+    expect(mockedCreateDeployment).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByText(/saving creates a new immutable configuration version/i),
+    ).toHaveLength(1);
+    expect(
+      screen.getByText(/traffic changes only when you deploy the selected versions/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/only catalog entries compatible/i)).toBeInTheDocument();
+
     await user.type(screen.getByLabelText(/hugging face token/i), 'hf-secret-token');
     await user.click(screen.getByRole('button', { name: /deploy selected revision/i }));
 

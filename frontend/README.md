@@ -21,6 +21,13 @@ Authorized operators retain their owner-scoped workflow, including billable acti
 Frontend disabling is an affordance, not an authorization boundary: the backend
 continues rejecting every unauthenticated mutation and side-effecting preview.
 
+Saving a configuration creates an immutable version; only an explicit deployment
+changes traffic. Compare uses the **Result report ID** from completed quality or
+performance reports, and its generated URL reopens the persisted comparison.
+Exercise prompt history is session-only and clears on close or refresh. Prompt
+timing uses the report display convention (integers unchanged, otherwise one
+decimal place); API measurements retain their original precision.
+
 Local Vite, the self-hosted Nginx image and Azure Container Apps use the same
 application. Container Apps is currently the only implemented cloud UI host;
 a second cloud host and standalone local-to-cloud Entra login are not supplied.
