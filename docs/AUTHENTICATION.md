@@ -5,15 +5,16 @@ contract and separately approved callback/private-vault writes, see
 [main application bootstrap](APP_BOOTSTRAP.md).
 
 Public UI/backend ingress is an intentional supported architecture, distinct
-from anonymous access or public database/inference ports. UI and headless
-clients use the same protected operator APIs; a private backend is not required.
+from public database/inference ports. Anonymous browsing is limited to the
+public summary API below. UI and headless clients use the same protected
+operator APIs for actions; a private backend is not required.
 See [UI hosting and headless/local access options](UI_DEPLOYMENT.md) for what is
 implemented and the limits of Easy Auth with a local UI.
 
 ## Trust boundaries
 
 `AUTH_MODE=entra-jwt` is the backend's safe default. Cloud Terraform sets this
-mode and `APP_ENV=production` explicitly. Browser/operator requests require a
+mode and `APP_ENV=production` explicitly. Operator requests require a
 cryptographically validated RS256 Entra user token with the configured tenant
 issuer, audience, expiry/issued-at, tenant ID and user identity. The allowed
 email-domain list remains enforced. Caller-supplied `X-Demo-User`,
@@ -25,7 +26,7 @@ Missing tenant/audience fails closed with `operator_auth_unconfigured` (503).
 Invalid/missing tokens return 401; forbidden domains return 403. Service tokens
 cannot impersonate operators merely by supplying a username header. Internal
 workflow callbacks use their separate audience-restricted managed-identity
-validator. Only `/internal/workflows` and its descendants bypass the platform's
+validator. `/internal/workflows` and its descendants bypass the platform's
 browser sign-in policy; they still require signed, unexpired tokens from the
 deployment tenant with the internal audience and an exact `xms_mirid` resource
 match in `INTERNAL_API_ALLOWED_IDENTITY_RESOURCE_IDS` (CSV or JSON array).
@@ -34,6 +35,11 @@ An empty allowlist fails closed (503); ordinary user/service tokens without a
 managed-identity claim return 401, and other managed identities return 403.
 No ARM audience is added to operator API authorization, and no new identity or
 role grant is required.
+
+The platform also excludes `/public/*` from browser sign-in so persisted
+read-only summaries remain available anonymously. That ingress exclusion is
+not API authorization: the backend admits only exact registered public `GET`
+routes and still authenticates every operator action and invalid public path.
 
 Operator tenant and infrastructure tenant are independent when explicitly
 configured: `AUTH_TENANT_ID` selects the single trusted operator issuer/JWKS/
@@ -55,6 +61,75 @@ Apps/App Service hosting. Tests opt into local-demo explicitly; separate tests
 exercise real signed-token validation and cloud rejection of every legacy
 identity header.
 
+## Public read-only API
+
+Anonymous browsing uses a separate `/public` router. Only `GET` requests that
+fully match one of its registered routes bypass operator authentication; there
+is no blanket GET exemption or `/public` prefix exemption. Unknown paths,
+trailing-slash variants, `HEAD`, and mutation methods fail closed. These reads
+do not need operator signing-key discovery or a configured/available SSO service.
+They query persisted database rows, never provider state, live inference,
+health checks, or provisioning APIs. Missing resources return a generic 404;
+environment-scoped deployment/report reads verify the persisted relationship.
+
+All responses include `requestId`. The public contract is:
+
+| GET route | Response |
+| --- | --- |
+| `/public/providers` | `{providers: [{provider, engines, cloudInfrastructure, durableProvisioning, durableModelDeployment, durableEvaluation}]}` (static capabilities) |
+| `/public/profiles` | `{profiles: [{profileId, provider, modelSizeClass, eligibleRegions, vmSku, version, capacityAssumptions, configurableInputs: {}, knownLimitations: []}]}` |
+| `/public/catalog` | `{catalog: [{catalogEntryId, family, sizeClass, isGated, quantizationRequired, compatibleProfileIds, huggingFaceRepoId: "", checkpointRef: "", license: "", notes: ""}]}` |
+| `/public/environments` | `{environments: [environment]}` |
+| `/public/environments/{id}` | `environment` |
+| `/public/environments/{id}/model-configurations` | `{items: [{modelConfigId, catalogEntryId, resolvedCheckpointRef: "", modelSettings, version, createdAt}]}` |
+| `/public/environments/{id}/inference-configurations` | `{items: [{inferenceConfigId, engineId, servingSettings, generationSettings, version, createdAt}]}` |
+| `/public/environments/{id}/deployments/{revision}` | `{deploymentRevisionId, environmentId, modelConfigId, inferenceConfigId, engineId, lifecycleState, activePeriod: {}, health: {status, diagnostics: []}, createdAt}` |
+| `/public/environments/{id}/runs` | `{runs: [{runId, runType, testDefinitionRef, status, startedAt, endedAt, configuration, diagnostics: []}]}` |
+| `/public/environments/{id}/runs/{run}/report` | `{resultReportId, runId, completenessIndicator, quality, performance, referenceExecutionProfileRef: null, configuration}` |
+| `/public/golden-datasets` | `{goldenDatasets: [{goldenDatasetId, name: goldenDatasetId, version, caseCount, provenance, reviewStatus}]}` |
+| `/public/benchmark-definitions` | `{benchmarkDefinitions: [{benchmarkId, version}]}` |
+| `/public/performance-workloads` | `{performanceWorkloads: [{workloadId, version, concurrency, warmup, inputProfile, durationOrRequestCount, safetyLimits, completionCriteria}]}` |
+| `/public/comparisons` | `{comparisons: [{comparisonId, comparabilityStatus, reports: [{reportId, revisionId, environmentId}]}]}` |
+| `/public/comparisons/{id}` | `{comparisonId, comparabilityStatus, reports, reasons: [], sections: [{title, items}]}` |
+
+`environment` contains `environmentId`, `profileId`, `provider`, `region`,
+`lifecycleState`, the equivalent `state` alias, `activeDeploymentRevisionId`,
+`createdAt`, `updatedAt`, `regionRecommendation: null`, and `providerState: {}`.
+No owner or operator audit identity is exposed. Only persisted-retention runs
+and their reports are published; session-ephemeral interactive runs are excluded.
+
+`configuration` is the run's immutable snapshot projected to
+`deploymentRevisionId`, `engineId`, `catalogEntryId`, `resolvedCheckpointRef: ""`,
+and safe `modelSettings`, `servingSettings`, and `generationSettings`.
+Settings contain only explicitly allowlisted finite numeric tuning parameters
+and recognized dtype/quantization enums. Arbitrary arguments, stop text,
+checkpoints, nested objects, credentials, URLs, and unknown settings are excluded.
+Workload dictionaries similarly retain only allowlisted numeric token counts,
+request counts, durations, concurrency/safety/completion limits. Profile
+capacity assumptions contain only numeric GPU count/memory.
+
+`quality` is `{cases: [], aggregate, benchmarks}`: allowlisted numeric aggregate
+counts/pass rate and numeric benchmark score/baseline/delta summaries with the
+run's definition ID and optional pass/fail enum/regression boolean.
+`performance` is null when absent; otherwise it contains allowlisted finite
+latency/throughput `metrics` (scalars or numeric p50/p95/p99), canonical `units`,
+numeric-only workload `testConditions`, `requestFailures: {count?, total?}`,
+`acceleratorUtilization: {available: false, details: null}`, and `diagnostics: []`.
+It never includes cases, raw prompts/outputs, errors, network details or traces.
+Azure tenant/subscription/principal/resource IDs, credentials and private
+addresses/URLs are excluded from all public projections.
+
+Saved comparison lineage is resolved from persisted report/run/revision rows
+(missing references have null revision/environment IDs). Detail sections retain
+safe saved configuration tuning and numeric quality/performance/failure diffs;
+freeform comparability reasons, checkpoints and utilization diagnostics are
+not published. No comparison is created by a public read.
+
+All existing operator route shapes, owner checks, mutation authentication and
+internal managed-identity callback authentication remain unchanged. `/session`
+is still protected. Public ingress does not make database or inference ports
+public, grant datasource/provider access, or allow anonymous operator actions.
+
 ## Browser-to-API transport
 
 Production browser requests use same-origin `/api`. Nginx receives the actual
@@ -63,7 +138,11 @@ runtime `BACKEND_URL`, and strips unsigned identity headers. An explicit bearer
 token is preserved when there is no platform ID-token header. The proxy does
 not validate or trust a header as an identity: the backend performs the complete
 JWT validation above, and upstream TLS certificate verification remains enabled.
-Missing credentials return 401, never a demo user.
+Missing credentials on operator routes return 401, never a demo user
+(unconfigured operator authentication returns 503). The dedicated
+`/api/public/` proxy forwards only `GET`, strips bearer/platform tokens and
+unsigned identity headers, and serves the public summary contract above;
+it does not relax the protected `/api/` operator transport.
 
 The platform must actually supply a user ID token for this path. Its availability
 and any tenant-approved token-store configuration must be verified in the target

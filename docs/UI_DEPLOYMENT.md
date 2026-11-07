@@ -4,24 +4,33 @@ Use the existing application for demos and exploration. A publicly reachable
 backend is intentional: the UI and headless clients use the same operator API.
 Public reachability does **not** make provisioning, model deployment or runs
 anonymous. Keep their signed-token authentication and authorization enabled.
-There is no separate anonymous playground API or reduced duplicate application.
+There is no anonymous inference playground. The explicit `/public` router serves
+safe persisted projections, never live provider checks or actions.
 
-The frontend static shell and workflow descriptions are accessible without
-sign-in. In Container Apps, only the **frontend** Easy Auth policy allows
-anonymous requests; its identity provider remains enabled for explicit sign-in.
-Nginx still rejects `/api` requests without a token, backend Easy Auth remains
-enabled, and the backend independently validates signed operator JWTs.
+The frontend and persisted read-only summaries are accessible without sign-in.
+Frontend Easy Auth still supports explicit sign-in; backend Easy Auth remains
+enabled with only `/public/*` and the separately authenticated internal workflow
+callbacks excluded from browser redirection. The backend public allowlist matches
+only approved read handlers; an unknown route or non-read request does not bypass
+operator authentication.
 
-Before mounting a live page, the UI checks the authenticated `GET /session`
-endpoint through the same API proxy. A 401 or 403 shows an intentional protected
-state, not an automatic failed-data panel. Other session-check failures keep
-live pages locked with a retry action. Sign-in returns to the requested route;
-no credentials are stored by the frontend and private API responses are not
-cached. Static workflow descriptions are not historical run evidence.
+Nginx permits only GET requests under `/api/public/`, strips identity/token
+headers there and forwards to the sanitized router. All other `/api` requests
+still require an operator token. Public summaries expose configuration lineage,
+aggregate metrics and lifecycle state, not credentials, infrastructure identifiers,
+private network information or raw case/prompt/output content.
 
-Authorized operators still have the full workflow. This public shell is **not**
-the future read-only open-source showcase: publishing sanitized historical
-examples and disabling execution server-side are separate release changes.
+Before mounting operator pages, the UI checks authenticated `GET /session`
+through the same API proxy. A 401/403 or unavailable identity provider keeps
+actions locked while public reads continue independently. Public API/database
+failures have their own retry/error state, distinct from sign-in availability.
+Sign-in returns to the requested route; no credentials are stored by the frontend
+and API responses are not cached.
+
+Authorized operators retain their full owner-scoped workflow. Public pages have
+disabled action controls and no submission forms; server-side authentication
+continues protecting prompts, runs, saves, generated exports and side-effecting
+previews, including direct API calls.
 
 ## What the repository currently supports
 

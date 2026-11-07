@@ -274,6 +274,19 @@ jobs:
                 exit 1
               fi
               printf '%s\n' "$response" | grep -q '401 Unauthorized'
+              docker exec llmserving-ci-frontend wget -qO- \
+                --header="X-MS-TOKEN-AAD-ID-TOKEN: signed-fixture" \
+                --header="X-Demo-User: forged" \
+                --header="X-MS-CLIENT-PRINCIPAL-NAME: forged" \
+                http://127.0.0.1/api/public/identity | \
+                python -c 'import json,sys; p=json.load(sys.stdin); assert p=={"authorization":"","demo":"","principal":"","rawToken":"","uri":"/public/identity"}'
+              docker exec llmserving-ci-frontend wget -qO- http://127.0.0.1/api/public/identity | \
+                python -c 'import json,sys; assert json.load(sys.stdin)["uri"]=="/public/identity"'
+              if response=$(docker exec llmserving-ci-frontend wget -SO- --post-data='{}' http://127.0.0.1/api/public/identity 2>&1); then
+                echo "::error::Public proxy accepted a non-read request."
+                exit 1
+              fi
+              printf '%s\n' "$response" | grep -q '405 Not Allowed'
               echo "Frontend HTTP and signed-token transport smoke passed (not Entra acceptance)"
               ;;
             *)

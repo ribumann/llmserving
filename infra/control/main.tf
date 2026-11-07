@@ -1404,7 +1404,7 @@ resource "azapi_resource" "backend_auth_config" {
       globalValidation = {
         unauthenticatedClientAction = "RedirectToLoginPage"
         redirectToProvider          = "azureactivedirectory"
-        excludedPaths               = ["/internal/workflows", "/internal/workflows/*"]
+        excludedPaths               = ["/internal/workflows", "/internal/workflows/*", "/public/*"]
       }
       identityProviders = {
         azureActiveDirectory = {
@@ -1436,8 +1436,8 @@ resource "azapi_resource" "frontend_auth_config" {
         enabled = true
       }
       globalValidation = {
-        # Only the static frontend is public. Nginx and the backend independently
-        # require a verified operator token for every /api request.
+        # Public summaries use an explicit read router. Nginx and backend JWT
+        # validation still require an operator token for all operational APIs.
         unauthenticatedClientAction = "AllowAnonymous"
       }
       identityProviders = {

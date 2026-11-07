@@ -161,6 +161,23 @@ pytest -m integration
 Use the `integration` marker for tests that require a live PostgreSQL instance or other external
 infrastructure.
 
+## Public read-only browsing
+
+The `/public` API exposes allowlisted persisted summaries without operator authentication.
+It never calls live providers or inference engines. All existing operator routes and internal
+callbacks keep their authentication and response contracts. Only exact registered public
+`GET` routes are exempt; mutations, unknown paths and `/session` remain protected.
+See the [public API contract](../docs/AUTHENTICATION.md#public-read-only-api) for routes,
+response envelopes and sensitive-data exclusions.
+
+The public boundary tests use an isolated in-memory SQLite database with JSON type variants
+to verify real persistence, filtering, comparison lineage and redaction:
+
+```powershell
+cd backend
+python -m pytest -q tests\contract\test_public.py tests\unit\test_operator_auth.py tests\unit\test_internal_auth.py
+```
+
 ## Azure environment provisioning authentication
 
 The current backend dispatches provisioning through Durable Functions to the
