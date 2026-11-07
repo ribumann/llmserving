@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Body1, Button, Field, Textarea, makeStyles, tokens } from '@fluentui/react-components';
+import { Button, Field, Textarea, makeStyles, tokens } from '@fluentui/react-components';
 import EnvironmentPicker from '../components/EnvironmentPicker';
 import { ApiError } from '../services/apiClient';
 import { submitPrompt } from '../services/deploymentsApi';
@@ -17,6 +17,7 @@ import {
   RouterLink,
   SectionCard,
   StatusMessage,
+  formatMetricValue,
 } from '../components/kit';
 
 const useStyles = makeStyles({
@@ -216,9 +217,6 @@ export default function ExercisePage() {
                 ]}
               />
             </InfoPanel>
-            <InfoPanel title="Retention note">
-              <Body1>Prompts are not saved. Refreshing the page intentionally clears this local history.</Body1>
-            </InfoPanel>
           </InfoGrid>
         ) : null}
       </SectionCard>
@@ -256,7 +254,7 @@ export default function ExercisePage() {
 
       <SectionCard
         title="3. Session prompt history"
-        description="Only this in-memory page session is shown. Closing or refreshing the page clears it."
+        description="Prompts are not saved. Closing or refreshing this page clears the session history."
       >
         {history.length ? (
           <div className={styles.exchangeStack}>
@@ -271,12 +269,12 @@ export default function ExercisePage() {
                   ]}
                 />
                 <MetricGrid>
-                  <MetricCard label="Time to first token" value={`${exchange.response.timing.ttftMs} ms`} />
+                  <MetricCard label="Time to first token" value={`${formatMetricValue(exchange.response.timing.ttftMs)} ms`} />
                   <MetricCard
                     label="Inter-token latency (avg)"
-                    value={`${exchange.response.timing.interTokenLatencyMsAvg} ms`}
+                    value={`${formatMetricValue(exchange.response.timing.interTokenLatencyMsAvg)} ms`}
                   />
-                  <MetricCard label="Total latency" value={`${exchange.response.timing.totalLatencyMs} ms`} />
+                  <MetricCard label="Total latency" value={`${formatMetricValue(exchange.response.timing.totalLatencyMs)} ms`} />
                 </MetricGrid>
               </InfoPanel>
             ))}

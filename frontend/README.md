@@ -13,6 +13,13 @@ This is not a read-only release mode: authorized operators retain the full
 workflow, including billable actions. A future public historical showcase needs
 a separately approved, sanitized dataset and server-side execution restrictions.
 
+Saving a configuration creates an immutable version; only an explicit deployment
+changes traffic. Compare uses the **Result report ID** from completed quality or
+performance reports, and its generated URL reopens the persisted comparison.
+Exercise prompt history is session-only and clears on close or refresh. Prompt
+timing uses the report display convention (integers unchanged, otherwise one
+decimal place); API measurements retain their original precision.
+
 Local Vite, the self-hosted Nginx image and Azure Container Apps use the same
 application. Container Apps is currently the only implemented cloud UI host;
 a second cloud host and standalone local-to-cloud Entra login are not supplied.

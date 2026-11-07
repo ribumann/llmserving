@@ -261,16 +261,13 @@ function Shell({ scheme, onToggleScheme }: ShellProps) {
         <div className={styles.headerStart}>
           <Hamburger onClick={() => setDrawerOpen((open) => !open)} />
           <div className={styles.brand}>
-            <Text size={200}>Learning environment</Text>
             <Subtitle1 as="h1">Azure LLM Serving Demo</Subtitle1>
           </div>
         </div>
         <div className={styles.headerActions}>
-          <Text size={200}>
-            {session === 'authenticated'
-              ? 'Operator workspace'
-              : 'Public workflow guide'}
-          </Text>
+          {session !== 'authenticated' ? (
+            <Text size={200}>Public workflow guide</Text>
+          ) : null}
           {session === 'unavailable' ? (
             <Button onClick={retry}>Check access again</Button>
           ) : null}

@@ -1,5 +1,9 @@
 import type { StatusTone } from './StatusBadge';
 
+export function formatMetricValue(value: number): string {
+  return Number.isInteger(value) ? value.toString() : value.toFixed(1);
+}
+
 /** `not_provisioned` / `quality-golden` → `Not Provisioned` / `Quality Golden`. Used for every raw snake_case or kebab-case status/state/phase/run-type value. */
 export function formatStateLabel(value: string): string {
   return value

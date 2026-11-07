@@ -36,6 +36,8 @@ describe('App shell', () => {
       await screen.findByRole('heading', { name: /explore the workflow/i }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Your environments')).not.toBeInTheDocument();
+    expect(screen.getByText('Public workflow guide')).toBeInTheDocument();
+    expect(screen.queryByText('Learning environment')).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       'http://localhost:8000/session',
     ]);
@@ -136,6 +138,9 @@ describe('App shell', () => {
       'http://localhost:8000/environments',
     ]);
     expect(screen.getByRole('link', { name: 'Sign out' })).toBeInTheDocument();
+    expect(screen.queryByText('Operator workspace')).not.toBeInTheDocument();
+    expect(screen.queryByText('Public workflow guide')).not.toBeInTheDocument();
+    expect(screen.queryByText('Learning environment')).not.toBeInTheDocument();
   });
 
   it('removes private views when a subsequent API call reports expired access', async () => {
