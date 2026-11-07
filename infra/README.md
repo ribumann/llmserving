@@ -1,6 +1,11 @@
 # Infrastructure: Baseline Azure Pilot Architecture
 
-This directory contains three independent Terraform modules that together implement the
+See [the deployment diagram](../docs/architecture/DEPLOYMENT.md) for layers,
+network/trust boundaries and artifact/state flow. Existing deployed acceptance
+is [dated evidence](../docs/RELEASE_VALIDATION.md), not authorization to replay
+bootstrap or adopt existing state.
+
+This directory contains three core independent Terraform modules that implement the
 "Baseline Azure Pilot Architecture" described in
 [`specs/001-llm-serving-demo/plan.md`](../specs/001-llm-serving-demo/plan.md) (Target Platform
 section) and [`research.md`](../specs/001-llm-serving-demo/research.md) (Section 7):
@@ -9,6 +14,8 @@ An optional, separate [`infra/bootstrap`](./bootstrap) module proposes keyless
 state storage in an existing shared group. It owns no group, ACR or grants
 and does not migrate any module's local state. Account-scoped OAuth blob
 access and any backend migration still require explicit approval.
+[`infra/operator_access`](./operator_access) is a separate opt-in private operator
+VPN/DNS/state-endpoint module; it is not a default part of every deployment.
 
 | Module | Resource group | Applied | Owns |
 |---|---|---|---|

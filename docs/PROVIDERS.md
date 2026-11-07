@@ -13,7 +13,7 @@ configuration and report schemas are unchanged.
 | Prompts | vLLM OpenAI-compatible API | Ollama OpenAI-compatible API | Not implemented | Not implemented |
 | Golden/benchmark/performance execution | Existing backend in-process orchestrator | Existing backend in-process orchestrator | Not implemented | Not implemented |
 | Durable evaluation/performance parity | Not yet certified; worker implementations differ | Not implemented | Not implemented | Not implemented |
-| Fresh full authenticated cloud release acceptance | Unverified; approved external SSO credential/callback/platform bootstrap still required | Real CPU API/browser inference smoke merged; not Azure SSO/cloud acceptance | Unsupported | Unsupported |
+| Observed execution / release boundary | Existing deployed Qwen3-4B/vLLM acceptance passed; new-target reproducibility/auth/cleanup remain separately gated | Real CPU API/browser inference smoke merged; not Azure SSO/cloud acceptance | Unsupported | Unsupported |
 
 AWS/GCP are non-blocking experimental directions, not working adapters,
 deployment targets, or tested portability claims. No placeholder adapter or
@@ -69,3 +69,6 @@ token throughput, TTFT or ITL. Neither change certifies complete durable parity:
 prompt/model invocation, benchmark execution, report normalization, immutable
 snapshots and durable restart/cancellation/ownership gates remain required.
 No API routing or capability flag is enabled by these preparatory changes.
+
+For high-level AWS/GCP implementation steps and a copy-paste coding-agent
+starter prompt, see [extending to another cloud](PROVIDER_EXTENSION.md).
