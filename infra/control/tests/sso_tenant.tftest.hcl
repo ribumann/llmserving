@@ -89,6 +89,10 @@ variables {
 run "external_same_tenant_default" {
   command = plan
   assert {
+    condition     = azurerm_linux_function_app.orchestrator.https_only
+    error_message = "The orchestration endpoint must require HTTPS independently of operator sign-in configuration."
+  }
+  assert {
     condition = (
       jsondecode(azapi_resource.frontend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "AllowAnonymous"
       && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.platform.enabled
