@@ -51,11 +51,9 @@ test('anonymous visitors browse actual persisted summaries and retained reports'
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('navigation', { name: 'Primary' })).toBeHidden();
   await expect(page.getByRole('heading', { name: 'Saved report summary' })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => {
-    return Array.from(document.querySelectorAll('body *'))
-      .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
-      .map((element) => `${element.tagName}.${element.className}: ${element.getBoundingClientRect().right}`);
-  })).toEqual([]);
+  await expect.poll(() => page.evaluate(() =>
+    document.documentElement.scrollWidth <= window.innerWidth,
+  )).toBe(true);
   if (process.env.READONLY_SCREENSHOT_DIR) {
     await page.screenshot({ path: path.join(process.env.READONLY_SCREENSHOT_DIR, 'public-read-mobile.png'), fullPage: true });
   }

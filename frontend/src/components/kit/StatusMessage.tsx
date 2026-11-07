@@ -15,7 +15,7 @@ export type StatusMessageProps = {
 };
 
 const useStyles = makeStyles({
-  body: { minWidth: 0, overflowWrap: 'anywhere' },
+  body: { minWidth: 0, overflowWrap: 'anywhere', whiteSpace: 'normal' },
 });
 
 /**
