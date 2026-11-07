@@ -171,7 +171,7 @@ describe('ProvisionPage', () => {
     });
 
     await user.selectOptions(
-      screen.getByRole('combobox', { name: /cloud deployment profile/i }),
+      await screen.findByRole('combobox', { name: /cloud deployment profile/i }),
       'azure-single-gpu-7b',
     );
     await user.selectOptions(
