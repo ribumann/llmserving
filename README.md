@@ -1,315 +1,175 @@
 # LLM Serving Demo
 
-Azure LLM Serving Demo is a control-plane application for operators and demo runners who need to stand up Azure-hosted LLM inference environments quickly, deploy a model into them, exercise prompts, and capture quality/performance evidence without hand-building infrastructure for every demo.
+An Azure-backed LLM serving lab: provision a GPU environment, deploy vLLM, exercise
+prompts, and retain comparable quality/performance reports. A local Ollama adapter
+supports development without Azure. The control plane is FastAPI/PostgreSQL with a
+React/Vite UI, Durable Functions and Container Apps Jobs.
 
-The current repository contains:
+**Try the [public demo](https://servinglab.liberatetheinnerchild.net).**
+Every screen has a read-only view of sanitized persisted data. Sign-in is required
+for provisioning, deployment, prompts, runs, configuration saves, exports and
+side-effecting previews. Anonymous access never invokes inference or Azure and
+never exposes raw cases/prompts/outputs, credentials or private infrastructure.
 
-- a FastAPI backend control plane
-- a React/Vite operator UI
-- Durable Functions + Container Apps Job orchestration for infrastructure/model deployment
-- Terraform for the shared platform, persistent control plane, and disposable per-demo GPU environments
+**Status, 2026-11-07:** real deployed Qwen3-4B/vLLM acceptance has passed on the
+existing Azure demo. Recent observations include golden **12/12** and a
+50-request, concurrency-10 performance run with five verified warm-ups, zero
+failures, **167.6 tokens/sec** and **369.6 ms p95 TTFT**. These are dated small-run
+observations, not an SLA, benchmark calibration or reproducible-release promise.
+Spot compute remains interruptible; Regular allocation was denied by subscription
+policy. See [evidence and limitations](docs/RELEASE_VALIDATION.md).
 
-Several later-stage UI areas are still scaffolded rather than fully productized (`Compare`, `Retune`, `Teardown`, and `Experiment History` pages), but provisioning, deployment, prompt exercise, and run/report flows are all represented in code today.
+## Start here
 
-**Status:** exploratory, not production-ready or a certified unattended Azure
-release. Read-only CI, scoped OIDC and independent canary cleanup have passed.
-Fresh CPU/Ollama API and real-browser inference gates are now merged;
-authenticated Azure browser acceptance and GPU deployment remain blocked.
-See [exact commits, runs, measurements and limitations](docs/RELEASE_VALIDATION.md).
-Canary cleanup does not establish cleanup of billable application resources.
+| Goal | Guide |
+| --- | --- |
+| Browse or present the application | [Demo walkthrough](docs/DEMO.md) |
+| Find documentation by task | [Documentation index](docs/README.md) |
+| Understand the system at increasing depth | [Architecture map](docs/ARCHITECTURE.md) |
+| Develop locally | [Backend](backend/README.md), [frontend](frontend/README.md), [testing](docs/TESTING.md) |
+| Configure an authorized private operator | [Operator inputs](docs/OPERATOR_CONFIGURATION.md), [authentication](docs/AUTHENTICATION.md) |
+| Bring up a new Azure target safely | [Infrastructure](infra/README.md), [release gates](docs/AZURE.md), [app bootstrap](docs/APP_BOOTSTRAP.md) |
+| Preserve configurations/reports and recover | [Data and backup](docs/DATA_AND_RECOVERY.md), [state leases](docs/TERRAFORM_STATE.md), [operations](docs/OPERATIONS.md) |
 
-Azure and local Ollama have implemented adapters. AWS/GCP are experimental
-design targets, not working deployment options; unsupported providers fail
-explicitly. Durable quality/performance routing remains disabled until parity
-with the current in-process runners is established.
+## Local development
 
-## Repository guide
+Use Python 3.11+, Node 20 (CI's version), npm and a **disposable** reachable
+PostgreSQL database. Ollama is optional for real local inference. Azure login
+and Terraform are not required for local development.
 
-- [`backend/README.md`](backend/README.md) - backend-specific setup, local Ollama mode, and validation commands
-- [`frontend/README.md`](frontend/README.md) - frontend setup, lint/unit-test commands, and Playwright smoke test
-- [`docs/UI_DEPLOYMENT.md`](docs/UI_DEPLOYMENT.md) - existing local/container/cloud UI options, public headless API and Easy Auth boundaries
-- [`infra/README.md`](infra/README.md) - Terraform module split, bring-up order, and control-plane vs. demo-environment isolation
-- [`specs/001-llm-serving-demo/`](specs/001-llm-serving-demo/) - spec-kit artifacts (`spec.md`, `plan.md`, `research.md`, `tasks.md`) that describe the feature intent and planned architecture
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) - deeper architecture reference with multiple views and runtime diagrams
-- [`docs/AZURE_CANARY.md`](docs/AZURE_CANARY.md) - protected OIDC and independent failure/cancellation cleanup gate; not application or billable-resource cleanup validation
-- [`docs/TESTING.md`](docs/TESTING.md) - complete CI commands, real PostgreSQL coverage, and explicit mocked/full-stack evidence boundaries
-- [`docs/PROVIDERS.md`](docs/PROVIDERS.md) - implemented Azure/local capabilities and explicit, non-blocking AWS/GCP limitations
-- [`docs/AUTHENTICATION.md`](docs/AUTHENTICATION.md) - signed cloud authentication and exact external SSO prerequisites
-- [`docs/AZURE.md`](docs/AZURE.md) - isolated bootstrap gates, deployment manifest and known reproducibility gaps
-- [`docs/OPERATOR_CONFIGURATION.md`](docs/OPERATOR_CONFIGURATION.md) - private exact-target inputs and disabled-by-default operator workflow templates
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) - readiness, power/quota/VRAM, costs, rollback and safe cleanup
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md) - contribution gates and security boundaries
-
-## Prerequisites
-
-### Tooling
-
-| Requirement | Verified source |
-|---|---|
-| Azure CLI with access to the target subscription | Used throughout `.github/workflows/backend.yml`, `.github/workflows/frontend.yml`, and by the Terraform/job flow |
-| Terraform `1.9.8` recommended (`>= 1.7.0` required by modules) | `.github/workflows/infra.yml`, `infra/*/providers.tf` |
-| Python `3.11+` | `backend/pyproject.toml` |
-| Node.js `20` recommended in CI (`18+` documented for local frontend work) | `.github/workflows/frontend.yml`, `frontend/README.md` |
-| npm `9+` | `frontend/README.md` |
-| Reachable PostgreSQL instance | `backend/README.md`, `backend/.env.example` |
-| Docker (optional) if you want to build images locally; not required for normal local dev | The repo uses Dockerfiles plus `az acr build` in CI/CD |
-
-### Azure access and permissions
-
-You need an Azure subscription and enough RBAC to:
-
-- apply `infra/shared` and `infra/control`
-- create/update the control-plane resources in `rg-llm-control-{stage}`
-- allow per-environment GPU resource creation for `infra/demo`
-
-For GitHub Actions deployment, the checked-in workflows expect these repository secrets for OIDC-based Azure login:
-
-- `AZURE_CLIENT_ID`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
-
-Pushes and pull requests never deploy. Deployment is disabled by default and requires
-all of the following: repository variable `ENABLE_AZURE_DEPLOYMENT=true`, a manual
-workflow dispatch on `main` with `deploy=true`, and a configured `azure-deployment`
-GitHub environment. Restrict that environment to `main` and add required reviewers
-before enabling deployment. Configure OIDC trust for that environment, not arbitrary
-pull requests.
-
-Set `AZURE_RESOURCE_GROUP`, `AZURE_ACR_NAME`, `AZURE_BACKEND_APP_NAME`, and
-`AZURE_FRONTEND_APP_NAME` as **secrets** in the protected `azure-deployment`
-GitHub environment, alongside the Azure identity IDs. Although resource names
-are not credentials, secret-backed values are masked before runner step headers
-are printed; runtime `add-mask` alone cannot redact earlier headers. Operators
-with legacy configuration variables must explicitly copy these settings to
-environment secrets before enabling deployment; no automatic fallback to
-unmasked variables is provided. No Azure identity or resources are
-configured by importing this repository.
-
-### Backend environment variables
-
-Copy `backend/.env.example` to `backend/.env` and set values appropriate for your environment.
-
-Most important settings:
-
-- `DATABASE_URL`
-- `AZURE_SUBSCRIPTION_ID`
-- `AZURE_TENANT_ID`
-- `AZURE_CLIENT_ID`
-- `INTERNAL_API_AUDIENCE` (needed when Durable Functions / job callbacks authenticate to the backend)
-- `HF_TOKEN_PASSTHROUGH_HEADER`
-- `AUTH_ALLOWED_EMAIL_DOMAINS`
-- `AUTH_BYPASS_PATHS`
-- `DEFAULT_ALLOWED_SSH_SOURCE_CIDR`
-- `DEFAULT_ALLOWED_API_SOURCE_CIDR`
-- `VLLM_IMAGE`
-- `LM_EVAL_PATH`
-- `LLMPERF_PATH`
-
-### Frontend environment variables
-
-The frontend reads:
-
-- `VITE_API_BASE_URL`
-- `VITE_DEMO_USER`
-
-Create an untracked `frontend/.env.local` with `VITE_API_BASE_URL=http://127.0.0.1:18000`
-and, for local development only, `VITE_DEMO_USER=presenter@example.com`. The sample backend
-allows `example.com`; set `AUTH_ALLOWED_EMAIL_DOMAINS` explicitly for your deployment.
-Set `AUTH_MODE=local-demo` and `APP_ENV=development` on the local backend only.
-Demo headers cannot authenticate the cloud API: its default `entra-jwt` mode
-validates a signed user token. The reviewed production browser proxy is wired;
-actual platform/SSO acceptance is still required as described
-in the [authentication guide](docs/AUTHENTICATION.md).
-
-## Getting started
-
-Local development needs no Azure sign-in. Before any cloud mutation, satisfy
-the [Azure safety and authentication gates](docs/AZURE.md); do not bypass a
-tenant policy denial or reuse an original deployment's identities/state.
-Examples below use PowerShell. On POSIX, activate a virtual environment with
-`. .venv/bin/activate` and use `cp` instead of `Copy-Item`.
-
-### 1) Backend
+From the repository root, in PowerShell:
 
 ```powershell
 cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e .[dev]
+python -m pip install -e '.[dev]'
 Copy-Item .env.example .env
-alembic upgrade head
+```
+
+Edit the untracked `backend/.env` to set your disposable `DATABASE_URL`.
+Keep `AUTH_MODE=local-demo`, `APP_ENV=development`, and
+`AUTH_ALLOWED_EMAIL_DOMAINS=example.com` **only on a loopback development backend**.
+Set `CORS_ALLOWED_ORIGINS=http://localhost:5173` for Vite; use its actual browser
+origin if the port changes. Do not use wildcard CORS or local-demo on a cloud host.
+The safe cloud default is signed `entra-jwt` authentication.
+
+Continue in that backend shell:
+
+```powershell
+python -m alembic upgrade head
 python -m src.persistence.seed_catalog
 python -m src.evaluation.seed_benchmarks
 python -m src.evaluation.seed_golden_datasets
 python -m src.performance.seed_workloads
-uvicorn src.api.app:app --reload --port 18000
+uvicorn src.api.app:app --reload --host 127.0.0.1 --port 18000
 ```
 
-Optional tooling for evaluation-focused backend work:
-
-```powershell
-pip install -e .[evaluation]
-```
-
-Useful backend endpoints while developing:
-
-- `GET /healthz`
-- `GET /readyz` (bounded database readiness; not model or GPU readiness)
-- `GET /docs`
-
-### 2) Frontend
+In a second shell from the repository root:
 
 ```powershell
 cd frontend
 npm ci
-npm run dev
+$env:VITE_API_BASE_URL = 'http://127.0.0.1:18000'
+$env:VITE_DEMO_USER = 'presenter@example.com'
+npm run dev -- --host localhost
 ```
 
-The frontend expects the backend at `VITE_API_BASE_URL`; set it as described above.
+Open the URL printed by Vite. For real inference, start your own local Ollama
+runtime, run `ollama pull qwen2.5:0.5b-instruct`, then choose **Local (Ollama)** in
+Provision. Follow [the walkthrough](docs/DEMO.md#local-operator-walkthrough) through
+Deploy, Exercise, Quality and Performance. Local golden/prompt/native performance
+flows do not require Azure. Benchmarks need the backend's `evaluation` extra;
+genuine vLLM LLMPerf additionally needs the separately pinned toolkit packaged in
+the backend image, not the unrelated PyPI `llmperf` package.
 
-### 3) Optional local-only demo mode
+`GET /healthz` is API liveness; `GET /readyz` is bounded database readiness,
+not GPU/model warmth. See [backend setup](backend/README.md) for full configuration
+and [testing](docs/TESTING.md) for exact coverage and commands.
 
-If you do not want to provision Azure GPU infrastructure during development, the backend includes a local Ollama path:
-
-```powershell
-ollama pull qwen2.5:0.5b-instruct
-```
-
-Then choose the `local-ollama` profile in the UI. See [`backend/README.md`](backend/README.md) for the full local flow.
-
-## Infrastructure provisioning and deployment
-
-The Terraform layout is intentionally split into three independent modules:
-
-1. `infra/shared` - long-lived shared networking, ACR, Key Vault, and monitoring
-2. `infra/control` - long-lived control plane (backend/frontend Container Apps, Functions app, jobs, PostgreSQL, storage, identities)
-3. `infra/demo` - disposable per-environment GPU VM resources
-
-Bring-up order follows [`infra/README.md`](infra/README.md):
-
-**Do not treat module validation as a safe bootstrap command.** The current
-modules still use local cross-module state and create their resource groups;
-they are not yet a reproducible deployment into pre-existing protected test
-groups. Review a plan, protected state/locking, immutable artifacts, external
-SSO and independent billable-resource cleanup before applying anything.
-
-Notes:
-
-- `stage` defaults to `dev`
-- `infra/shared` defaults to `polandcentral`
-- `infra/demo` is **not** intended to be applied by hand for each environment; it is executed asynchronously by the `terraform_runner` Container Apps Job
-- `infra/control` can validate before images exist, but the apps/jobs will not run successfully until real images are available in ACR
-
-## CI/CD as checked into this repo
-
-### Backend (`.github/workflows/backend.yml`)
-
-On PRs and relevant pushes:
-
-- installs the backend with dev extras
-- runs `ruff check src tests`
-- runs `black --check src tests`
-- migrates/seeds a disposable PostgreSQL database and runs the full
-  `python -m pytest -q -o addopts=""` (default pytest selection excludes integration)
-
-Only on an explicitly enabled manual deployment dispatch from `main`:
-
-- logs into Azure with a commit-pinned `azure/login` action (OIDC), after masking
-  required protected infrastructure configuration
-- builds and pushes `llmserving-backend:${github.sha}` with `az acr build`
-- points Container App `llm-backend` at that commit-labelled tag (tags remain mutable;
-  digest pinning is still required for immutable release claims)
-- polls `https://<fqdn>/readyz`
-
-Git-SHA tags are traceable but still mutable registry tags. Digest pinning and
-artifact provenance are required before claiming immutable deployments.
-
-### Frontend (`.github/workflows/frontend.yml`)
-
-On PRs and relevant pushes:
-
-- runs `npm ci`
-- runs `npm run lint`
-- runs `npm run build`
-- runs `npm test`
-
-Only on an explicitly enabled manual deployment dispatch from `main`:
-
-- logs into Azure with the same commit-pinned OIDC action and pre-login masking
-- resolves the live backend Container App FQDN
-- builds and pushes `llmserving-frontend:${github.sha}` with `az acr build`
-- sets `BACKEND_URL=https://<backend-fqdn>` at runtime for the same-origin signed-token proxy
-- points the configured frontend Container App at the commit-tagged image (a tag is not digest immutability)
-- polls the frontend root URL
-
-### Terraform validation (`.github/workflows/infra.yml`)
-
-This workflow performs static validation and credential-free mocked-provider
-plan contracts, never live cloud plan/apply:
-
-- `terraform fmt -check -recursive`
-- `terraform init -backend=false`
-- `terraform validate`
-- five native mocked-provider SSO-tenant plans against actual auth bodies/env fields
-
-It also asserts that no Hugging Face token-shaped variable appears in `infra/demo` or `infra/control`.
-
-### Runtime (`.github/workflows/runtime-ci.yml`)
-
-Runs every Functions/worker test, packages and imports the dependency-inclusive
-Functions ZIP, builds all seven images, and runs nine API-mocked Playwright
-scenarios. These browser tests do not establish full-stack or cloud acceptance.
-The separate real-model API/Chromium workflow/evidence is explicitly identified
-in [release validation](docs/RELEASE_VALIDATION.md), not represented as a
-Azure/browser/benchmark result.
-
-## Licensing and external assets
-
-The application source is MIT licensed; retain the copyright and license in
-[`LICENSE`](LICENSE). Spec Kit attribution is retained in
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Third-party dependencies and build-time downloads retain
-their own licenses and notices, including ray-project/LLMPerf (Apache-2.0) and
-its downloaded prompt data. No model weights or external benchmark datasets
-are included in this source snapshot. Model catalog license labels are guidance,
-not a license grant: review the exact model card and revision, accept any gated
-access terms (including Gemma and Llama terms), and retain required notices before
-downloading, deploying, or redistributing models. Benchmark runs can download
-GSM8K, IFEval, and MMLU data through evaluation tooling; independently review each
-dataset's license and usage restrictions. The bundled small golden dataset uses
-curated general-knowledge prompts, not copied benchmark examples.
-
-This is an exploratory demo, not a production-hardened service. Azure operations
-incur costs and require independently configured identities, networking, and quotas.
-
-## High-level architecture
-
-At runtime, the frontend calls the FastAPI control plane, which persists state in PostgreSQL and hands off slow or infrastructure-heavy operations to Durable Functions and Container Apps Jobs. The control plane itself is long-lived, while demo GPU environments are created and destroyed separately as disposable Terraform-managed resource groups.
+## Architecture at a glance
 
 ```mermaid
 flowchart LR
-    Operator[Operator / demo runner]
-    Frontend[React/Vite frontend<br/>llm-frontend]
-    Backend[FastAPI backend<br/>llm-backend]
-    Postgres[(PostgreSQL)]
-    Functions[Durable Functions<br/>orchestration app]
-    Jobs[Container Apps Jobs<br/>terraform_runner / model_deployment / workers]
-    Demo[Disposable GPU demo environment<br/>rg-llm-demo-...]
-    Azure[Azure control-plane resources<br/>ACR, Container Apps, identities, storage]
-
-    Operator --> Frontend
-    Frontend --> Backend
-    Backend --> Postgres
-    Backend -->|Infrastructure and model deployment| Functions
-    Functions -->|Infra and model jobs| Jobs
-    Jobs --> Demo
-    Backend --> Demo
-    Jobs --> Azure
-    Backend --> Azure
+    Visitor["Public visitor"]
+    Operator["Verified operator"]
+    UI["React UI and Nginx"]
+    API["FastAPI control plane"]
+    DB[("PostgreSQL")]
+    Runs["In-process quality and performance"]
+    Functions["Durable Functions"]
+    Jobs["Terraform and model jobs"]
+    GPU["Private GPU VM and vLLM"]
+    Ollama["Local Ollama"]
+    Visitor -->|Safe persisted GETs| UI
+    Operator -->|Authorized actions| UI
+    UI --> API
+    API --> DB
+    API --> Runs
+    API --> Functions
+    API -->|Model pre-dispatch| Jobs
+    Functions -->|Dispatch or monitor| Jobs
+    Jobs --> GPU
+    Runs --> GPU
+    API -->|Prompts| GPU
+    API --> Ollama
+    Runs --> Ollama
 ```
 
-Quality/performance runners currently execute in the backend process. Worker
-definitions exist, but their presence is not durable-run parity or restart
-certification. No original deployment, Terraform state or private dataset is
-included in this public MIT snapshot; retain the license and attribution.
+Shared networking/registry/vault/monitoring and the control plane outlive demo GPU
+environments. `infra/demo` supports both managed disposable groups and explicitly
+approved retained groups with fresh data-only group state. Teardown must preserve
+retained groups, shared/control resources and other environments.
 
-For deeper implementation detail, diagrams, and verified design-pattern notes, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Provision/teardown/model deployment use durable job monitoring. **Quality and
+performance still run in the backend process**, with reports/snapshots persisted
+in PostgreSQL. Evaluation/performance/export worker definitions exist, but are not
+the API run path and do not certify process-restart recovery. AWS/GCP are design
+directions, not working adapters. [Layered diagrams](docs/ARCHITECTURE.md) distinguish
+these implemented paths from optional infrastructure and pending gates.
+
+## Deployment and safety
+
+PR/push CI checks code, database contracts, containers and credential-free
+Terraform plans; it never deploys to Azure. Cloud image updates require protected
+manual-main dispatch, `ENABLE_AZURE_DEPLOYMENT=true` and the `azure-deployment`
+environment. Separate operator workflows have their own disabled-by-default
+configuration/approval gates. Importing this repository configures no identity,
+connection, resource or cloud access.
+
+New targets require reviewed ownership, private state/locking/backups, artifact
+digests, actual SSO/token relay, exact GPU quota/policy, bounded costs and
+independent cleanup. Existing-target success does not satisfy those gates for a
+new tenant or subscription. Default Terraform image tags and local cross-module
+state are not a clean production bootstrap. Never bypass policy or weaken auth.
+See [private setup](docs/OPERATOR_CONFIGURATION.md) and [Azure gates](docs/AZURE.md).
+
+The database is PostgreSQL Flexible Server, not an idle-auto-pausing serverless
+database. Explicit stop/start and external subscription shutdown automation are
+separate operational concerns; [the availability runbook](docs/DATA_AND_RECOVERY.md#database-availability)
+explains what to inspect without inventing an `autoPauseDelay` setting.
+
+## Extending to AWS or GCP
+
+Neither cloud is implemented today. Start with one provider and retain the
+existing API/report contracts: implement its lifecycle and honest quota/capacity
+checks, approved identity/private networking/secrets, isolated Terraform state
+and recovery, job orchestration/artifact publication, private vLLM deployment,
+provider-aware UI/configuration and full contract/real-model acceptance.
+Do not replace Azure or simply point its ARM/managed-identity workers at another
+cloud. [The high-level roadmap and coding-agent starter prompt](docs/PROVIDER_EXTENSION.md)
+identify current extension seams and platform-specific decisions without claiming
+ready AWS/GCP capabilities.
+
+## License and contributions
+
+Application source is [MIT](LICENSE); retain
+[third-party attribution](THIRD_PARTY_NOTICES.md). No model weights, private
+deployment files or raw acceptance reports are included. Check each exact model
+revision and dataset's license/gated terms independently; catalog labels are not
+a license grant.
+
+Follow [contribution and review gates](CONTRIBUTING.md) and
+[private vulnerability reporting](SECURITY.md). Specifications under
+[`specs/001-llm-serving-demo`](specs/001-llm-serving-demo) preserve design intent and
+task history; current source and the architecture/evidence guides take precedence.

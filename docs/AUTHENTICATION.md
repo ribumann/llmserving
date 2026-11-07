@@ -1,5 +1,10 @@
 # Authentication and external SSO bootstrap
 
+This guide describes the per-target authentication contract, not current login
+availability. Existing deployed acceptance is recorded in
+[release evidence](RELEASE_VALIDATION.md); every new tenant/host still needs its
+own approved consent, callbacks, credential and real token-relay verification.
+
 For the fixed main environment's executable operator phases, exact input
 contract and separately approved callback/private-vault writes, see
 [main application bootstrap](APP_BOOTSTRAP.md).
@@ -168,7 +173,7 @@ sequenceDiagram
 
 Real-image tests cover synthetic header/path transport and missing-token
 rejection; backend tests cover locally signed JWT validation. Neither substitutes
-for an actual Entra browser session, which remains unverified until bootstrap.
+for an actual Entra browser session on a newly bootstrapped target.
 Local Vite development still uses its explicit `VITE_API_BASE_URL`; cloud builds
 must use the runtime same-origin proxy rather than a baked cross-origin API URL.
 
@@ -236,8 +241,9 @@ or expose the API with demo headers.
 
 Actual authenticated frontend-to-backend requests, token/cookie forwarding,
 CORS, negative authorization paths and teardown must be tested after bootstrap.
-The current external-bootstrap code and local signed-token tests do not claim
-that this cloud browser flow has passed. No GPU expenditure should be incurred
+The external-bootstrap code and local signed-token tests alone do not prove
+a cloud browser flow. Existing-target observations are separate
+[release evidence](RELEASE_VALIDATION.md). No new-target GPU expenditure should be incurred
 before real authentication, independent billable-resource cleanup and the
 aggregate budget/exposure gate are established.
 

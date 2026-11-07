@@ -1,6 +1,9 @@
 # Frontend setup
 
-This frontend is a Vite + React + TypeScript shell for the Azure LLM Serving Demo operator UI.
+This is the Vite + React + TypeScript application for the Azure LLM Serving Demo,
+with implemented operator workflows and public read-only views across all screens.
+Start with [the demo walkthrough](../docs/DEMO.md) or
+[the architecture map](../docs/ARCHITECTURE.md).
 
 Signed-out visitors can browse persisted, sanitized environment/deployment state,
 configuration versions, profiles/catalog, test definitions, experiments, aggregate
@@ -36,7 +39,7 @@ See [hosting and authentication options](../docs/UI_DEPLOYMENT.md).
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 20 recommended (the CI version)
 - npm 9+
 
 ## Install
@@ -53,11 +56,19 @@ cd frontend
 npm run dev
 ```
 
-The app runs on Vite's default port. To point it at a backend API, set:
+The app runs on Vite's default port. Create an untracked `frontend/.env.local`
+with the loopback backend used by [root setup](../README.md#local-development):
 
-```bash
-VITE_API_BASE_URL=http://localhost:8000
+```dotenv
+VITE_API_BASE_URL=http://127.0.0.1:18000
+VITE_DEMO_USER=presenter@example.com
 ```
+
+Use explicit local-demo/development authentication and an allowed email domain
+on the local backend, plus exact `CORS_ALLOWED_ORIGINS=http://localhost:5173`
+(or the actual Vite origin). This is not an authenticated local-to-cloud login
+flow. On Windows with `npm.ps1` blocked, use the installed `npm.cmd` entry point;
+do not change system execution policy for setup.
 
 ## Lint
 
@@ -77,7 +88,7 @@ npm run test
 
 ```bash
 cd e2e
-npm install
+npm ci
 npx playwright install chromium
 npm test
 ```
@@ -102,8 +113,9 @@ Missing platform token injection is not a demo fallback.
 
 The real-image smoke uses a synthetic loopback upstream to check path/header
 transport and missing-token rejection. It does not validate an Entra session.
-Actual platform ID-token injection and authenticated browser requests remain a
-separate release gate; see [authentication prerequisites](../docs/AUTHENTICATION.md).
+Actual platform ID-token injection and authenticated browser requests are a
+per-target gate; see [authentication prerequisites](../docs/AUTHENTICATION.md)
+and [dated existing-target acceptance](../docs/RELEASE_VALIDATION.md).
 
 Container builds use the locked local TypeScript/Vite binaries, never `npx`
 downloads as a fallback for an incomplete install. Registry fetches are bounded

@@ -1,8 +1,10 @@
 # Operations, cost and recovery
 
-This runbook describes safety requirements and implemented signals. It is not
-evidence that a fresh Azure bootstrap, private networking, browser SSO or GPU
-acceptance has passed. See [release evidence](RELEASE_VALIDATION.md).
+This runbook describes safety requirements and implemented signals. Existing
+deployed Qwen3-4B/vLLM acceptance is in [release evidence](RELEASE_VALIDATION.md);
+it is not certification of a fresh target's bootstrap, networking, SSO, cleanup
+or reliability. Read [data and recovery](DATA_AND_RECOVERY.md) for retention,
+backup and external database-stop handling.
 
 ## Health is not readiness or warmth
 
@@ -15,12 +17,13 @@ acceptance has passed. See [release evidence](RELEASE_VALIDATION.md).
 | `inferenceState=unverified` | Running VM has not established current inference readiness | Successful prompt execution |
 | SKU/quota preview | Compatibility and requested-vCPU headroom | Physical allocation or a capacity reservation |
 
-A paused/stopped database should make readiness fail, not turn liveness into a
-restart loop. Resume through an approved operator path and wait for readiness
-before user traffic; do not recreate or overwrite the database. Azure can
-automatically restart stopped PostgreSQL servers at the service's stop limit.
-Storage/backups remain billable. Verify the current service limits for the
-selected server rather than assuming permanent pause.
+A stopped/unreachable database should make readiness fail, not turn liveness
+into a restart loop. PostgreSQL Flexible Server does not use Azure SQL serverless
+idle auto-pause; explicit stop/start and external subscription shutdown schedules
+are separate. Use a subscription-owner-approved always-on setup/exemption, not
+a competing restart loop, and verify any expiry. Resume through an approved path,
+wait for readiness and preserve existing data. Storage/backups remain billable;
+service stop limits are not permanent availability or cost guarantees.
 
 ## GPU, quota and memory
 
@@ -71,7 +74,7 @@ have no cloud-init ordering hook. The gate uses the supported
 on the existing VM, covered by existing VM extension permissions; no new
 identity, role, network exposure or external script download is introduced.
 Policy-managed agents retain their independent scheduling and protections.
-Fresh Azure/GPU acceptance is still required: local contracts cannot guarantee
+Each new target still needs Azure/GPU acceptance: local contracts cannot guarantee
 external package availability, policy-agent serialization or extension versions
 selected by the existing minor auto-upgrade policy.
 
@@ -104,7 +107,9 @@ Missing SKU/quota metadata stays unknown. Visibility and sufficient quota never
 establish physical capacity. Bound region/SKU retries; do not silently substitute
 an expensive GPU family or change the requested deployment.
 
-Spot can be evicted without warning and is not durable compute. Preserve
+Spot is the accepted existing-demo allocation; a Regular attempt was denied by
+subscription policy, and no policy bypass is supported. Spot can be evicted
+without warning and is not durable compute. Preserve
 immutable model/configuration/report provenance outside the VM and make failure
 visible. Do not call an interrupted report complete.
 
@@ -117,9 +122,10 @@ first only after all auth/cleanup/budget gates pass.
 
 ## Exposure ledger
 
-For the authorized validation effort the aggregate Azure estimate cap is
-**US$500**, with a conservative **US$100 contingency** reserved before new
-commitments. This is not a guarantee or hard billing stop.
+The earlier validation campaign used a US$500 estimate cap with US$100 reserved
+contingency. That is historical campaign guidance, not a repository default,
+current spending authorization or hard billing stop. Each operator must establish
+an explicit current exposure cap and contingency before new commitments.
 
 Track committed resources and delayed billing together: region/SKU, hourly
 rates, quantity, maximum runtime including retries, persistent daily storage/
@@ -140,8 +146,8 @@ actually exercise failure **and cancellation**.
 
 The [OIDC canary](AZURE_CANARY.md) proves only cleanup of its fixed nonbillable
 managed identity. Independent cleanup of billable app/VM/network/database
-resources has **not** been demonstrated and must be implemented/tested before
-creating them.
+resources is a separate per-target gate; do not infer it from canary cleanup or
+a successful deployed prompt. Establish and exercise it before new provisioning.
 
 Before each create/delete, check the exact subscription and live group
 ownership tags; before deletion also verify the exact resource ID, type,

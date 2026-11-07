@@ -1,8 +1,11 @@
-# Backend foundation
+# Backend control plane
 
-This backend implements the Setup + Foundational layers for the spec-kit feature:
-FastAPI app bootstrap, PostgreSQL/SQLAlchemy persistence, Alembic migrations, auth/audit/
-telemetry scaffolding, provider/engine adapter contracts, and reference-data seeding.
+FastAPI exposes the implemented environment/configuration/deployment, prompt,
+quality/performance, report, comparison and teardown APIs. PostgreSQL holds
+versioned state and snapshots; Azure infrastructure/model jobs use Durable
+monitoring, while quality/performance execute in the API process.
+See [architecture by depth](../docs/ARCHITECTURE.md) and
+[data/backup boundaries](../docs/DATA_AND_RECOVERY.md).
 
 ## Prerequisites
 
@@ -19,7 +22,7 @@ python -m venv .venv
 pip install -e .[dev]
 ```
 
-Optional research-driven tooling for later phases:
+Optional standard-benchmark tooling:
 
 ```powershell
 pip install -e .[evaluation]
@@ -33,14 +36,14 @@ Copy-Item .env.example .env
 
 ## Database migrations
 
-Apply the foundational schema:
+Apply the current schema to a disposable local database:
 
 ```powershell
 cd backend
 alembic upgrade head
 ```
 
-Seed the deployment profiles, vLLM engine record, and the 9-entry model catalog:
+Seed deployment profiles, inference engine records and the model catalog:
 
 ```powershell
 cd backend
@@ -57,9 +60,10 @@ python -m src.evaluation.seed_golden_datasets
 python -m src.performance.seed_workloads
 ```
 
-Each seed script upserts by primary key (`session.merge`), so it is safe to
-re-run. `backend/docker-entrypoint.sh` runs all four automatically on every
-container startup, so a deployed environment never needs this done by hand.
+Each seed script upserts by primary key (`session.merge`).
+`backend/docker-entrypoint.sh` runs migrations and all four seeds on container
+startup. Upserts can reapply seeded definition content; they are not backup
+restores and do not recover user reports/configurations.
 
 ## Local Ollama demo mode
 
@@ -86,7 +90,7 @@ performance flow against a local Ollama runtime.
 
 ```powershell
 cd backend
-uvicorn src.api.app:app --reload
+uvicorn src.api.app:app --reload --host 127.0.0.1 --port 18000
 ```
 
 Health route:
@@ -124,8 +128,9 @@ configurations. See [the executable contract](../e2e/live/cloud/README.md).
 
 ## Explicit local versus cloud authentication
 
-The safe default is `AUTH_MODE=entra-jwt`. Configure `AZURE_TENANT_ID` and
-`AUTH_AUDIENCE`; an unconfigured cloud API returns 503, not a demo identity.
+The safe default is `AUTH_MODE=entra-jwt`. Configure `AZURE_TENANT_ID` (or
+explicit `AUTH_TENANT_ID`) and `AUTH_AUDIENCE`; an unconfigured cloud API returns
+503, not a demo identity.
 Operator tokens must have a valid RS256 signature, tenant issuer, audience,
 expiry, issued-at, tenant claim and user identity. Supply a bearer token or the
 real Easy Auth `X-MS-TOKEN-AAD-ID-TOKEN`; unsigned identity-name headers are
@@ -147,19 +152,22 @@ SSO prerequisites when the deployment identity cannot create Graph applications.
 
 ```powershell
 cd backend
-ruff check .
-pytest
+ruff check src tests
+black --check src tests
+python -m pytest -q
 ```
 
 Integration tests are skipped by default via `pytest.ini`:
 
 ```powershell
 cd backend
-pytest -m integration
+python -m pytest -q -o addopts=""
 ```
 
-Use the `integration` marker for tests that require a live PostgreSQL instance or other external
-infrastructure.
+The full command clears the default integration exclusion. Real PostgreSQL tests
+need an explicit disposable `TEST_DATABASE_URL`; without it they skip.
+See [complete testing commands](../docs/TESTING.md), including migration/seeding
+and the distinction between mocked flows and genuine external-service tests.
 
 ## Public read-only browsing
 
@@ -189,8 +197,10 @@ See [`infra/README.md`](../infra/README.md) and
 Local state, generated SSH keys, Terraform plans, and credentials must remain
 untracked and must not be uploaded as CI artifacts.
 
-## What is intentionally not implemented yet
+## Remaining boundaries
 
-This phase does **not** include any user-story business logic (T037+): environment preview,
-provisioning orchestration, deployment workflows, prompt submission, evaluation runs,
-comparisons, or teardown APIs still belong to the next phase.
+Azure and local Ollama implement the current workflows; AWS/GCP do not have
+working adapters. Quality/performance run in this API's process, not durable
+workers. Persisted run snapshots/reports do not certify automatic orphan/restart
+recovery. Use the [provider matrix](../docs/PROVIDERS.md) and
+[current release evidence](../docs/RELEASE_VALIDATION.md), not old task-phase labels.

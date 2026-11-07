@@ -13,6 +13,12 @@ principal, resource IDs, tags, ownership and workflow provenance against the
 reviewed values. Configuration is frozen on first use in a process. Changing
 it requires a new process and a new review, not an in-process target switch.
 
+Preserve the reviewed configuration with encrypted, access-controlled source/
+artifact/state checkpoints and an independent private backup. It is not a
+connection credential or a replacement for current authorization checks.
+See [data and backup](DATA_AND_RECOVERY.md) and
+[state recovery](TERRAFORM_STATE.md); never publish exact operator inputs.
+
 ```powershell
 $env:LLM_SERVING_OPERATOR_CONFIG = Get-Content -Raw 'C:\private\operator-target.json'
 python scripts\azure_release_preflight.py --help
