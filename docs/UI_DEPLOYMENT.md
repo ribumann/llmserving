@@ -103,6 +103,50 @@ flow, not disabling JWT checks or copying cached credentials. See
 requirements. Historical deployment success is useful context, not verification
 that a new tenant, callback, identity or secret is already configured.
 
+## Optional frontend custom domain
+
+The generated frontend and backend hostnames and their SSO callbacks remain in
+use. To add a subdomain you control, choose the hostname and verify the target
+frontend app, Container Apps environment and authoritative DNS zone before
+making any changes. The DNS zone can be in a different resource group or with
+another provider; neither that zone nor its records are managed by this module.
+
+1. If Terraform manages the Entra application, set the control module input
+   `additional_frontend_sso_redirect_uris` to a list such as
+   `["https://ui.example.com/.auth/login/aad/callback"]` in your private
+   deployment inputs and review a full plan before applying. The default is
+   empty; Terraform retains both generated callbacks. Only exact HTTPS Easy
+   Auth callback URLs on DNS hostnames are accepted.
+2. With an external SSO application, this input does not update its registration.
+   Have its authorized owner add the exact custom callback to the existing
+   frontend and backend callbacks through the approved directory workflow.
+   The external bootstrap helper's two-callback ownership checks are not a
+   custom-domain management workflow; do not use it to overwrite additional
+   callbacks.
+3. Obtain the frontend's generated FQDN and domain verification ID with
+   `az containerapp show` (`properties.configuration.ingress.fqdn` and
+   `properties.customDomainVerificationId`). At the authoritative DNS provider,
+   add a CNAME from the chosen subdomain directly to that FQDN and a TXT record
+   named `asuid.<subdomain>` containing the verification ID. Keep these records
+   for issuance and renewal; an intermediate CNAME can prevent both.
+4. Following Microsoft's [managed certificate instructions](https://learn.microsoft.com/en-us/azure/container-apps/custom-domains-managed-certificates),
+   add the hostname and bind a managed certificate with CNAME validation using
+   the Azure CLI or portal. HTTP ingress must be publicly reachable by the
+   certificate authority, the app must be running, and any CAA policy must
+   permit the issuer. Verify the binding is secured and HTTPS validates.
+5. Visit the custom hostname, use the normal sign-in flow, and verify an
+   authenticated same-origin API request. Also verify the generated frontend
+   hostname still works. This does not change public frontend viewing or
+   backend authorization.
+
+DNS, the certificate and the frontend hostname binding are externally managed.
+Terraform ignores only `frontend.ingress[0].custom_domain` (as well as its
+pre-existing image ignore); other ingress and auth configuration remains
+Terraform-managed. Monitor the external binding and certificate separately:
+Terraform will not repair their drift, and a replacement frontend must be
+rebound. Review the full plan before applying, including any resource
+replacement and SSO redirect changes.
+
 ## Network and deployment boundaries
 
 Public backend ingress is supported; a private backend is not required by the
