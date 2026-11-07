@@ -1,5 +1,12 @@
 # Azure bootstrap and release gates
 
+**Reading scope:** these are new-target safety contracts and retained operator
+recovery records, not today's live inventory or deployment status. The existing
+demo's dated Qwen3-4B/vLLM acceptance is in
+[release evidence](RELEASE_VALIDATION.md). Earlier empty-group, unconfigured-SSO,
+quota and partial-apply observations below are historical and must not be
+replayed or treated as instructions for a working deployment.
+
 **A clean reproducible Azure release is not yet demonstrated.** The modules
 describe shared/control/demo layers, but still have local cross-module state,
 placeholder image defaults and default to managing their own groups. Shared,
@@ -723,6 +730,10 @@ These are unmet release requirements, not claims that a single command or the
 existing image-update workflows already implement them. Never turn a blocked
 gate into a success by omitting it or substituting old measurements.
 # Shared partial recovery considerations
+
+**Historical recovery record.** Re-inspect exact privately checkpointed state
+before selecting a recovery action; do not assume the following partial inventory
+is still present or replay these commands against the current serving platform.
 
 The previously guarded first shared-layer apply persisted **27 managed resources**, then
 failed creating the NAT public IP: enforced organization policy appended

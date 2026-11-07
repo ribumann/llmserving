@@ -15,8 +15,8 @@ or migrate state. Its OAuth/OIDC backend outputs propose separate
 `bootstrap.tfstate`, `shared.tfstate` and `control.tfstate` keys; existing
 shared/control/demo local-state wiring and the worker protocol below are unchanged.
 
-**Current data-plane access is not authorized.** Owner management rights do not
-provide OAuth blob data access. Explicit user approval for Storage Blob Data
+The proposal alone authorizes no data-plane access. Owner management rights do
+not provide OAuth blob data access. Independently approved Storage Blob Data
 Contributor at the exact new account is required before grant, use or migration.
 The source and mocked plans are not an applied storage backend, permission
 check, locking/restore proof or clean-bootstrap certification.
@@ -182,8 +182,10 @@ or independently verified restart recovery. The API lock is a separate control.
 The runner's failure handler cannot survive process/host cancellation;
 independent server-side billable-resource cleanup remains required.
 
-Do not provision billable resources until those gates, actual authenticated
-Azure UX and bounded aggregate exposure pass. Do not enable durable evaluation
+Do not provision new-target billable resources until those gates, actual
+authenticated Azure UX and bounded aggregate exposure pass. Existing-target
+acceptance is recorded separately in [release evidence](RELEASE_VALIDATION.md).
+Do not enable durable evaluation
 or remove API runners based on these Terraform state tests.
 
 Shared/control module state still has local cross-module assumptions. Moving

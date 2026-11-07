@@ -1,4 +1,54 @@
-# Public validation evidence and blocked gates
+# Public validation evidence and limitations
+
+## Current observed demo status: 2026-11-07
+
+The existing [public demo](https://servinglab.liberatetheinnerchild.net) has
+completed real deployed **Qwen3-4B / vLLM** acceptance. Anonymous safe GET
+projections are available across all screens; actions require a verified
+operator. Raw prompts/cases/outputs and infrastructure details remain hidden
+from public views. Public source baseline
+`662f8b69a5c849e8b8d531f54965f7feaf27e805` includes merged PRs #84-88.
+That source baseline identifies the documentation review, **not** an assertion
+that every earlier measurement used its exact image.
+
+The operator-reported observations below are intentionally sanitized. Exact
+deployment identities, private manifests and raw reports are not included.
+Historical reports have been retained rather than rewritten by newer runs.
+
+| Observed run | Result | Scope |
+| --- | --- | --- |
+| Latest golden run | 12 passed / 12 cases | Small accepted golden dataset, not a full benchmark suite |
+| Latest performance run | 50 measured requests, concurrency 10, five verified warm-up requests, zero failures | Genuine deployed vLLM workload; warm-up excluded from measurement |
+| Aggregate token throughput | 167.6 tokens/sec | Measured run, not per-request throughput or requests/sec |
+| p95 time to first token | 369.6 ms | Client/tool-observed TTFT, not kernel-only latency or an SLA |
+| Earlier GSM8K / IFEval reports | 82% each | Existing saved subset results; no claim of full-suite calibration or identical conditions to the new runs |
+
+These are dated observations, not availability promises, statistically
+representative performance claims or certification of a clean new deployment.
+Do not infer the private model/image digest, hardware sizing or exact benchmark
+subset from an aggregate. Keep those in the accepted private snapshots/manifests.
+[Metric interpretation](DEMO.md#interpreting-results) explains warm-up,
+completeness, percentile, queueing and comparability limits.
+
+## Current boundaries
+
+| Area | Status / limitation |
+| --- | --- |
+| Existing Azure demo | Real deployed model acceptance passed; this supersedes earlier “GPU not run” statements **for this existing target only**. |
+| Public vs operator | Persisted redacted GETs are anonymous; mutations, inference, previews, exports and operator `/session` stay authenticated. |
+| Database availability | Flexible Server is provisioned, not idle-auto-pausing serverless. External stop automation was identified and a temporary resource-scoped exemption verified; permanent always-on is not established. [Availability guidance](DATA_AND_RECOVERY.md#database-availability). |
+| Compute availability | Spot is accepted interruptible compute. Regular allocation was denied by subscription policy; no bypass or automatic policy/SKU escalation. |
+| Quality/performance durability | Backend in-process execution remains active. Deferred worker packaging is not routing, restart/cancellation/report parity or exactly-once execution. |
+| Reproducibility and cleanup | New targets still require verified state/locking/backups, actual SSO/private connectivity, immutable artifacts, independent actual-resource cleanup and bounded cost gates. Existing-target success is not universal bootstrap certification. |
+| Calibration / telemetry | Tiny workloads/subsets are not representative calibration. Public GPU utilization is unavailable, not zero; KV-cache occupancy is not physical utilization. |
+
+## Historical local and pre-GPU evidence
+
+**The remainder records earlier source/run-specific evidence and blockers.**
+Earlier “blocked”, “not run”, empty inventory and unconfigured SSO statements
+describe those historical runs/targets, not the current demo's live state.
+Preserve the original commit, workload and failure boundaries; do not relabel old
+measurements as fresh GPU acceptance. Current status above takes precedence.
 
 This is a pre-release evidence record, not full Azure acceptance. Source
 baseline `e30d0e043947a66d023ec3236f476d44d3d5f627` includes reviewed PRs
@@ -121,7 +171,7 @@ failed counts and, for duration warm-up, the observed interval, only after
 verification. Warm-up metrics are excluded from the measured run. These changes
 do not alter or retroactively validate stored reports.
 
-## Blocked or not yet demonstrated
+## Historical blockers and implementation boundaries
 
 ### Performance-worker packaging boundary
 
@@ -189,7 +239,7 @@ Generator/HTTP-mocked tests and actual SDK registration/starter tests are source
 and package evidence, not a live Durable task-hub/replay, Azure stop/cleanup,
 exactly-once dispatch or complete durable-runner parity claim.
 
-### Azure target boundary
+### Historical Azure target boundary
 
 Both original primary canary/cleanup workflows remain disabled. The user
 selected the isolated fallback subscription as the future deployment target;

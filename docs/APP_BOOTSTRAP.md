@@ -1,8 +1,10 @@
 # Main application operator bootstrap
 
 This is the existing frontend ACA + backend ACA + private PostgreSQL/GPU +
-Durable Functions architecture, not a second API. No deployment has been
-established by these commands. The explicitly approved `create-secret` operation
+Durable Functions architecture, not a second API. This is a per-target procedure,
+not evidence that running its examples establishes a deployment. Existing-target
+acceptance is recorded in [release evidence](RELEASE_VALIDATION.md).
+The explicitly approved `create-secret` operation
 adds one credential to the fixed existing app and writes it privately to Key
 Vault. The helper creates no app, service principal, permission/consent grant,
 role, DNS record or infrastructure resource.
@@ -99,8 +101,9 @@ dependencies, state availability, permissions or authentication.
    checked `functions_package_sha256` Terraform input; Terraform creates the
    private container and configures the package URL, not the package bytes.
 
-Shared/state absence is a real stop, not successful bootstrap. The next
-operator action is phase 1, then preview and the approved `create-secret` command.
+Shared/state absence is a real stop, not successful bootstrap. For a new target,
+start at phase 1; do not repeat initial credential creation on an existing
+working application or infer its live phase from this procedure.
 
 ## Preview and separately approved writes
 
