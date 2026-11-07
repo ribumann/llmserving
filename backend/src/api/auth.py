@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import jwt
 from fastapi import FastAPI, Request
 from starlette.concurrency import run_in_threadpool
+from starlette.routing import Match
 
 from src.api.errors import ApiError
 from src.api.internal_auth import EntraTokenVerifier
@@ -94,7 +95,19 @@ def extract_authenticated_user(request: Request) -> AuthenticatedUser | None:
 def install_auth_middleware(app: FastAPI, settings: Settings) -> None:
     @app.middleware("http")
     async def authenticate_request(request: Request, call_next):
-        if is_exempt_path(request.url.path, settings):
+        # Exempt only full matches on the deliberately registered read-only router.
+        # Unknown paths, suffixes and all non-GET methods still authenticate.
+        from src.api.routes.public import router as public_router
+
+        if request.method == "GET" and any(
+            route.matches(request.scope)[0] == Match.FULL for route in public_router.routes
+        ):
+            return await call_next(request)
+        if (
+            request.url.path != "/public"
+            and not request.url.path.startswith("/public/")
+            and is_exempt_path(request.url.path, settings)
+        ):
             return await call_next(request)
 
         if settings.auth_mode == "local-demo":

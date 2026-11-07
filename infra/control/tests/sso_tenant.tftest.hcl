@@ -95,11 +95,11 @@ run "external_same_tenant_default" {
       && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.enabled
       && jsondecode(azapi_resource.frontend_auth_config[0].body).properties.identityProviders.azureActiveDirectory.validation.allowedAudiences == [local.sso_client_id]
       && jsondecode(azapi_resource.backend_auth_config[0].body).properties.globalValidation.unauthenticatedClientAction == "RedirectToLoginPage"
-      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.globalValidation.excludedPaths == ["/internal/workflows", "/internal/workflows/*"]
+      && jsondecode(azapi_resource.backend_auth_config[0].body).properties.globalValidation.excludedPaths == ["/internal/workflows", "/internal/workflows/*", "/public/*"]
       && jsondecode(azapi_resource.backend_auth_config[0].body).properties.platform.enabled
       && one([for env in azurerm_container_app.backend.template[0].container[0].env : env.value if env.name == "AUTH_MODE"]) == "entra-jwt"
     )
-    error_message = "Only the static frontend may allow anonymous visitors; frontend SSO and backend EasyAuth/JWT validation must remain enabled."
+    error_message = "Only the frontend and explicit public summary router may allow anonymous visitors; operational EasyAuth/JWT and internal callback validation must remain enabled."
   }
   assert {
     condition = (

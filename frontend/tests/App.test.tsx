@@ -3,15 +3,140 @@ import userEvent from '@testing-library/user-event';
 import App from '../src/App';
 import { AUTH_REQUIRED_EVENT } from '../src/services/apiClient';
 
-describe('App shell', () => {
+const environment = {
+  environmentId: 'env-public',
+  profileId: 'profile-public',
+  provider: 'azure',
+  region: 'eastus',
+  lifecycleState: 'ready',
+  state: 'ready',
+  resources: [],
+};
+const model = {
+  modelConfigId: 'model-public',
+  catalogEntryId: 'catalog-public',
+  resolvedCheckpointRef: 'public/checkpoint',
+  modelSettings: { dtype: 'float16' },
+  version: 2,
+};
+const inference = {
+  inferenceConfigId: 'inference-public',
+  engineId: 'vllm',
+  version: 3,
+  servingSettings: { maxModelLen: 2048 },
+  generationSettings: { temperature: 0.4 },
+};
+const run = {
+  runId: 'run-public',
+  runType: 'quality-golden',
+  testDefinitionRef: 'dataset-public',
+  status: 'completed',
+  startedAt: '2026-11-07T10:00:00Z',
+  configuration: { deploymentRevisionId: 'revision-public' },
+};
+const report = {
+  resultReportId: 'report-public',
+  runId: 'run-public',
+  completenessIndicator: 'complete',
+  quality: {
+    cases: [],
+    aggregate: { totalCases: 10, passed: 9, passRate: 0.9 },
+    benchmarks: [],
+  },
+  performance: null,
+};
+const comparison = {
+  comparisonId: 'comparison-public',
+  comparabilityStatus: 'comparable',
+  reports: [{ reportId: 'report-public' }],
+  reasons: [],
+  sections: [{ title: 'Quality', items: [{ passRate: 0.9 }] }],
+};
+
+function publicResponse(path: string) {
+  if (path === '/public/environments') return { environments: [environment] };
+  if (path === '/public/environments/env-public') return environment;
+  if (path.endsWith('/model-configurations')) return { items: [model] };
+  if (path.endsWith('/inference-configurations')) return { items: [inference] };
+  if (path.endsWith('/runs')) return { runs: [run] };
+  if (path.endsWith('/report')) return report;
+  if (path === '/public/profiles')
+    return {
+      profiles: [
+        {
+          profileId: 'profile-public',
+          provider: 'azure',
+          modelSizeClass: '3b',
+          eligibleRegions: ['eastus'],
+          vmSku: 'Standard_GPU',
+        },
+      ],
+    };
+  if (path === '/public/catalog')
+    return {
+      catalog: [
+        {
+          catalogEntryId: 'catalog-public',
+          family: 'public-family',
+          sizeClass: '3b',
+          checkpointRef: 'public/checkpoint',
+          license: 'MIT',
+          isGated: false,
+          compatibleProfileIds: ['profile-public'],
+        },
+      ],
+    };
+  if (path === '/public/golden-datasets')
+    return {
+      goldenDatasets: [
+        {
+          goldenDatasetId: 'dataset-public',
+          version: 1,
+          provenance: 'curated',
+          reviewStatus: 'reviewed',
+          caseCount: 10,
+        },
+      ],
+    };
+  if (path === '/public/benchmark-definitions')
+    return {
+      benchmarkDefinitions: [{ benchmarkId: 'benchmark-public', version: '1' }],
+    };
+  if (path === '/public/performance-workloads')
+    return {
+      performanceWorkloads: [
+        { workloadId: 'workload-public', version: 1, concurrency: 4 },
+      ],
+    };
+  if (path === '/public/comparisons') return { comparisons: [comparison] };
+  if (path === '/public/comparisons/comparison-public') return comparison;
+  throw new Error(`Unexpected public request: ${path}`);
+}
+
+describe('App public and operator shell', () => {
   const fetchMock = vi.fn();
+  let sessionStatus: number;
 
   beforeEach(() => {
+    sessionStatus = 401;
     window.history.replaceState({}, '', '/');
     vi.stubGlobal('fetch', fetchMock);
-    fetchMock.mockImplementation(() =>
-      Promise.resolve(new Response('', { status: 401 })),
-    );
+    fetchMock.mockImplementation((url: string) => {
+      const path = new URL(url).pathname;
+      if (path === '/session') {
+        return Promise.resolve(
+          new Response(
+            sessionStatus === 200
+              ? JSON.stringify({ authenticated: true })
+              : '',
+            { status: sessionStatus },
+          ),
+        );
+      }
+      if (path === '/environments')
+        return Promise.resolve(Response.json({ environments: [] }));
+      return Promise.resolve(Response.json(publicResponse(path)));
+    });
   });
 
   afterEach(() => {
@@ -19,158 +144,268 @@ describe('App shell', () => {
     vi.clearAllMocks();
   });
 
-  it('renders a public workflow guide without loading live environments', async () => {
+  it('shows persisted public environments without operator authentication', async () => {
     render(<App />);
-
+    expect(await screen.findByText('env-public')).toBeInTheDocument();
+    expect(screen.getByText('Public read-only workspace')).toBeInTheDocument();
     expect(
-      screen.getByRole('heading', {
-        name: /azure llm serving demo/i,
-      }),
-    ).toBeInTheDocument();
-
-    const nav = screen.getByRole('navigation', { name: /primary/i });
+      screen.getByRole('link', { name: 'View experiments' }),
+    ).toHaveAttribute('href', '/history?environmentId=env-public');
     expect(
-      within(nav).getByRole('link', { name: /provision/i }),
-    ).toBeInTheDocument();
-    expect(
-      await screen.findByRole('heading', { name: /explore the workflow/i }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Your environments')).not.toBeInTheDocument();
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      'http://localhost:8000/session',
-    ]);
+      fetchMock.mock.calls.map(([url]) => new URL(url).pathname).sort(),
+    ).toEqual(['/public/environments', '/session']);
   });
 
   it.each([
-    '/provision',
-    '/deploy',
-    '/exercise',
-    '/retune',
-    '/quality/run',
-    '/performance/run',
-    '/compare',
-    '/history',
-    '/teardown',
-    '/environments/private-id',
-    '/quality/report/private-run',
-    '/performance/report/private-run',
-  ])('keeps %s private even when opened directly', async (path) => {
-    window.history.replaceState({}, '', path);
+    ['/provision', 'Available profiles'],
+    ['/deploy', 'Model configurations'],
+    ['/exercise', 'Inference configurations'],
+    ['/retune', 'Model configurations'],
+    ['/quality/run', 'Golden datasets'],
+    ['/performance/run', 'Performance workloads'],
+    ['/compare', 'Saved comparisons'],
+    ['/history', 'Experiments and saved reports'],
+    ['/teardown', 'Environment state'],
+    ['/environments/env-public', 'Environment state'],
+    [
+      '/quality/report/run-public?environmentId=env-public',
+      'Saved report summary',
+    ],
+    [
+      '/performance/report/run-public?environmentId=env-public',
+      'Saved report summary',
+    ],
+  ])(
+    'renders actual read-only data on direct %s navigation',
+    async (path, section) => {
+      window.history.replaceState({}, '', path);
+      render(<App />);
+      expect(
+        await screen.findByRole('heading', { name: section }),
+      ).toBeInTheDocument();
+      const main = screen.getByRole('main');
+      expect(
+        within(main).getByRole('link', { name: /sign in with microsoft/i }),
+      ).toHaveAttribute(
+        'href',
+        `/.auth/login/aad?post_login_redirect_uri=${encodeURIComponent(path)}`,
+      );
+      expect(
+        fetchMock.mock.calls.every(
+          ([url, init]) =>
+            (new URL(url).pathname === '/session' ||
+              new URL(url).pathname.startsWith('/public/')) &&
+            (!init?.method || init.method === 'GET'),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it('keeps actions disabled and cannot submit them from the keyboard', async () => {
+    window.history.replaceState({}, '', '/exercise');
     render(<App />);
+    expect(await screen.findByText('inference-public')).toBeInTheDocument();
+    const send = screen.getByRole('button', { name: 'Send prompt' });
+    expect(send).toBeDisabled();
+    await userEvent.click(send);
+    await userEvent.keyboard('{Enter}');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(
-      await screen.findByRole('heading', {
-        name: 'Sign in to use the operator workspace',
-      }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(fetchMock.mock.calls).toHaveLength(1);
-    const main = screen.getByRole('main');
-    expect(
-      within(main).getByRole('link', { name: /sign in with microsoft/i }),
-    ).toHaveAttribute(
-      'href',
-      `/.auth/login/aad?post_login_redirect_uri=${encodeURIComponent(path)}`,
-    );
+      fetchMock.mock.calls.every(
+        ([, init]) => !init?.method || init.method === 'GET',
+      ),
+    ).toBe(true);
   });
 
-  it('keeps navigation available without calling protected page APIs', async () => {
-    render(<App />);
-    await userEvent.click(screen.getByRole('link', { name: /^provision$/i }));
-    expect(
-      await screen.findByRole('heading', { name: /sign in to use/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/review quota and capacity/i)).toBeInTheDocument();
-    expect(fetchMock.mock.calls).toHaveLength(1);
-  });
-
-  it('distinguishes a forbidden account from a signed-out visitor', async () => {
+  it('opens retained report aggregates and saved comparison data', async () => {
     window.history.replaceState({}, '', '/history');
-    fetchMock.mockResolvedValue(new Response('', { status: 403 }));
     render(<App />);
+    await userEvent.click(
+      await screen.findByRole('link', { name: 'Open report summary' }),
+    );
+    expect(await screen.findByText('report-public')).toBeInTheDocument();
+    expect(screen.getByText('0.9')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('link', { name: 'Compare' }));
+    await userEvent.click(
+      await screen.findByRole('link', { name: 'Open saved comparison' }),
+    );
     expect(
-      await screen.findByRole('heading', {
-        name: /does not have operator access/i,
-      }),
+      await screen.findByRole('heading', { name: 'Saved comparison' }),
     ).toBeInTheDocument();
-    expect(fetchMock.mock.calls).toHaveLength(1);
+    expect(screen.getByText('Quality')).toBeInTheDocument();
   });
 
-  it('reports an unavailable identity check and supports retry', async () => {
+  it('shows real performance metric distributions and safe test conditions', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/performance/report/run-public?environmentId=env-public',
+    );
+    fetchMock.mockImplementation((url: string) => {
+      const path = new URL(url).pathname;
+      if (path === '/session') {
+        return Promise.resolve(new Response('', { status: 401 }));
+      }
+      return Promise.resolve(
+        Response.json(
+          path.endsWith('/report')
+            ? {
+                ...report,
+                quality: null,
+                performance: {
+                  metrics: {
+                    timeToFirstTokenMs: { p50: 23.5, p95: 40.5 },
+                    interTokenLatencyMs: { p50: 4, p95: 7 },
+                    endToEndLatencyMs: { p50: 250, p95: 450 },
+                    throughputTokensPerSec: 36,
+                  },
+                  requestFailures: { count: 1, total: 20, rate: 0.05 },
+                  testConditions: { concurrency: 4, requestCount: 20 },
+                },
+              }
+            : publicResponse(path),
+        ),
+      );
+    });
+    render(<App />);
+    expect(await screen.findByText('p50: 23.5; p95: 40.5')).toBeInTheDocument();
+    expect(screen.getByText('0.05')).toBeInTheDocument();
+    expect(screen.getByText('requestCount')).toBeInTheDocument();
+  });
+
+  it('changes the environment detail route when selecting another environment', async () => {
+    window.history.replaceState({}, '', '/environments/env-public');
+    fetchMock.mockImplementation((url: string) => {
+      const path = new URL(url).pathname;
+      if (path === '/session') {
+        return Promise.resolve(new Response('', { status: 401 }));
+      }
+      return Promise.resolve(
+        Response.json(
+          path === '/public/environments'
+            ? {
+                environments: [
+                  environment,
+                  { ...environment, environmentId: 'env-second' },
+                ],
+              }
+            : path === '/public/environments/env-second'
+              ? { ...environment, environmentId: 'env-second' }
+              : publicResponse(path),
+        ),
+      );
+    });
+    render(<App />);
+    await userEvent.selectOptions(
+      await screen.findByRole('combobox', { name: 'Environment' }),
+      'env-second',
+    );
+    expect(window.location.pathname).toBe('/environments/env-second');
+    expect(
+      await screen.findByRole('heading', { name: 'Environment state' }),
+    ).toBeInTheDocument();
+  });
+
+  it('does not block public reads when identity verification is unavailable', async () => {
+    sessionStatus = 503;
     window.history.replaceState({}, '', '/deploy');
-    fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }));
     render(<App />);
     expect(
-      await screen.findByRole('heading', { name: /could not be verified/i }),
+      await screen.findByText(/operator sign-in is unavailable/i),
     ).toBeInTheDocument();
+    expect(await screen.findByText('model-public')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Save configurations and deploy' }),
+    ).toBeDisabled();
+    sessionStatus = 401;
     await userEvent.click(
       within(screen.getByRole('main')).getByRole('button', {
-        name: /check access again/i,
+        name: 'Check access again',
       }),
     );
     expect(
-      await screen.findByRole('heading', { name: /sign in to use/i }),
+      await screen.findByText(/sign in with an approved microsoft account/i),
     ).toBeInTheDocument();
-    expect(fetchMock.mock.calls).toHaveLength(2);
   });
 
-  it('loads real data only after the backend verifies the session', async () => {
+  it('distinguishes a public API outage from an authentication failure and retries reads', async () => {
     fetchMock.mockImplementation((url: string) =>
       Promise.resolve(
-        new Response(
-          JSON.stringify(
-            url.endsWith('/session')
-              ? { authenticated: true }
-              : { environments: [] },
-          ),
-          { status: 200 },
-        ),
+        new URL(url).pathname === '/session'
+          ? new Response('', { status: 401 })
+          : Response.json(
+              {
+                error: {
+                  code: 'database_unavailable',
+                  message: 'Database temporarily unavailable.',
+                },
+              },
+              { status: 503 },
+            ),
       ),
     );
+    render(<App />);
+    expect(
+      await screen.findByText('Database temporarily unavailable.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Retry public data' }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByText(/operator sign-in is unavailable/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('allows a forbidden account to browse public data without actions', async () => {
+    sessionStatus = 403;
+    render(<App />);
+    expect(
+      await screen.findByText(/not an approved operator/i),
+    ).toBeInTheDocument();
+    expect(await screen.findByText('env-public')).toBeInTheDocument();
+  });
+
+  it('preserves verified operator views and protected API transport', async () => {
+    sessionStatus = 200;
     render(<App />);
     expect(await screen.findByText('Your environments')).toBeInTheDocument();
     expect(
       await screen.findByRole('heading', { name: 'No environments yet' }),
     ).toBeInTheDocument();
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      'http://localhost:8000/session',
-      'http://localhost:8000/environments',
-    ]);
+    expect(
+      fetchMock.mock.calls.map(([url]) => new URL(url).pathname),
+    ).toContain('/environments');
     expect(screen.getByRole('link', { name: 'Sign out' })).toBeInTheDocument();
   });
 
-  it('removes private views when a subsequent API call reports expired access', async () => {
+  it('removes private operator data immediately when access expires', async () => {
+    sessionStatus = 200;
+    render(<App />);
+    expect(await screen.findByText('Your environments')).toBeInTheDocument();
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent(AUTH_REQUIRED_EVENT, { detail: 401 }),
+      ),
+    );
+    expect(screen.queryByText('Your environments')).not.toBeInTheDocument();
+    expect(await screen.findByText('env-public')).toBeInTheDocument();
+  });
+
+  it('fails closed on a malformed session but still loads public data', async () => {
     fetchMock.mockImplementation((url: string) =>
       Promise.resolve(
-        new Response(
-          JSON.stringify(
-            url.endsWith('/session')
-              ? { authenticated: true }
-              : { environments: [] },
-          ),
-          { status: 200 },
+        Response.json(
+          new URL(url).pathname === '/session'
+            ? {}
+            : publicResponse(new URL(url).pathname),
         ),
       ),
     );
     render(<App />);
-    expect(await screen.findByText('Your environments')).toBeInTheDocument();
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent(AUTH_REQUIRED_EVENT, { detail: 401 }),
-      );
-    });
     expect(
-      await screen.findByRole('heading', { name: 'Explore the workflow' }),
+      await screen.findByText(/operator sign-in is unavailable/i),
     ).toBeInTheDocument();
+    expect(await screen.findByText('env-public')).toBeInTheDocument();
     expect(screen.queryByText('Your environments')).not.toBeInTheDocument();
-  });
-
-  it('fails closed on a malformed successful session response', async () => {
-    window.history.replaceState({}, '', '/exercise');
-    fetchMock.mockResolvedValue(new Response('{}', { status: 200 }));
-    render(<App />);
-    expect(
-      await screen.findByRole('heading', { name: /could not be verified/i }),
-    ).toBeInTheDocument();
-    expect(fetchMock.mock.calls).toHaveLength(1);
   });
 });

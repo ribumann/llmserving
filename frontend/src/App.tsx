@@ -43,6 +43,7 @@ import EnvironmentDetailPage from './pages/EnvironmentDetail';
 import ExercisePage from './pages/Exercise';
 import ExperimentHistoryPage from './pages/ExperimentHistory';
 import OverviewPage from './pages/Overview';
+import PublicWorkspace from './pages/PublicWorkspace';
 import PerformanceReportPage from './pages/PerformanceReport';
 import PerformanceRunPage from './pages/PerformanceRun';
 import ProvisionPage from './pages/Provision';
@@ -269,7 +270,7 @@ function Shell({ scheme, onToggleScheme }: ShellProps) {
           <Text size={200}>
             {session === 'authenticated'
               ? 'Operator workspace'
-              : 'Public workflow guide'}
+              : 'Public read-only workspace'}
           </Text>
           {session === 'unavailable' ? (
             <Button onClick={retry}>Check access again</Button>
@@ -351,7 +352,11 @@ function Shell({ scheme, onToggleScheme }: ShellProps) {
               <Route
                 path="/"
                 element={
-                  <OverviewPage authenticated={session === 'authenticated'} />
+                  session === 'authenticated' ? (
+                    <OverviewPage authenticated />
+                  ) : (
+                    <PublicWorkspace session={session} retry={retry} />
+                  )
                 }
               />
               <Route
@@ -359,7 +364,7 @@ function Shell({ scheme, onToggleScheme }: ShellProps) {
                   session === 'authenticated' ? (
                     <Outlet />
                   ) : (
-                    <OperatorAccess session={session} retry={retry} />
+                    <PublicWorkspace session={session} retry={retry} />
                   )
                 }
               >
