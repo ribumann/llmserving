@@ -20,6 +20,7 @@ import {
   SectionCard,
   StatusBadge,
   StatusMessage,
+  formatMetricValue,
   formatStateLabel,
   statusTone,
 } from '../components/kit';
@@ -38,6 +39,7 @@ import type {
   GoldenDatasetSummary,
   InferenceConfigurationVersion,
   ModelConfigurationVersion,
+  PerformanceReportData,
   PerformanceReportResponse,
   PerformanceWorkloadSummary,
   RunSummary,
@@ -117,6 +119,73 @@ function Settings({ values }: { values: Record<string, unknown> }) {
     />
   ) : (
     <Text>No public settings recorded.</Text>
+  );
+}
+
+function formatDistribution(value: unknown, unit: string | undefined) {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('p50' in value) ||
+    !('p95' in value) ||
+    typeof value.p50 !== 'number' ||
+    !Number.isFinite(value.p50) ||
+    typeof value.p95 !== 'number' ||
+    !Number.isFinite(value.p95)
+  ) {
+    return null;
+  }
+  const suffix = unit ?? 'ms';
+  return `p50 ${formatMetricValue(value.p50)} ${suffix} · p95 ${formatMetricValue(value.p95)} ${suffix}`;
+}
+
+function performanceMetricItems(performance: PerformanceReportData) {
+  const { metrics, units } = performance;
+  return [
+    {
+      label: 'Time to first token',
+      value: formatDistribution(
+        metrics.timeToFirstTokenMs,
+        units.timeToFirstTokenMs,
+      ),
+    },
+    {
+      label: 'Inter-token latency',
+      value: formatDistribution(
+        metrics.interTokenLatencyMs,
+        units.interTokenLatencyMs,
+      ),
+    },
+    {
+      label: 'End-to-end latency',
+      value: formatDistribution(
+        metrics.endToEndLatencyMs,
+        units.endToEndLatencyMs,
+      ),
+    },
+    {
+      label: 'Throughput',
+      value:
+        typeof metrics.throughputTokensPerSec === 'number' &&
+        Number.isFinite(metrics.throughputTokensPerSec)
+          ? `${formatMetricValue(metrics.throughputTokensPerSec)} ${units.throughputTokensPerSec ?? 'tokens/sec'}`
+          : null,
+    },
+  ].filter(
+    (item): item is { label: string; value: string } => item.value !== null,
+  );
+}
+
+function PerformanceMetricList({
+  performance,
+}: {
+  performance: PerformanceReportData;
+}) {
+  const items = performanceMetricItems(performance);
+  return items.length ? (
+    <DataList items={items} />
+  ) : (
+    <Text>No performance metrics were recorded.</Text>
   );
 }
 
@@ -696,7 +765,7 @@ export default function PublicWorkspace({
                     Performance metrics (milliseconds; throughput in
                     tokens/second)
                   </Text>
-                  <Settings values={{ ...data.report.performance.metrics }} />
+                  <PerformanceMetricList performance={data.report.performance} />
                   <Text weight="semibold">Request failures</Text>
                   <Settings
                     values={{ ...data.report.performance.requestFailures }}

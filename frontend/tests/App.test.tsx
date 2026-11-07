@@ -255,10 +255,17 @@ describe('App public and operator shell', () => {
                 quality: null,
                 performance: {
                   metrics: {
-                    timeToFirstTokenMs: { p50: 23.5, p95: 40.5 },
+                    timeToFirstTokenMs: {
+                      p50: 346.1906768998233,
+                      p95: 512.4852340587241,
+                    },
                     interTokenLatencyMs: { p50: 4, p95: 7 },
-                    endToEndLatencyMs: { p50: 250, p95: 450 },
-                    throughputTokensPerSec: 36,
+                    throughputTokensPerSec: 167.31852946603055,
+                  },
+                  units: {
+                    timeToFirstTokenMs: 'ms',
+                    interTokenLatencyMs: 'ms',
+                    throughputTokensPerSec: 'tokens/sec',
                   },
                   requestFailures: { count: 1, total: 20, rate: 0.05 },
                   testConditions: { concurrency: 4, requestCount: 20 },
@@ -269,7 +276,11 @@ describe('App public and operator shell', () => {
       );
     });
     render(<App />);
-    expect(await screen.findByText('p50: 23.5; p95: 40.5')).toBeInTheDocument();
+    expect(await screen.findByText('p50 346.2 ms · p95 512.5 ms')).toBeInTheDocument();
+    expect(screen.getByText('p50 4 ms · p95 7 ms')).toBeInTheDocument();
+    expect(screen.queryByText('End-to-end latency')).not.toBeInTheDocument();
+    expect(screen.getByText('167.3 tokens/sec')).toBeInTheDocument();
+    expect(screen.queryByText('167.31852946603055')).not.toBeInTheDocument();
     expect(screen.getByText('0.05')).toBeInTheDocument();
     expect(screen.getByText('requestCount')).toBeInTheDocument();
   });
