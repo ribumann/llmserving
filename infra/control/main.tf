@@ -1177,6 +1177,7 @@ resource "azurerm_linux_function_app" "orchestrator" {
   resource_group_name = local.resource_group_name
   location            = local.location
   service_plan_id     = azurerm_service_plan.functions.id
+  https_only          = true
   tags                = local.common_tags
 
   storage_account_name          = azapi_resource.functions_storage.name

@@ -13,6 +13,9 @@ implemented and the limits of Easy Auth with a local UI.
 
 ## Trust boundaries
 
+The orchestration Functions app requires HTTPS. Terraform declares this
+explicitly so reconciliation cannot revert a platform-enforced HTTPS-only setting.
+
 `AUTH_MODE=entra-jwt` is the backend's safe default. Cloud Terraform sets this
 mode and `APP_ENV=production` explicitly. Operator requests require a
 cryptographically validated RS256 Entra user token with the configured tenant
