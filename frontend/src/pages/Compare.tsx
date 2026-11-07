@@ -190,29 +190,20 @@ export default function ComparePage() {
     <div className={styles.stack}>
       <PageHeader
         eyebrow="Evaluate"
-        title="Compare report outputs"
-        description="Paste two or more report ids to build a shareable side-by-side comparison of quality and performance evidence across runs."
+        title="Compare reports"
+        description="Compare quality and performance evidence side by side across runs."
       />
 
       <SectionCard
-        title="1. Choose report ids"
-        description="Report ids are the Result report id values shown on the quality and performance report pages after a run completes."
+        title="1. Choose result report IDs"
       >
         <div className={styles.formStack}>
-          <InfoGrid>
-            <InfoPanel title="Where to find report ids">
-              <Body1 block>
-                Open a completed report from{' '}
-                <RouterLink to="/quality/run">Quality Run</RouterLink> or{' '}
-                <RouterLink to="/performance/run">Performance Run</RouterLink>, then copy the
-                Result report id from the report metadata section.
-              </Body1>
-              <Body1>
-                You can bookmark or share the resulting comparison URL because the page stores the
-                generated comparison id in <code>?comparisonId=</code>.
-              </Body1>
-            </InfoPanel>
-          </InfoGrid>
+          <Body1>
+            Copy the Result report ID from two or more completed reports in{' '}
+            <RouterLink to="/quality/run">Quality Run</RouterLink> or{' '}
+            <RouterLink to="/performance/run">Performance Run</RouterLink>. Bookmark or share the
+            generated <code>?comparisonId=</code> URL to reopen the comparison.
+          </Body1>
 
           <Field label="Optional comparison title">
             <Input
@@ -225,9 +216,9 @@ export default function ComparePage() {
 
           {reportIds.map((reportId, index) => (
             <div className={styles.reportRow} key={`report-id-${index}`}>
-              <Field label={`Report ID ${index + 1}`}>
+              <Field label={`Result report ID ${index + 1}`}>
                 <Input
-                  aria-label={`Report ID ${index + 1}`}
+                  aria-label={`Result report ID ${index + 1}`}
                   placeholder="report_abc123"
                   value={reportId}
                   onChange={(event) => updateReportId(index, event.target.value)}
@@ -293,7 +284,7 @@ export default function ComparePage() {
             <Table aria-label="Compared reports" size="small">
               <TableHeader>
                 <TableRow>
-                  <TableHeaderCell>Report id</TableHeaderCell>
+                  <TableHeaderCell>Result report ID</TableHeaderCell>
                   <TableHeaderCell>Revision id</TableHeaderCell>
                   <TableHeaderCell>Environment id</TableHeaderCell>
                 </TableRow>

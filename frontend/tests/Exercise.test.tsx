@@ -53,18 +53,17 @@ describe('ExercisePage', () => {
     vi.clearAllMocks();
   });
 
-  it('submits a prompt and renders the response timing and revision trace', async () => {
+  it.each([
+    { ttftMs: 220, interTokenLatencyMsAvg: 18, totalLatencyMs: 945, displayed: ['220 ms', '18 ms', '945 ms'] },
+    { ttftMs: 220.123456, interTokenLatencyMsAvg: 18.987654, totalLatencyMs: 945.456789, displayed: ['220.1 ms', '19.0 ms', '945.5 ms'] },
+  ])('renders display-only timing precision and revision trace for $ttftMs ms TTFT', async ({ displayed, ...timing }) => {
     const user = userEvent.setup();
 
     mockedSubmitPrompt.mockResolvedValue({
       requestId: 'req-prompt',
       deploymentRevisionId: 'rev-001',
       responseText: 'South Central US has healthier GPU capacity and a ready serving revision.',
-      timing: {
-        ttftMs: 220,
-        interTokenLatencyMsAvg: 18,
-        totalLatencyMs: 945,
-      },
+      timing,
       activeRevision: {
         deploymentRevisionId: 'rev-001',
         modelConfigId: 'model-config-001',
@@ -72,7 +71,7 @@ describe('ExercisePage', () => {
       },
     });
 
-    render(
+    const { unmount } = render(
       <MemoryRouter initialEntries={['/exercise?environmentId=env-123']}>
         <ExercisePage />
       </MemoryRouter>,
@@ -98,10 +97,25 @@ describe('ExercisePage', () => {
     expect(
       await screen.findByText(/south central us has healthier gpu capacity/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/220 ms/i)).toBeInTheDocument();
-    expect(screen.getByText(/18 ms/i)).toBeInTheDocument();
-    expect(screen.getByText(/945 ms/i)).toBeInTheDocument();
+    displayed.forEach((value) => expect(screen.getByText(value)).toBeInTheDocument());
+    expect((await mockedSubmitPrompt.mock.results[0].value).timing).toEqual(timing);
     expect(screen.getAllByText(/rev-001/i)).toHaveLength(2);
+    expect(
+      screen.getAllByText('Prompts are not saved. Closing or refreshing this page clears the session history.'),
+    ).toHaveLength(1);
+    expect(screen.queryByText('Retention note')).not.toBeInTheDocument();
+
+    unmount();
+    render(
+      <MemoryRouter initialEntries={['/exercise?environmentId=env-123']}>
+        <ExercisePage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /reload environment/i })).toBeEnabled();
+    });
+    expect(screen.getByText('No prompts submitted in this browser session yet')).toBeInTheDocument();
+    expect(screen.queryByText(/south central us has healthier gpu capacity/i)).not.toBeInTheDocument();
   });
 
   it('maps no-ready-deployment to a deploy-focused error message', async () => {

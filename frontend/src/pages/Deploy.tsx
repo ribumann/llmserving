@@ -430,7 +430,7 @@ export default function DeployPage() {
       <PageHeader
         eyebrow="Setup"
         title="Deploy a model revision"
-        description="Load a ready environment, create immutable model and inference configuration versions, then explicitly deploy the selected pair."
+        description="Deploy a model and inference configuration pair to a ready environment."
       />
 
       {catalogLoading ? <LoadingState label="Loading model catalog…" /> : null}
@@ -476,9 +476,7 @@ export default function DeployPage() {
             </InfoPanel>
             <InfoPanel title="Deployment notes">
               <Body1>
-                Only catalog entries compatible with the provisioned profile are shown here. Every
-                configuration save creates a new version; it will not take effect until you deploy
-                it explicitly.
+                Only catalog entries compatible with the provisioned profile are shown here.
               </Body1>
             </InfoPanel>
           </InfoGrid>
@@ -676,8 +674,8 @@ export default function DeployPage() {
               </InfoPanel>
               <InfoPanel title="Deployment behavior">
                 <Body1>
-                  Deployment is explicit: saving a new config version does not change traffic until
-                  you click Deploy.
+                  Saving creates a new immutable configuration version. Traffic changes only when
+                  you deploy the selected versions.
                 </Body1>
                 {requiresHfToken ? (
                   <HuggingFaceTokenField

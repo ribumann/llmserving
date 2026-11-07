@@ -8,7 +8,7 @@ export { MetricGrid, MetricCard } from './MetricGrid';
 export { default as StatusBadge } from './StatusBadge';
 export type { StatusTone } from './StatusBadge';
 export { EmptyState, LoadingState } from './EmptyState';
-export { formatStateLabel, statusTone } from './format';
+export { formatMetricValue, formatStateLabel, statusTone } from './format';
 export { RouterLink, RouterButton } from './RouterLink';
 export type { RouterLinkProps, RouterButtonProps } from './RouterLink';
 export { default as HuggingFaceTokenField } from './HuggingFaceTokenField';
