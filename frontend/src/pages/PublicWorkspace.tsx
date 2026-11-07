@@ -4,17 +4,25 @@ import {
   Button,
   Field,
   Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
   Text,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { SignInLink } from '../components/OperatorAccess';
+import { environmentLabel, environmentOptionLabel, visibleEnvironments } from '../components/environmentOptions';
 import {
   DataList,
   EmptyState,
   InfoGrid,
   InfoPanel,
   LoadingState,
+  MetricCard,
+  MetricGrid,
   PageHeader,
   RouterLink,
   SectionCard,
@@ -53,6 +61,8 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalL,
   },
   content: { overflowWrap: 'anywhere', minWidth: 0 },
+  tableScroll: { overflowX: 'auto' },
+  historyTable: { minWidth: '650px' },
   actions: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -189,6 +199,57 @@ function PerformanceMetricList({
   );
 }
 
+function SavedReport({ report }: { report: PerformanceReportResponse }) {
+  const aggregate = report.quality?.aggregate;
+  const qualityMetrics = aggregate ? [
+    { key: 'totalCases', label: 'Total cases' },
+    { key: 'passed', label: 'Passed' },
+    { key: 'failed', label: 'Failed' },
+    { key: 'errored', label: 'Errored' },
+    { key: 'skipped', label: 'Skipped' },
+    { key: 'incomplete', label: 'Incomplete' },
+    { key: 'passRate', label: 'Pass rate' },
+  ] as const : [];
+  return (
+    <SectionCard title="Saved report summary">
+      <Text weight="semibold">Completeness: {report.completenessIndicator}</Text>
+      {aggregate ? <MetricGrid>{qualityMetrics.map(({ key, label }) => (
+        typeof aggregate[key] === 'number' && Number.isFinite(aggregate[key])
+          ? <MetricCard key={key} label={label} value={key === 'passRate' ? `${formatMetricValue(aggregate[key] * 100)}%` : String(aggregate[key])} />
+          : null
+      ))}</MetricGrid> : null}
+      {report.quality?.benchmarks?.map((benchmark) => (
+        <DataList key={benchmark.benchmarkId} items={[
+          { label: 'Benchmark', value: benchmark.benchmarkId },
+          { label: 'Score', value: benchmark.score },
+          { label: 'Baseline', value: benchmark.baseline },
+          { label: 'Delta', value: benchmark.delta },
+          { label: 'Result', value: benchmark.passFail },
+          { label: 'Regression', value: benchmark.regressionFlag === undefined ? 'Not recorded' : benchmark.regressionFlag ? 'Flagged' : 'No' },
+        ]} />
+      ))}
+      {report.performance ? (
+        <>
+          <Text weight="semibold">Performance metrics</Text>
+          <PerformanceMetricList performance={report.performance} />
+          <Text weight="semibold">Request failures</Text>
+          <Settings values={{ ...report.performance.requestFailures }} />
+        </>
+      ) : null}
+      <details>
+        <summary>Report provenance and test conditions</summary>
+        <DataList items={[
+          { label: 'Report', value: report.resultReportId },
+          { label: 'Run', value: report.runId },
+          { label: 'Deployment revision', value: report.configuration?.deploymentRevisionId ?? 'Not recorded' },
+        ]} />
+        {report.performance ? <Settings values={report.performance.testConditions} /> : null}
+      </details>
+      <Text>Raw prompts, outputs and per-case content are operator-only.</Text>
+    </SectionCard>
+  );
+}
+
 function Records<T>({
   title,
   rows,
@@ -247,6 +308,7 @@ export default function PublicWorkspace({
   const [data, setData] = useState<PublicData>();
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
+  const [showArchived, setShowArchived] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -255,7 +317,7 @@ export default function PublicWorkspace({
     async function load() {
       const environments = await publicApi.environments(controller.signal);
       const environmentId =
-        environmentParam || environments.environments[0]?.environmentId;
+        environmentParam || visibleEnvironments(environments.environments, false)[0]?.environmentId;
       const result: PublicData = { environments: environments.environments };
       const tasks: Promise<void>[] = [];
       if (
@@ -386,8 +448,9 @@ export default function PublicWorkspace({
   const selectedEnvironment =
     environmentParam ||
     data?.environment?.environmentId ||
-    data?.environments[0]?.environmentId ||
+    visibleEnvironments(data?.environments ?? [], false)[0]?.environmentId ||
     '';
+  const visible = visibleEnvironments(data?.environments ?? [], showArchived, environmentParam);
   const suffix = `?environmentId=${encodeURIComponent(selectedEnvironment)}`;
 
   return (
@@ -403,7 +466,6 @@ export default function PublicWorkspace({
             ? 'This account is not an approved operator. Public browsing is still available.'
             : 'Sign in with an approved Microsoft account to execute actions.'}
         <div className={styles.actions}>
-          <SignInLink />
           {session === 'unavailable' ? (
             <Button onClick={retry}>Check access again</Button>
           ) : null}
@@ -426,6 +488,7 @@ export default function PublicWorkspace({
         <LoadingState label="Loading public data..." />
       ) : (
         <>
+          {data.report ? <SavedReport report={data.report} /> : null}
           {pathname !== '/' &&
           pathname !== '/compare' &&
           pathname !== '/provision' ? (
@@ -444,31 +507,40 @@ export default function PublicWorkspace({
                   }
                 }}
               >
-                {!data.environments.length ? (
-                  <option value="">No environments recorded</option>
+                {!selectedEnvironment ? (
+                  <option value="">No active environments</option>
                 ) : null}
-                {data.environments.map((environment) => (
+                {environmentParam && !data.environments.some((environment) => environment.environmentId === environmentParam) ? (
+                  <option value={environmentParam}>{environmentParam} (not in list)</option>
+                ) : null}
+                {visible.map((environment) => (
                   <option
                     key={environment.environmentId}
                     value={environment.environmentId}
                   >
-                    {environment.environmentId}
+                    {environmentOptionLabel(environment)}
                   </option>
                 ))}
               </Select>
             </Field>
           ) : null}
+          {data.environments.some((environment) => environment.lifecycleState === 'torn_down') ? (
+            <label><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} /> Show torn-down environments</label>
+          ) : null}
+          {!visible.length && data.environments.length ? (
+            <StatusMessage intent="info">No active environments. Show torn-down environments to view their history.</StatusMessage>
+          ) : null}
           {pathname === '/' || pathname === '/provision' ? (
             <Records
               title="Environments"
-              rows={data.environments}
+              rows={visible}
               render={(environment) => (
                 <>
                   <DataList
                     items={[
                       {
                         label: 'Environment',
-                        value: environment.environmentId,
+                        value: environmentLabel(environment),
                       },
                       { label: 'Profile', value: environment.profileId },
                       { label: 'Provider', value: environment.provider },
@@ -494,12 +566,16 @@ export default function PublicWorkspace({
             />
           ) : null}
           {data.environment ? (
+            <details>
+            <summary>Environment context</summary>
             <SectionCard title="Environment state">
               <DataList
                 items={[
                   {
                     label: 'Environment',
-                    value: data.environment.environmentId,
+                    value: data.environments.find((entry) => entry.environmentId === data.environment?.environmentId)
+                      ? environmentLabel(data.environments.find((entry) => entry.environmentId === data.environment?.environmentId)!)
+                      : data.environment.environmentId,
                   },
                   { label: 'Provider', value: data.environment.provider },
                   { label: 'Profile', value: data.environment.profileId },
@@ -532,6 +608,7 @@ export default function PublicWorkspace({
                 </RouterLink>
               </div>
             </SectionCard>
+            </details>
           ) : null}
           {data.deployment ? (
             <SectionCard title="Active deployment">
@@ -694,89 +771,23 @@ export default function PublicWorkspace({
             />
           ) : null}
           {data.runs ? (
-            <Records
-              title="Experiments and saved reports"
-              rows={data.runs}
-              render={(run) => (
-                <>
-                  <DataList
-                    items={[
-                      { label: 'Run', value: run.runId },
-                      { label: 'Type', value: run.runType },
-                      {
-                        label: 'Definition',
-                        value: run.testDefinitionRef ?? 'Not recorded',
-                      },
-                      { label: 'Status', value: formatStateLabel(run.status) },
-                      { label: 'Started', value: run.startedAt },
-                      { label: 'Ended', value: run.endedAt ?? 'Not finished' },
-                      {
-                        label: 'Deployment revision',
-                        value:
-                          run.configuration?.deploymentRevisionId ??
-                          'Not recorded',
-                      },
-                    ]}
-                  />
-                  <RouterLink
-                    to={`/${run.runType === 'performance' ? 'performance' : 'quality'}/report/${encodeURIComponent(run.runId)}${suffix}`}
-                  >
-                    Open report summary
-                  </RouterLink>
-                </>
-              )}
-            />
-          ) : null}
-          {data.report ? (
-            <SectionCard title="Saved report summary">
-              <DataList
-                items={[
-                  { label: 'Report', value: data.report.resultReportId },
-                  { label: 'Run', value: data.report.runId },
-                  {
-                    label: 'Completeness',
-                    value: data.report.completenessIndicator,
-                  },
-                  {
-                    label: 'Deployment revision',
-                    value:
-                      data.report.configuration?.deploymentRevisionId ??
-                      'Not recorded',
-                  },
-                ]}
-              />
-              {data.report.quality?.aggregate ? (
-                <Settings values={{ ...data.report.quality.aggregate }} />
-              ) : null}
-              {data.report.quality?.benchmarks?.map((benchmark) => (
-                <DataList
-                  key={benchmark.benchmarkId}
-                  items={[
-                    { label: 'Benchmark', value: benchmark.benchmarkId },
-                    { label: 'Score', value: benchmark.score },
-                    { label: 'Baseline', value: benchmark.baseline },
-                    { label: 'Delta', value: benchmark.delta },
-                  ]}
-                />
-              ))}
-              {data.report.performance ? (
-                <>
-                  <Text weight="semibold">
-                    Performance metrics (milliseconds; throughput in
-                    tokens/second)
-                  </Text>
-                  <PerformanceMetricList performance={data.report.performance} />
-                  <Text weight="semibold">Request failures</Text>
-                  <Settings
-                    values={{ ...data.report.performance.requestFailures }}
-                  />
-                  <Text weight="semibold">Test conditions</Text>
-                  <Settings values={data.report.performance.testConditions} />
-                </>
-              ) : null}
-              <Text>
-                Raw prompts, outputs and per-case content are operator-only.
-              </Text>
+            <SectionCard title="Experiments and saved reports">
+              {data.runs.length ? (
+                <div className={styles.tableScroll}>
+                  <Table aria-label="Experiments and saved reports" size="small" className={styles.historyTable}>
+                    <TableHeader><TableRow><TableHeaderCell>Definition</TableHeaderCell><TableHeaderCell>Type</TableHeaderCell><TableHeaderCell>Status</TableHeaderCell><TableHeaderCell>Started</TableHeaderCell><TableHeaderCell>Report</TableHeaderCell></TableRow></TableHeader>
+                    <TableBody>{data.runs.map((run) => (
+                      <TableRow key={run.runId}>
+                        <TableCell>{run.testDefinitionRef ?? run.runId}</TableCell>
+                        <TableCell>{run.runType}</TableCell>
+                        <TableCell>{formatStateLabel(run.status)}</TableCell>
+                        <TableCell>{run.startedAt}</TableCell>
+                        <TableCell><RouterLink to={`/${run.runType === 'performance' ? 'performance' : 'quality'}/report/${encodeURIComponent(run.runId)}${suffix}`}>Open report summary</RouterLink></TableCell>
+                      </TableRow>
+                    ))}</TableBody>
+                  </Table>
+                </div>
+              ) : <EmptyState title="No experiments recorded" />}
             </SectionCard>
           ) : null}
           {data.comparisons ? (

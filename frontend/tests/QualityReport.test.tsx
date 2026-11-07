@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import QualityReportPage from '../src/pages/QualityReport';
 import { ApiError } from '../src/services/apiClient';
@@ -94,6 +95,11 @@ describe('QualityReportPage', () => {
     expect(screen.getByText(/returned prose instead of json/i)).toBeInTheDocument();
     expect(screen.getByText(/regression flagged/i)).toBeInTheDocument();
     expect(screen.getByText('report-123')).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Show cases'), 'attention');
+    expect(screen.queryByText('case-001')).not.toBeInTheDocument();
+    expect(screen.getByText('case-002')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('View case case-002'));
+    expect(screen.getByText('Returned prose instead of JSON.')).toBeVisible();
   });
 
   it('shows a return-to-run message when the report is not ready yet', async () => {
