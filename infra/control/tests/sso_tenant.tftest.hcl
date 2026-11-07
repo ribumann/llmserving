@@ -290,6 +290,93 @@ run "managed_default_unchanged" {
     condition     = local.sso_tenant_id == "11111111-1111-1111-1111-111111111111" && length(azuread_application.sso) == 1
     error_message = "The existing managed same-tenant path must remain unchanged."
   }
+  assert {
+    condition = (
+      length(var.additional_frontend_sso_redirect_uris) == 0
+      && length(local.sso_redirect_uris) == 2
+    )
+    error_message = "Default managed SSO must retain exactly the generated frontend and backend callbacks."
+  }
+}
+
+run "managed_additional_frontend_callbacks" {
+  command = plan
+  variables {
+    existing_sso_client_id                = null
+    existing_sso_secret_id                = null
+    additional_frontend_sso_redirect_uris = ["https://ui.example.com/.auth/login/aad/callback", "https://demo.example.org/.auth/login/aad/callback"]
+  }
+  assert {
+    condition = (
+      length(local.sso_redirect_uris) == 4
+      && tolist(slice(local.sso_redirect_uris, 2, 4)) == var.additional_frontend_sso_redirect_uris
+    )
+    error_message = "Managed SSO must add the approved frontend callbacks without removing either generated callback."
+  }
+}
+
+run "reject_unsafe_frontend_callbacks" {
+  command = plan
+  variables {
+    additional_frontend_sso_redirect_uris = ["http://ui.example.com/.auth/login/aad/callback"]
+  }
+  expect_failures = [var.additional_frontend_sso_redirect_uris]
+}
+
+run "reject_frontend_callback_credentials" {
+  command = plan
+  variables {
+    additional_frontend_sso_redirect_uris = ["https://user@ui.example.com/.auth/login/aad/callback"]
+  }
+  expect_failures = [var.additional_frontend_sso_redirect_uris]
+}
+
+run "reject_frontend_callback_query" {
+  command = plan
+  variables {
+    additional_frontend_sso_redirect_uris = ["https://ui.example.com/.auth/login/aad/callback?next=evil"]
+  }
+  expect_failures = [var.additional_frontend_sso_redirect_uris]
+}
+
+run "reject_frontend_callback_wrong_path" {
+  command = plan
+  variables {
+    additional_frontend_sso_redirect_uris = ["https://ui.example.com/other"]
+  }
+  expect_failures = [var.additional_frontend_sso_redirect_uris]
+}
+
+run "reject_frontend_callback_port" {
+  command = plan
+  variables {
+    additional_frontend_sso_redirect_uris = ["https://ui.example.com:443/.auth/login/aad/callback"]
+  }
+  expect_failures = [var.additional_frontend_sso_redirect_uris]
+}
+
+run "reject_frontend_callback_fragment" {
+  command = plan
+  variables {
+    additional_frontend_sso_redirect_uris = ["https://ui.example.com/.auth/login/aad/callback#fragment"]
+  }
+  expect_failures = [var.additional_frontend_sso_redirect_uris]
+}
+
+run "reject_frontend_callback_invalid_hostname" {
+  command = plan
+  variables {
+    additional_frontend_sso_redirect_uris = ["https://-bad.example.com/.auth/login/aad/callback"]
+  }
+  expect_failures = [var.additional_frontend_sso_redirect_uris]
+}
+
+run "reject_frontend_callback_null" {
+  command = plan
+  variables {
+    additional_frontend_sso_redirect_uris = [null]
+  }
+  expect_failures = [var.additional_frontend_sso_redirect_uris]
 }
 
 run "managed_rejects_foreign_tenant" {

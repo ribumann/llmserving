@@ -235,6 +235,22 @@ variable "functions_package_sha256" {
 
 # --- Entra ID SSO (FR-075) ---
 
+variable "additional_frontend_sso_redirect_uris" {
+  description = "Additional HTTPS Easy Auth callback URIs for externally managed frontend custom domains, used only with a Terraform-managed SSO application."
+  type        = list(string)
+  default     = []
+  nullable    = false
+
+  validation {
+    condition = alltrue([for uri in var.additional_frontend_sso_redirect_uris : try(
+      length(split("/", uri)[2]) <= 253 &&
+      can(regex("^https://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?/\\.auth/login/aad/callback$", uri)),
+      false
+    )])
+    error_message = "Additional frontend SSO redirects must be HTTPS DNS hostnames with the exact /.auth/login/aad/callback path and no port, query, fragment or credentials."
+  }
+}
+
 variable "enable_sso" {
   description = <<-EOT
     Whether to provision the Entra ID app registration/service principal and wire Container

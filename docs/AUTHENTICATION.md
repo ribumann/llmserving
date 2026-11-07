@@ -110,6 +110,12 @@ validation app outside Terraform and supply:
 | Redirects | `https://<new-frontend-fqdn>/.auth/login/aad/callback` and `https://<new-backend-fqdn>/.auth/login/aad/callback` |
 | Identity policy | Tenant-approved users/assignments/consent and explicit allowed email domains |
 
+For an optional frontend custom hostname, retain both generated callbacks and
+follow the [custom-domain setup](UI_DEPLOYMENT.md#optional-frontend-custom-domain).
+Terraform-managed registrations accept extra callbacks through
+`additional_frontend_sso_redirect_uris`; an external app's owner manages its
+callbacks separately.
+
 Supply both external inputs or neither. External mode does not create an
 AzureAD application, service principal, password or Key Vault secret through
 Terraform; it still configures Easy Auth using the supplied references. The

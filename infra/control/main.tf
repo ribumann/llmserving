@@ -734,7 +734,8 @@ resource "azurerm_container_app" "frontend" {
   }
 
   lifecycle {
-    ignore_changes = [template[0].container[0].image]
+    # DNS, managed certificates and hostname bindings are managed outside Terraform.
+    ignore_changes = [template[0].container[0].image, ingress[0].custom_domain]
     precondition {
       condition = var.frontend_token_store_sas_secret_id == null ? true : (
         var.enable_sso && startswith(var.frontend_token_store_sas_secret_id, "${trimsuffix(local.shared.key_vault_uri, "/")}/secrets/")
@@ -1317,6 +1318,10 @@ locals {
   # so this avoids the cycle while resolving to the same value.
   backend_fqdn  = "${var.name_prefix}-backend.${azurerm_container_app_environment.control.default_domain}"
   frontend_fqdn = "${var.name_prefix}-frontend.${azurerm_container_app_environment.control.default_domain}"
+  sso_redirect_uris = concat([
+    "https://${local.frontend_fqdn}/.auth/login/aad/callback",
+    "https://${local.backend_fqdn}/.auth/login/aad/callback",
+  ], var.additional_frontend_sso_redirect_uris)
 }
 
 resource "azuread_application" "sso" {
@@ -1325,10 +1330,7 @@ resource "azuread_application" "sso" {
   display_name = "${var.entra_app_display_name}-${var.stage}"
 
   web {
-    redirect_uris = [
-      "https://${local.frontend_fqdn}/.auth/login/aad/callback",
-      "https://${local.backend_fqdn}/.auth/login/aad/callback",
-    ]
+    redirect_uris = local.sso_redirect_uris
 
     implicit_grant {
       id_token_issuance_enabled = true
