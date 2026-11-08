@@ -23,7 +23,7 @@ policy. See [evidence and limitations](docs/RELEASE_VALIDATION.md).
 
 | Goal | Guide |
 | --- | --- |
-| Browse or present the application | [Demo walkthrough](docs/DEMO.md) |
+| Browse or present the application | [User guide](docs/USER_GUIDE.md), [demo walkthrough](docs/DEMO.md) |
 | Find documentation by task | [Documentation index](docs/README.md) |
 | Understand the system at increasing depth | [Architecture map](docs/ARCHITECTURE.md) |
 | Develop locally | [Backend](backend/README.md), [frontend](frontend/README.md), [testing](docs/TESTING.md) |
