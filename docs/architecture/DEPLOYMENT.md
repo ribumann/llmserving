@@ -1,8 +1,14 @@
-# Deployment, trust and recovery
+# Supplementary deployment, trust and recovery views
 
-[Architecture map](../ARCHITECTURE.md) / **deployment depth** /
-[containers](CONTEXT.md#runtime-containers) / [components](COMPONENTS.md) /
-[sequences](FLOWS.md)
+[Architecture map](../ARCHITECTURE.md) / **deployment view—not a C4 level** /
+[C4 L2 containers](CONTEXT.md#c4-level-2-runtime-containers) /
+[C4 L3 components](COMPONENTS.md) / [dynamic sequences](FLOWS.md) /
+[selected code paths](CODE.md)
+
+The deployment view answers **where and across which trust/network boundaries
+does the system run?** It complements C4; it does not replace the L2 container
+view, nor is it proof that a live deployment matches the checked-in Terraform
+topology.
 
 ## Azure topology
 

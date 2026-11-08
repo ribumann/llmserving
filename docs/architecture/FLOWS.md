@@ -1,8 +1,13 @@
-# Runtime sequence flows
+# Dynamic views — Runtime sequence flows
 
-[Architecture map](../ARCHITECTURE.md) / **behavior depth** /
-[containers](CONTEXT.md#runtime-containers) / [components](COMPONENTS.md) /
+[Architecture map](../ARCHITECTURE.md) / **behavior depth—not C4 levels** /
+[C4 L2 containers](CONTEXT.md#c4-level-2-runtime-containers) /
+[C4 L3 components](COMPONENTS.md) / [C4 L4 code](CODE.md) /
 [deployment and recovery](DEPLOYMENT.md)
+
+These storyboards add time order, asynchronous handoffs and selected failure
+branches to the static C4 model. Read the arrows top to bottom; use the linked
+source views for precise implementation details.
 
 ## Public read versus operator action
 
@@ -69,6 +74,12 @@ for recovery, not a success callback. Cancellation/timeout in the versioned
 Functions monitor waits for SDK stop before terminal finalization; unexpected
 callback/stop/ownership errors remain visible.
 
+Source trace: [provisioning L4](CODE.md#2-provisioning-persisted-intent-to-reconciled-environment),
+[`create_environment`](../../backend/src/api/routes/environments.py),
+[`AzureProvisioner`](../../backend/src/providers/azure/provision.py),
+[`generic_orchestrator_v2`](../../functions/orchestrators/generic_orchestrator.py),
+[`WorkflowReconciliationService`](../../backend/src/domain/workflow_reconciliation.py).
+
 ## Deploy a model
 
 ```mermaid
@@ -100,6 +111,10 @@ not enter DB, Terraform, logs, public evidence or Durable history; cloud job/Run
 Command execution-metadata retention still needs private review. Never dump raw
 SDK output to diagnose credential-bearing requests.
 
+Source trace: [deployment L4](CODE.md#3-deployment-secret-safe-pre-dispatch-and-durable-monitoring),
+[`AzureDeployer`](../../backend/src/providers/azure/deploy.py),
+[`model deployment job`](../../jobs/model_deployment/entrypoint.py).
+
 ## Interactive inference
 
 ```mermaid
@@ -124,6 +139,10 @@ sequenceDiagram
 Busy, unavailable or unready environments fail explicitly. Persisted READY is
 not a live health guarantee; operators must distinguish stopped/deallocated VM,
 running-but-unverified model and successful real inference.
+
+Source trace: [inference L4](CODE.md#4-inference-evaluation-and-report-persistence),
+[`submit_prompt`](../../backend/src/api/routes/prompts.py),
+[`provider/engine selection`](../../backend/src/providers/registry.py).
 
 ## Quality, performance and report persistence
 
@@ -169,6 +188,11 @@ must not mark an untracked future cancelled. A directly tracked queued future
 may be cancelled before start; running evaluators are not forcibly interrupted.
 After process loss, persisted inputs/reports remain but automatic orphan recovery
 is not certified. Deferred worker definitions are not this execution path.
+
+Source trace: [run/report L4](CODE.md#4-inference-evaluation-and-report-persistence),
+[`create_run`](../../backend/src/api/routes/runs.py),
+[`QualityRunOrchestrator`](../../backend/src/evaluation/run_quality.py),
+[`ResultReportRepository`](../../backend/src/domain/result_report_repo.py).
 
 Sources: [`provision`](../../backend/src/providers/azure/provision.py),
 [`deploy`](../../backend/src/providers/azure/deploy.py),
