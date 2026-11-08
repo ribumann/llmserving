@@ -5,7 +5,7 @@ planning. Start with [the root README](../README.md) or choose a path below.
 
 | Reader / task | Read in order |
 | --- | --- |
-| Visitor or presenter | [Demo](DEMO.md), [metric interpretation](DEMO.md#interpreting-results), [release evidence](RELEASE_VALIDATION.md) |
+| Visitor or presenter | [User guide](USER_GUIDE.md), [demo](DEMO.md), [metric interpretation](DEMO.md#interpreting-results), [release evidence](RELEASE_VALIDATION.md) |
 | Developer | [Backend](../backend/README.md), [frontend](../frontend/README.md), [architecture by depth](ARCHITECTURE.md), [testing](TESTING.md), [contributing](../CONTRIBUTING.md) |
 | Authorized Azure operator | [Private configuration](OPERATOR_CONFIGURATION.md), [auth](AUTHENTICATION.md), [infra](../infra/README.md), [Azure gates](AZURE.md), [app bootstrap](APP_BOOTSTRAP.md) |
 | Availability or recovery | [Data and backups](DATA_AND_RECOVERY.md), [Terraform leases](TERRAFORM_STATE.md), [operations](OPERATIONS.md) |
