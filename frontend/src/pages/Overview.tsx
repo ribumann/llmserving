@@ -11,6 +11,7 @@ import { CloudArrowUp20Regular, Rocket20Regular } from '@fluentui/react-icons';
 import { listEnvironments } from '../services/environmentsApi';
 import type { EnvironmentSummary } from '../services/types';
 import { SignInLink } from '../components/OperatorAccess';
+import { environmentLabel, visibleEnvironments } from '../components/environmentOptions';
 import {
   EmptyState,
   LoadingState,
@@ -88,6 +89,8 @@ export default function OverviewPage({
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const visible = visibleEnvironments(environments ?? [], showArchived);
 
   useEffect(() => {
     if (!authenticated) {
@@ -154,6 +157,12 @@ export default function OverviewPage({
           <Subtitle2 as="h3" className={styles.sectionTitle}>
             Your environments
           </Subtitle2>
+          {environments?.some((env) => env.lifecycleState === 'torn_down') ? (
+            <label><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} /> Show torn-down environments</label>
+          ) : null}
+          {environments?.length && !visible.length ? (
+            <EmptyState title="No active environments">Show torn-down environments to view their history.</EmptyState>
+          ) : null}
           {error ? (
             <StatusMessage intent="error" title="Couldn't load environments">
               {error}
@@ -174,12 +183,12 @@ export default function OverviewPage({
               Provision an environment to start deploying and exercising models.
             </EmptyState>
           ) : null}
-          {environments && environments.length > 0 ? (
+          {visible.length > 0 ? (
             <div className={styles.grid}>
-              {environments.map((env) => (
+              {visible.map((env) => (
                 <Card className={styles.card} key={env.environmentId}>
                   <div className={styles.envHeader}>
-                    <Text weight="semibold">{env.environmentId}</Text>
+                    <Text weight="semibold">{environmentLabel(env)}</Text>
                     <StatusBadge tone={statusTone(env.lifecycleState)}>
                       {formatStateLabel(env.lifecycleState)}
                     </StatusBadge>

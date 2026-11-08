@@ -146,7 +146,7 @@ describe('App public and operator shell', () => {
 
   it('shows persisted public environments without operator authentication', async () => {
     render(<App />);
-    expect(await screen.findByText('env-public')).toBeInTheDocument();
+    expect(await screen.findByText(/profile-public · eastus \(v-public\)/)).toBeInTheDocument();
     expect(screen.getByText('Public read-only workspace')).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: 'View experiments' }),
@@ -184,9 +184,8 @@ describe('App public and operator shell', () => {
       expect(
         await screen.findByRole('heading', { name: section }),
       ).toBeInTheDocument();
-      const main = screen.getByRole('main');
       expect(
-        within(main).getByRole('link', { name: /sign in with microsoft/i }),
+        screen.getByRole('link', { name: /sign in with microsoft/i }),
       ).toHaveAttribute(
         'href',
         `/.auth/login/aad?post_login_redirect_uri=${encodeURIComponent(path)}`,
@@ -225,7 +224,7 @@ describe('App public and operator shell', () => {
       await screen.findByRole('link', { name: 'Open report summary' }),
     );
     expect(await screen.findByText('report-public')).toBeInTheDocument();
-    expect(screen.getByText('0.9')).toBeInTheDocument();
+    expect(screen.getByText('90%')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('link', { name: 'Compare' }));
     await userEvent.click(
       await screen.findByRole('link', { name: 'Open saved comparison' }),
@@ -275,6 +274,7 @@ describe('App public and operator shell', () => {
         ),
       );
     });
+
     render(<App />);
     expect(await screen.findByText('p50 346.2 ms · p95 512.5 ms')).toBeInTheDocument();
     expect(screen.getByText('p50 4 ms · p95 7 ms')).toBeInTheDocument();
@@ -285,6 +285,43 @@ describe('App public and operator shell', () => {
     expect(screen.getByText('requestCount')).toBeInTheDocument();
   });
 
+  it('defaults to active environments and preserves an explicitly selected archived report', async () => {
+      const archived = { ...environment, environmentId: 'env-archived', lifecycleState: 'torn_down', state: 'torn_down' };
+      window.history.replaceState({}, '', '/performance/report/run-public?environmentId=env-archived');
+      fetchMock.mockImplementation((url: string) => {
+        const path = new URL(url).pathname;
+        if (path === '/session') return Promise.resolve(new Response('', { status: 401 }));
+        if (path === '/public/environments') return Promise.resolve(Response.json({ environments: [archived, environment] }));
+        if (path === '/public/environments/env-archived') return Promise.resolve(Response.json(archived));
+        return Promise.resolve(Response.json(publicResponse(path)));
+      });
+      render(<App />);
+      const selector = await screen.findByRole('combobox', { name: 'Environment' });
+      expect(selector).toHaveValue('env-archived');
+      const options = within(selector).getAllByRole('option');
+      expect(options.map((option) => option.getAttribute('value'))).toEqual(['env-public', 'env-archived']);
+      const reportHeading = screen.getByRole('heading', { name: 'Saved report summary' });
+      const historyHeading = screen.getByRole('heading', { name: 'Experiments and saved reports' });
+      expect(reportHeading.compareDocumentPosition(historyHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+    });
+
+    it('offers archived environments when no active environment exists', async () => {
+      window.history.replaceState({}, '', '/history');
+      fetchMock.mockImplementation((url: string) => {
+        const path = new URL(url).pathname;
+        if (path === '/session') return Promise.resolve(new Response('', { status: 401 }));
+        if (path === '/public/environments') return Promise.resolve(Response.json({ environments: [{ ...environment, lifecycleState: 'torn_down' }] }));
+        return Promise.resolve(Response.json(publicResponse(path)));
+      });
+      render(<App />);
+      const selector = await screen.findByRole('combobox', { name: 'Environment' });
+      expect(selector).toHaveValue('');
+      expect(screen.getByText(/no active environments\. show torn-down/i)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Show torn-down environments' }));
+      await userEvent.selectOptions(selector, 'env-public');
+      expect(window.location.search).toContain('environmentId=env-public');
+    });
   it('changes the environment detail route when selecting another environment', async () => {
     window.history.replaceState({}, '', '/environments/env-public');
     fetchMock.mockImplementation((url: string) => {
@@ -374,7 +411,7 @@ describe('App public and operator shell', () => {
     expect(
       await screen.findByText(/not an approved operator/i),
     ).toBeInTheDocument();
-    expect(await screen.findByText('env-public')).toBeInTheDocument();
+    expect(await screen.findByText(/profile-public · eastus \(v-public\)/)).toBeInTheDocument();
   });
 
   it('preserves verified operator views and protected API transport', async () => {
@@ -403,7 +440,7 @@ describe('App public and operator shell', () => {
       ),
     );
     expect(screen.queryByText('Your environments')).not.toBeInTheDocument();
-    expect(await screen.findByText('env-public')).toBeInTheDocument();
+    expect(await screen.findByText(/profile-public · eastus \(v-public\)/)).toBeInTheDocument();
   });
 
   it('fails closed on a malformed session but still loads public data', async () => {
@@ -420,7 +457,7 @@ describe('App public and operator shell', () => {
     expect(
       await screen.findByText(/operator sign-in is unavailable/i),
     ).toBeInTheDocument();
-    expect(await screen.findByText('env-public')).toBeInTheDocument();
+    expect(await screen.findByText(/profile-public · eastus \(v-public\)/)).toBeInTheDocument();
     expect(screen.queryByText('Your environments')).not.toBeInTheDocument();
   });
 });

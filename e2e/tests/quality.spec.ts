@@ -147,6 +147,8 @@ test('quickstart scenario 3 quality run and report flow', async ({ page }) => {
 
   await expect(page).toHaveURL(/\/quality\/report\/run-123\?environmentId=env-123$/);
   await expect(page.getByText('80.0%')).toBeVisible();
+  await expect(page.getByText(/return json only/i)).toBeHidden();
+  await page.getByText('View case case-002', { exact: true }).click();
   await expect(page.getByText(/return json only/i)).toBeVisible();
   await expect(page.getByText(/returned prose instead of json/i)).toBeVisible();
 });

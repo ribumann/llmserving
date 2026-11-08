@@ -41,6 +41,7 @@ const useStyles = makeStyles({
     display: 'flex',
     gap: tokens.spacingHorizontalS,
   },
+  tableScroll: { overflowX: 'auto' },
 });
 
 function formatPercent(value: number) {
@@ -70,6 +71,7 @@ export default function QualityReportPage() {
   const [error, setError] = useState<string>();
   const [reportNotReady, setReportNotReady] = useState(false);
   const [environment, setEnvironment] = useState<DemoEnvironment>();
+  const [caseFilter, setCaseFilter] = useState('all');
 
   useEffect(() => {
     if (!runId || !environmentId) {
@@ -183,7 +185,7 @@ export default function QualityReportPage() {
             </StatusMessage>
           ) : null}
 
-          <SectionCard title="1. Aggregate summary">
+          <SectionCard title="Aggregate summary">
             <MetricGrid>
               <MetricCard label="Total cases" value={report.quality.aggregate.totalCases} />
               <MetricCard label="Passed" value={report.quality.aggregate.passed} />
@@ -194,6 +196,8 @@ export default function QualityReportPage() {
               <MetricCard label="Pass rate" value={formatPercent(report.quality.aggregate.passRate)} />
             </MetricGrid>
 
+            <details>
+              <summary>Report provenance</summary>
             <InfoGrid>
               <InfoPanel title="Report metadata">
                 <DataList
@@ -209,34 +213,50 @@ export default function QualityReportPage() {
                 />
               </InfoPanel>
             </InfoGrid>
+            </details>
           </SectionCard>
 
-          <SectionCard title="2. Deterministic case outcomes">
+          <SectionCard title="Deterministic case outcomes">
             {report.quality.cases.length ? (
+              <>
+              <label>Show cases{' '}
+                <select value={caseFilter} onChange={(event) => setCaseFilter(event.target.value)}>
+                  <option value="all">All</option>
+                  <option value="attention">Failed, errored, skipped or incomplete</option>
+                  <option value="passed">Passed</option>
+                </select>
+              </label>
+              <div className={styles.tableScroll}>
               <Table aria-label="Deterministic case outcomes" size="small">
                 <TableHeader>
                   <TableRow>
                     <TableHeaderCell>Case id</TableHeaderCell>
-                    <TableHeaderCell>Input</TableHeaderCell>
-                    <TableHeaderCell>Evaluation rule</TableHeaderCell>
-                    <TableHeaderCell>Observed outcome</TableHeaderCell>
                     <TableHeaderCell>Status</TableHeaderCell>
+                    <TableHeaderCell>Details</TableHeaderCell>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {report.quality.cases.map((qualityCase) => (
+                  {report.quality.cases.filter((qualityCase) => caseFilter === 'all' || (caseFilter === 'passed' ? qualityCase.status === 'passed' : qualityCase.status !== 'passed')).map((qualityCase) => (
                     <TableRow key={qualityCase.caseId}>
                       <TableCell>{qualityCase.caseId}</TableCell>
-                      <TableCell>{qualityCase.input}</TableCell>
-                      <TableCell>{qualityCase.evaluationRule}</TableCell>
-                      <TableCell>{qualityCase.observedOutcome}</TableCell>
                       <TableCell>
                         <StatusBadge tone={statusTone(qualityCase.status)}>{qualityCase.status}</StatusBadge>
+                      </TableCell>
+                      <TableCell>
+                        <details><summary>View case {qualityCase.caseId}</summary>
+                          <DataList items={[
+                            { label: 'Input', value: qualityCase.input },
+                            { label: 'Evaluation rule', value: qualityCase.evaluationRule },
+                            { label: 'Observed outcome', value: qualityCase.observedOutcome },
+                          ]} />
+                        </details>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+              </div>
+              </>
             ) : (
               <EmptyState title="No deterministic case outcomes recorded">
                 This run type may not use deterministic cases, or the run stopped before any
@@ -245,8 +265,9 @@ export default function QualityReportPage() {
             )}
           </SectionCard>
 
-          <SectionCard title="3. Benchmark results">
+          <SectionCard title="Benchmark results">
             {report.quality.benchmarks.length ? (
+              <div className={styles.tableScroll}>
               <Table aria-label="Benchmark results" size="small">
                 <TableHeader>
                   <TableRow>
@@ -283,6 +304,7 @@ export default function QualityReportPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             ) : (
               <EmptyState title="No benchmark outcomes recorded">
                 This run may have used a golden dataset only, or stopped before any benchmark

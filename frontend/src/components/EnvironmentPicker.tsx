@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Dropdown, Field, Option } from '@fluentui/react-components';
 import { listEnvironments } from '../services/environmentsApi';
 import type { EnvironmentSummary } from '../services/types';
-import { StatusMessage, formatStateLabel } from './kit';
+import { StatusMessage } from './kit';
+import { environmentOptionLabel, visibleEnvironments } from './environmentOptions';
 
 type EnvironmentPickerProps = {
   value: string;
@@ -11,10 +12,6 @@ type EnvironmentPickerProps = {
   disabled?: boolean;
   refreshToken?: number;
 };
-
-function optionLabel(entry: EnvironmentSummary) {
-  return `${entry.environmentId} — ${formatStateLabel(entry.lifecycleState)} (${entry.profileId})`;
-}
 
 /**
  * Shared dropdown of known environments so pages never require memorizing or
@@ -31,6 +28,7 @@ export default function EnvironmentPicker({
   const [environments, setEnvironments] = useState<EnvironmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [showArchived, setShowArchived] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -69,7 +67,8 @@ export default function EnvironmentPicker({
 
   const hasKnownValue = value ? environments.some((entry) => entry.environmentId === value) : true;
   const selectedEntry = environments.find((entry) => entry.environmentId === value);
-  const displayValue = value ? (selectedEntry ? optionLabel(selectedEntry) : `${value} (not in list)`) : '';
+  const displayValue = value ? (selectedEntry ? environmentOptionLabel(selectedEntry) : `${value} (not in list)`) : '';
+  const visible = visibleEnvironments(environments, showArchived, value);
 
   return (
     <div>
@@ -87,13 +86,19 @@ export default function EnvironmentPicker({
               {value} (not in list)
             </Option>
           ) : null}
-          {environments.map((entry) => (
-            <Option key={entry.environmentId} value={entry.environmentId} text={optionLabel(entry)}>
-              {optionLabel(entry)}
+          {visible.map((entry) => (
+            <Option key={entry.environmentId} value={entry.environmentId} text={environmentOptionLabel(entry)}>
+              {environmentOptionLabel(entry)}
             </Option>
           ))}
         </Dropdown>
       </Field>
+      {environments.some((entry) => entry.lifecycleState === 'torn_down') ? (
+        <label><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} /> Show torn-down environments</label>
+      ) : null}
+      {!loading && !error && environments.length > 0 && visible.length === 0 ? (
+        <StatusMessage intent="info">No active environments. Show torn-down environments to view their history.</StatusMessage>
+      ) : null}
       {error ? (
         <StatusMessage intent="error" title="Couldn't load environments">
           {error}

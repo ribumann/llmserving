@@ -166,7 +166,10 @@ test('quickstart scenario 4 performance run and partial report flow', async ({ p
   await expect(page.getByText(/85.4 tokens\/sec/i)).toBeVisible();
   await expect(page.getByText(/2 \/ 50/i)).toBeVisible();
   await expect(page.getByText(/4.0% failure rate/i)).toBeVisible();
+  await expect(page.getByText(/perf-reference-v1/i)).toBeHidden();
+  await page.getByText('Test conditions and provenance', { exact: true }).click();
   await expect(page.getByText(/perf-reference-v1/i)).toBeVisible();
+  await expect(page.getByText(/"requests": 5\s*}/i)).toBeVisible();
   await expect(page.getByText(/avgPercent/i)).toBeVisible();
 });
 
