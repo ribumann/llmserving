@@ -14,10 +14,11 @@ planning. Start with [the root README](../README.md) or choose a path below.
 
 ## Architecture by depth
 
-[Architecture map](ARCHITECTURE.md) links system context, runtime containers,
-UI/API/data components, deployment/trust boundaries and executable sequence
-flows. Use those views for today's system; do not infer capabilities from a
-specification diagram or a Terraform worker definition alone.
+[Architecture map](ARCHITECTURE.md) teaches the complete C4 L1 context, L2
+containers, L3 container components and selective L4 code views. It links
+deployment/trust and sequence diagrams as **complementary, not C4** views, with a
+guided source trace and glossary. Use it for today's system; do not infer
+capabilities from a specification diagram or a Terraform worker definition alone.
 
 ## Reference and evidence
 

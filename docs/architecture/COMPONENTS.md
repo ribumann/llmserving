@@ -1,90 +1,172 @@
-# Components and data lineage
+# C4 L3 — Components and data lineage
 
 [Architecture map](../ARCHITECTURE.md) / **depth 3** /
-[containers](CONTEXT.md#runtime-containers) / [deployment](DEPLOYMENT.md) /
-[flows](FLOWS.md)
+[L2 containers](CONTEXT.md#c4-level-2-runtime-containers) / [L4 code](CODE.md) /
+[deployment](DEPLOYMENT.md) / [dynamic flows](FLOWS.md)
 
-## Frontend
+L3 diagrams take **one L2 container at a time** and explain its logical
+components. Arrows are source relationships, not a timeline. Solid arrows show
+implemented paths; dashed arrows are labeled as an alternative transport or a
+cross-cutting relationship. The API's middleware wraps routing; it does not
+forward a request to every router in turn. Use the [sequence views](FLOWS.md)
+to understand order, async handoffs and failure behavior. These views expand the
+key coordination containers, not every L2 container: PostgreSQL and storage
+internals are better explained by their data and deployment contracts than by
+invented application components.
+
+## React UI / Nginx components
 
 ```mermaid
 flowchart TB
-    Shell["Router, navigation, theme"]
-    Session["Operator session check"]
-    Public["PublicWorkspace"]
-    Operator["Operator pages"]
-    Shared["Pickers, histories, metric panels"]
-    PublicAPI["publicApi"]
-    OperatorAPI["Typed operator services"]
-    Transport["apiClient"]
-    Proxy["Nginx proxy or local Vite API URL"]
-    Shell --> Session
-    Session -->|Signed out or unavailable| Public
-    Session -->|Authenticated| Operator
-    Public --> Shared
-    Operator --> Shared
-    Public --> PublicAPI
-    Operator --> OperatorAPI
-    PublicAPI --> Transport
-    OperatorAPI --> Transport
-    Transport --> Proxy
+    subgraph UI["React SPA"]
+        Routes["App routes and navigation"]
+        Session["useOperatorSession"]
+        Workspace["PublicWorkspace"]
+        Pages["Operator pages"]
+        PublicService["publicApi"]
+        OperatorServices["Typed operator services"]
+        Client["apiClient"]
+        Routes --> Session
+        Routes --> Workspace
+        Routes --> Pages
+        Workspace --> PublicService
+        Pages --> OperatorServices
+        PublicService --> Client
+        OperatorServices --> Client
+    end
+    Nginx["Nginx same-origin API proxy"]
+    Vite["Vite dev-server API target"]
+    Client -->|Production| Nginx
+    Client -.->|Local development| Vite
 ```
 
-[`App.tsx`](../../frontend/src/App.tsx) mounts public projections for all routed
-screens while signed out, and existing operator pages only after `/session`
-verification. [`PublicWorkspace`](../../frontend/src/pages/PublicWorkspace.tsx)
-reads profiles/catalog, environments, configurations, definitions, runs, reports
-and saved comparisons. It has no submission forms. The server remains the
-authorization/redaction boundary, even if a client bypasses disabled controls.
+[`App.tsx`](../../frontend/src/App.tsx) is the route shell. It renders
+[`PublicWorkspace`](../../frontend/src/pages/PublicWorkspace.tsx) while signed
+out and gates operator routes with `OperatorAccess` after
+[`useOperatorSession`](../../frontend/src/services/useOperatorSession.ts)
+verifies `/session`. `PublicWorkspace` reads safe saved profiles/catalog,
+environments, configurations, definitions, runs, reports and comparisons; it
+does not submit actions. `publicApi` and typed operator services both use
+[`apiClient`](../../frontend/src/services/apiClient.ts), but different request
+functions do not create an authorization boundary: Nginx and the backend enforce
+the public/operator distinction.
 
-Operator pages are implemented, not scaffolds: Provision, Deploy, Exercise,
-Retune, Quality/Performance Run and Report, Compare, Experiment History,
-Environment Detail and Teardown. Saving a tuning version does not itself change
-traffic; deployment creates a new revision. Exercise history is session-only.
-Public data failures and sign-in unavailability have separate retry/error states.
+Operator pages implement Provision, Deploy, Exercise, Retune,
+Quality/Performance Run and Report, Compare, Experiment History, Environment
+Detail and Teardown. Saving a tuning version does not change traffic; deployment
+creates a new revision. Exercise history is session-only. Public data failures
+and sign-in unavailability have distinct retry/error states.
 
-## API and execution
+## FastAPI control-plane components
 
 ```mermaid
 flowchart TB
-    HTTP["FastAPI app"]
-    Middleware["Errors, audit, telemetry, auth, correlation"]
-    Public["Public GET projection router"]
-    Operator["Operator routes and owner checks"]
-    Internal["Managed-identity callbacks"]
-    Domain["Workflow service and environment lock"]
-    Provider["Azure / local provider adapters"]
-    Engine["vLLM / Ollama engine adapters"]
+    App["create_app / FastAPI"]
+    Crosscut["Middleware: operator auth, correlation, audit, telemetry, errors"]
+    Routes["Route composition"]
+    Public["Public projection routes"]
+    User["Operator routes and owner checks"]
+    Internal["Internal callback routes"]
+    Services["Domain services<br/>locks, workflow reconciliation, comparisons"]
+    Providers["CompositeProviderAdapter"]
+    Azure["AzureProviderAdapter"]
+    Local["LocalProviderAdapter"]
+    Engines["Engine adapters"]
     Runs["QualityRunOrchestrator"]
-    Tools["Golden scorer, lm-eval, LLMPerf"]
-    DB[("SQLAlchemy / PostgreSQL")]
-    HTTP --> Middleware
-    Middleware --> Public
-    Middleware --> Operator
-    Middleware --> Internal
-    Public --> DB
-    Operator --> Domain
-    Internal --> Domain
-    Domain --> DB
-    Operator --> Provider
-    Provider --> Engine
-    Operator --> Runs
-    Runs --> Tools
-    Runs --> Engine
-    Runs --> DB
+    Golden["Golden scorer"]
+    Benchmark["lm-eval runner"]
+    Performance["LLMPerf / Ollama performance runner"]
+    Model["Active inference endpoint"]
+    Repos["Repositories and SQLAlchemy"]
+    DB[("PostgreSQL")]
+    App --> Crosscut
+    App --> Routes
+    Routes --> Public
+    Routes --> User
+    Routes --> Internal
+    Crosscut -.->|Wraps request pipeline| Routes
+    Public --> Repos
+    User --> Services
+    Internal --> Services
+    Services --> Repos
+    User --> Providers
+    Providers --> Azure
+    Providers --> Local
+    Providers --> Engines
+    Runs --> Golden
+    Runs --> Benchmark
+    Runs --> Performance
+    Runs -->|Golden and performance only| Providers
+    Golden --> Engines
+    Performance --> Engines
+    Benchmark -->|Saved inference URL; direct requests| Model
+    Runs --> Repos
+    Repos --> DB
 ```
 
-API routes cover catalog, environments, configurations, deployments, prompts,
-runs, comparisons, system/session, public projections and internal workflows.
+The app's router composition is the HTTP entry surface; middleware runs around
+that surface for applicable requests. Route groups divide public read-only
+projection, user/operator actions and machine-to-machine callbacks. Domain
+services implement state transitions, lock ownership and reconciliation.
+Repositories persist state. The provider adapter controls environment lifecycle
+and selects an engine adapter. Interactive prompts, golden scoring and
+performance runs use that engine adapter; benchmark evaluation instead sends
+requests through lm-eval using the saved inference URL. Similar names do not
+mean these paths are interchangeable: provider selection answers *where is the
+environment?*; engine selection answers *how do I talk to its model?*
+
 Azure preflight checks the exact effective SKU/region/priority without claiming
-physical capacity. Azure provider dispatch and local provider behavior share
-contracts, not infrastructure implementations.
+physical capacity. Azure and local adapters share a protocol, not infrastructure
+implementations. The composite registry selects supported Azure or local
+providers; vLLM is currently routed to Azure and Ollama to local. This is why a
+new cloud adapter alone would not enable cloud vLLM.
 
-`public.py` allowlists finite metrics/tuning fields and removes raw text,
-checkpoints, arbitrary arguments, URLs, diagnostics and infrastructure identities.
-It never enters the provider/engine layer. `internal_auth.py` validates exact
-managed-identity resources separately from `auth.py`'s operator user tokens.
+[`public.py`](../../backend/src/api/routes/public.py) allowlists finite metrics
+and tuning fields; it removes raw text, checkpoints, arbitrary arguments, URLs,
+diagnostics and infrastructure identities. It never calls provider/engine
+operations. [`auth.py`](../../backend/src/api/auth.py) validates operator user
+tokens; [`internal_auth.py`](../../backend/src/api/internal_auth.py) validates
+the distinct managed-identity callback audience and resource allowlist.
 
-## Persistent lineage
+## Functions container components
+
+```mermaid
+flowchart TB
+    Starter["http_start"]
+    Resolve["resolve_job_name"]
+    Orchestrator["generic_orchestrator_v2"]
+    Dispatch["dispatch_job activity"]
+    Poll["poll_job_status activity"]
+    Stop["stop_job activity"]
+    Finalize["finalize_workflow activity"]
+    Job["Container Apps Job execution"]
+    Callback["FastAPI internal workflow callback"]
+    Reconcile["WorkflowReconciliationService"]
+    DB[("Workflow and domain state in PostgreSQL")]
+    Starter --> Resolve
+    Starter -->|Durable start_new| Orchestrator
+    Orchestrator -->|For provision / teardown| Dispatch
+    Dispatch --> Job
+    Orchestrator -->|Monitor, including pre-dispatched deploy| Poll
+    Poll --> Job
+    Orchestrator -->|Cooperative cancellation| Stop
+    Stop --> Job
+    Job -->|Authenticated terminal callback| Callback
+    Callback --> Reconcile --> DB
+    Orchestrator -->|Version-two finalization safety net| Finalize
+    Finalize --> Callback
+```
+
+`function_app.py` registers triggers but contains no business logic. The starter
+resolves a job name outside the replayable orchestrator. The deterministic
+orchestrator coordinates side-effecting activities; activities dispatch,
+poll/stop jobs and invoke terminal finalization. Job callback validation and
+domain-state reconciliation occur in FastAPI, in a single transaction with
+workflow terminal status. Model deployment is pre-dispatched by the API before
+the Durable monitor starts, so its replayable history receives an execution
+name—not the transient model credential.
+
+## Data lineage (domain view, not a C4 component view)
 
 ```mermaid
 flowchart LR
@@ -121,10 +203,23 @@ Configurations referenced by any deployment revision cannot be deleted;
 unreferenced scratch deletion is creator-scoped and lock-coordinated. Keeping a
 configuration/report is not backing it up. See [data and recovery](../DATA_AND_RECOVERY.md).
 
-Sources: [`routes`](../../backend/src/api/routes),
+## Continue the trace
+
+- [Provisioning, deployment and teardown sequence](FLOWS.md#provision-and-teardown)
+- [Interactive inference sequence](FLOWS.md#interactive-inference)
+- [Quality/performance acceptance and report sequence](FLOWS.md#quality-performance-and-report-persistence)
+- [Selective L4 code views](CODE.md)
+
+Sources: [`app composition`](../../backend/src/api/app.py),
+[`route composition`](../../backend/src/api/routes/__init__.py),
+[`provider registry`](../../backend/src/providers/registry.py),
+[`provider protocol`](../../backend/src/providers/base.py),
+[`routes`](../../backend/src/api/routes),
 [`run acceptance`](../../backend/src/api/routes/runs.py),
 [`configurations`](../../backend/src/api/routes/configurations.py),
 [`report repository`](../../backend/src/domain/result_report_repo.py),
 [`comparison builder`](../../backend/src/domain/comparison_builder.py),
+[`Functions host`](../../functions/function_app.py),
+[`Functions activities`](../../functions/activities/activities.py),
 [`domain entities`](../../backend/src/domain),
 [`migrations`](../../backend/migrations/versions).
