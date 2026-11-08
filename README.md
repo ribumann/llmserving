@@ -125,8 +125,10 @@ Provision/teardown/model deployment use durable job monitoring. **Quality and
 performance still run in the backend process**, with reports/snapshots persisted
 in PostgreSQL. Evaluation/performance/export worker definitions exist, but are not
 the API run path and do not certify process-restart recovery. AWS/GCP are design
-directions, not working adapters. [Layered diagrams](docs/ARCHITECTURE.md) distinguish
-these implemented paths from optional infrastructure and pending gates.
+directions, not working adapters. The [C4 architecture guide](docs/ARCHITECTURE.md)
+teaches the static system levels and links supplementary deployment and sequence
+views, distinguishing implemented paths from optional infrastructure and pending
+gates.
 
 ## Deployment and safety
 

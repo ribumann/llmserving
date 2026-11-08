@@ -1,14 +1,13 @@
 # Architecture map
 
 This is the **implemented** architecture at public main baseline
-`b59f8d45218babd98d63f1b75b062957de957e51` (merged through PR #89), reviewed
+`84e32ef148833d49b24215072676fac9b9aa01e7` (merged through PR #90), reviewed
 2026-11-08. Diagrams describe source contracts, not a deployment attestation.
 [Release evidence](RELEASE_VALIDATION.md) separately records observed execution.
 The spec-kit artifacts retain broader design intent and are not a capability list.
 
 ## Learn the system, one level at a time
 
-| --- | --- | --- |
 Read this as a map, not a sequence of implementation tasks:
 
 1. **C4 L1 — Context:** [who uses the lab, what it depends on, and where the
