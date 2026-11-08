@@ -36,13 +36,17 @@ test('anonymous visitors browse actual persisted summaries and retained reports'
   });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: /azure llm serving demo/i })).toBeVisible();
-  await expect(page.getByText('public-env', { exact: true })).toBeVisible();
+  await expect(page.getByText(/No active environments/)).toBeVisible();
+  await page.getByLabel('Show torn-down environments').check();
+  await expect(page.getByText('public-profile · eastus (blic-env)', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'View experiments' }).click();
   await expect(page.getByRole('heading', { name: 'Experiments and saved reports' })).toBeVisible();
   await page.getByRole('link', { name: 'Open report summary' }).click();
+  await expect(page.getByRole('heading', { name: 'Saved report summary' })).toBeVisible();
+  await expect(page.getByText('90%', { exact: true })).toBeVisible();
+  await page.getByText('Report provenance and test conditions').click();
   await expect(page.getByText('public-report', { exact: true })).toBeVisible();
-  await expect(page.getByText('0.9', { exact: true })).toBeVisible();
-  await expect(page.getByRole('main').getByRole('link', { name: 'Sign in with Microsoft' }))
+  await expect(page.getByRole('link', { name: 'Sign in with Microsoft' }))
     .toHaveAttribute('href', '/.auth/login/aad?post_login_redirect_uri=%2Fquality%2Freport%2Fpublic-run%3FenvironmentId%3Dpublic-env');
   expect(apiCalls).toContain('/public/environments/public-env/runs/public-run/report');
   if (process.env.READONLY_SCREENSHOT_DIR) {
@@ -78,7 +82,7 @@ test('authentication outages do not block public browsing or unlock actions', as
   });
   await page.goto('/exercise?environmentId=public-env');
   await expect(page.getByText(/operator sign-in is unavailable/i)).toBeVisible();
-  await expect(page.getByText('public-run', { exact: true })).toBeVisible();
+  await expect(page.getByText('public-golden', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send prompt' })).toBeDisabled();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('textbox')).toHaveCount(0);

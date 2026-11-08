@@ -73,9 +73,10 @@ function getCompletenessMessage(indicator: PerformanceReportResponse['completene
 
 function distributionMetric(
   label: string,
-  metric: PerformanceMetricDistribution,
+  metric: PerformanceMetricDistribution | undefined,
   unit: string | undefined,
 ) {
+  if (!metric || !Number.isFinite(metric.p50) || !Number.isFinite(metric.p95)) return null;
   return (
     <MetricCard
       key={label}
@@ -218,7 +219,27 @@ export default function PerformanceReportPage() {
             </StatusMessage>
           ) : null}
 
-          <SectionCard title="1. Test conditions">
+          <SectionCard title="Metrics">
+            {performance ? (
+              <MetricGrid>
+                {distributionMetric('Time to first token', performance.metrics?.timeToFirstTokenMs, units.timeToFirstTokenMs ?? 'ms')}
+                {distributionMetric('Inter-token latency', performance.metrics?.interTokenLatencyMs, units.interTokenLatencyMs ?? 'ms')}
+                {distributionMetric('End-to-end latency', performance.metrics?.endToEndLatencyMs, units.endToEndLatencyMs ?? 'ms')}
+                {Number.isFinite(performance.metrics?.throughputTokensPerSec) ? (
+                  <MetricCard label="Throughput" value={`${formatMetricValue(performance.metrics.throughputTokensPerSec)} ${units.throughputTokensPerSec ?? 'tokens/sec'}`} />
+                ) : null}
+                {performance.requestFailures ? (
+                  <MetricCard label="Request failures" value={`${performance.requestFailures.count} / ${performance.requestFailures.total}`} secondary={Number.isFinite(performance.requestFailures.rate) ? `${formatPercent(performance.requestFailures.rate)} failure rate` : undefined} />
+                ) : null}
+              </MetricGrid>
+            ) : (
+              <StatusMessage intent="warning">Performance metrics are not available for this run.</StatusMessage>
+            )}
+          </SectionCard>
+
+          <details>
+          <summary>Test conditions and provenance</summary>
+          <SectionCard title="Test conditions">
             <InfoGrid>
               <InfoPanel>
                 <DataList
@@ -271,34 +292,9 @@ export default function PerformanceReportPage() {
               </InfoPanel>
             </InfoGrid>
           </SectionCard>
-
-          <SectionCard title="2. Metrics">
+          <SectionCard title="Accelerator utilization">
             {performance ? (
-              <MetricGrid>
-                {distributionMetric('Time to first token', performance.metrics.timeToFirstTokenMs, units.timeToFirstTokenMs)}
-                {distributionMetric('Inter-token latency', performance.metrics.interTokenLatencyMs, units.interTokenLatencyMs)}
-                {distributionMetric('End-to-end latency', performance.metrics.endToEndLatencyMs, units.endToEndLatencyMs)}
-                <MetricCard
-                  label="Throughput"
-                  value={`${formatMetricValue(performance.metrics.throughputTokensPerSec)} ${units.throughputTokensPerSec ?? ''}`}
-                />
-                <MetricCard
-                  label="Request failures"
-                  value={`${performance.requestFailures.count} / ${performance.requestFailures.total}`}
-                  secondary={`${formatPercent(performance.requestFailures.rate)} failure rate`}
-                />
-              </MetricGrid>
-            ) : (
-              <StatusMessage intent="warning">
-                Performance metrics are not available yet for this run, or the run failed before any
-                reportable measurements were produced.
-              </StatusMessage>
-            )}
-          </SectionCard>
-
-          <SectionCard title="3. Accelerator utilization">
-            {performance ? (
-              performance.acceleratorUtilization.available ? (
+              performance.acceleratorUtilization?.available ? (
                 <InfoGrid>
                   <InfoPanel>
                     <DataList
@@ -323,6 +319,7 @@ export default function PerformanceReportPage() {
               <Body1>No accelerator utilization data is available because the run did not produce a performance payload.</Body1>
             )}
           </SectionCard>
+          </details>
         </>
       ) : null}
     </div>

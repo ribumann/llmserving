@@ -153,6 +153,7 @@ export interface DemoEnvironment {
 
 export interface EnvironmentSummary {
   environmentId: string;
+  name?: string;
   profileId: string;
   provider: ProviderName;
   region: string;
